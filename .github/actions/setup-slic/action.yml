@@ -239,8 +239,12 @@ runs:
 
     # ------------------------------------------------------------------------------
     # `wp core download --force` replaces the core files without touching the
-    # database, so it both upgrades and downgrades. The site is installed after this
-    # point, against whichever version is on disk.
+    # database, so it both upgrades and downgrades.
+    #
+    # Any `slic wp` command installs WordPress first if it is not installed yet, so
+    # this one creates the database at the version baked into the image and only then
+    # swaps the files. `wp core update-db` reconciles the schema with the files that
+    # are now on disk; it is a no-op when the two already agree.
     # ------------------------------------------------------------------------------
     - name: Put the requested WordPress version in place
       if: inputs.wp-version != ''
@@ -261,6 +265,7 @@ runs:
         fi
 
         ${SLIC_BIN} wp core download --version="${WP_VERSION}" --force
+        ${SLIC_BIN} wp core update-db
 
     - name: Show slic info
       shell: bash
