@@ -3,9 +3,11 @@
 Runs a Codeception suite through [slic](https://github.com/stellarwp/slic), uploads the suite's
 output as an artifact when it fails, and optionally tears the stack down.
 
-[setup-slic](../setup-slic/) has to run earlier in the same job. It exports `SLIC_BIN` and
-`DEBUG_FLAG`, which this action reads. Without `SLIC_BIN` the action fails with a message saying so
-rather than running the suite name as a command.
+[setup-slic](../setup-slic/) has to run earlier in the same job. This action reads the four
+variables it exports: `SLIC_BIN` to call slic, `SLIC_TOOLBOX_TARGET` for the target,
+`SLIC_PHP_VERSION` for the artifact name, and `SLIC_TOOLBOX_DEBUG_FLAG` to pass on to `slic run`.
+Without `SLIC_BIN` the action stops with a message saying so, rather than running the suite name
+as a command.
 
 ```yaml
 - uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1

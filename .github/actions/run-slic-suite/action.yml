@@ -48,9 +48,9 @@ runs:
   using: 'composite'
   steps:
     # ------------------------------------------------------------------------------
-    # SLIC_BIN, DEBUG_FLAG, SLIC_PHP_VERSION and SLIC_TOOLBOX_TARGET are exported to
-    # the environment by setup-slic. Fail with a clear message rather than letting an
-    # empty ${SLIC_BIN} run the suite name as a command.
+    # setup-slic exports SLIC_BIN, SLIC_PHP_VERSION, SLIC_TOOLBOX_TARGET and
+    # SLIC_TOOLBOX_DEBUG_FLAG. Fail with a clear message rather than letting an empty
+    # ${SLIC_BIN} run the suite name as a command.
     # ------------------------------------------------------------------------------
     - name: Run suite ${{ inputs.suite }}
       id: run
@@ -109,9 +109,9 @@ runs:
 
         "${SLIC_BIN}" use "${TARGET}"
 
-        # Word splitting is intended: SUITE_ARGS and DEBUG_FLAG are argument lists.
+        # Word splitting is intended: both are argument lists, not single words.
         # shellcheck disable=SC2086
-        "${SLIC_BIN}" run "${SUITE}" ${SUITE_ARGS} ${DEBUG_FLAG:-}
+        "${SLIC_BIN}" run "${SUITE}" ${SUITE_ARGS} ${SLIC_TOOLBOX_DEBUG_FLAG:-}
 
     - name: Upload failed test data as an artifact
       if: failure() && inputs.upload-output-on-failure == 'true'

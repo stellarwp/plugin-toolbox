@@ -63,7 +63,8 @@ inputs:
     required: false
     default: 'false'
   verify-php-version:
-    description: 'Fail the job when the PHP version inside the WordPress container does not match php-version.'
+    description: >-
+      Fail the job when the PHP version inside the WordPress container does not match php-version.
     required: false
     default: 'true'
   debug-enabled:
@@ -81,7 +82,7 @@ outputs:
   debug-flag:
     description: >-
       `--debug` when debug is on for this run, empty otherwise. Also exported to the environment as
-      DEBUG_FLAG, which run-slic-suite appends to `slic run`.
+      SLIC_TOOLBOX_DEBUG_FLAG, which run-slic-suite appends to `slic run`.
     value: ${{ steps.debug-flag.outputs.debug-flag }}
   target:
     description: >-
@@ -125,9 +126,13 @@ runs:
 
         echo "slic-bin=${GITHUB_WORKSPACE}/${SLIC_PATH}/slic" >> "$GITHUB_OUTPUT"
 
-    - name: Set run context for slic
+    # ------------------------------------------------------------------------------
+    # slic's is_ci() checks CI, along with GITHUB_ACTION, which the runner already
+    # sets. Setting it explicitly keeps the action correct on a runner that does not.
+    # ------------------------------------------------------------------------------
+    - name: Set the CI run context
       shell: bash
-      run: echo "SLIC=1" >> "$GITHUB_ENV" && echo "CI=1" >> "$GITHUB_ENV"
+      run: echo "CI=1" >> "$GITHUB_ENV"
 
     - name: Start ssh-agent
       shell: bash
@@ -175,7 +180,7 @@ runs:
           "${SLIC_BIN}" xdebug off
         fi
 
-        echo "DEBUG_FLAG=${debug_flag}" >> "$GITHUB_ENV"
+        echo "SLIC_TOOLBOX_DEBUG_FLAG=${debug_flag}" >> "$GITHUB_ENV"
         echo "debug-flag=${debug_flag}" >> "$GITHUB_OUTPUT"
 
     # ------------------------------------------------------------------------------

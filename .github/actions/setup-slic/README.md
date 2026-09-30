@@ -38,21 +38,54 @@ as Playwright, calls its own commands after this action instead.
 | `debug-flag` | `--debug` when debug is on for this run, empty otherwise |
 | `target` | The target this action selected |
 
-All three are also exported to the environment, as `SLIC_BIN`, `DEBUG_FLAG` and
-`SLIC_TOOLBOX_TARGET`, so later steps in the job can call `${SLIC_BIN}` without wiring the output
-through. `setup-slic` also exports
-`SLIC_WP_DIR`, `SLIC_WORDPRESS_DOCKERFILE`, `SLIC_PHP_VERSION`, `SLIC_TOOLBOX_TARGET`, `SLIC`, `CI`,
-`SSH_AUTH_SOCK` and `SSH_AGENT_PID`.
+All three are also exported to the environment, so later steps in the job can use them without
+wiring an output through.
 
-`SLIC_TOOLBOX_TARGET` is how [run-slic-suite](../run-slic-suite/) knows which target to run against
-without being told again. slic records the current target in its own run settings file rather than
-in the environment, so there is nothing else to read it from.
+## Environment
 
-`SLIC_PHP_VERSION` is what pins the PHP version for the whole job. slic reads a value that is
-already in the environment as a command-line override, and that override beats the version a
-target's `slic.json` or `composer.json` asks for. `slic php-version set --skip-rebuild` alone only
-stages a version, which the first `slic use` consumes; any later `slic use`, including one in your
-own step, would otherwise switch the stack to that target's own PHP requirement.
+`setup-slic` exports variables of two kinds, and the name tells you which.
+
+### Read by slic
+
+These are slic's own interface. slic looks each one up by name, so the spelling is not ours to
+choose.
+
+| Variable | What slic does with it |
+|---|---|
+| `SLIC_WP_DIR` | Where slic keeps the WordPress install |
+| `SLIC_WORDPRESS_DOCKERFILE` | Which Dockerfile the WordPress container builds from |
+| `SLIC_PHP_VERSION` | Pins the PHP version for the job. See below |
+| `SSH_AUTH_SOCK` | Forwarded into the containers |
+| `CI` | slic's `is_ci()` checks it, alongside `GITHUB_ACTION` |
+
+### Ours
+
+slic reads none of these. The `SLIC_TOOLBOX_` prefix keeps them from colliding with a variable slic
+may add later, and with anything else sharing the job's environment, where a short unprefixed name
+is one any other action or tool could set as well.
+
+| Variable | What it is for |
+|---|---|
+| `SLIC_TOOLBOX_TARGET` | The target this action selected, so `run-slic-suite` needs no target of its own |
+| `SLIC_TOOLBOX_DEBUG_FLAG` | `--debug`, or empty, which `run-slic-suite` appends to `slic run` |
+
+One exception carries no prefix. `SLIC_BIN` holds the path to the slic binary. slic does not read
+it. It is how a job calls slic outside these actions, as the examples in this README do.
+
+`SSH_AGENT_PID` is set by `ssh-agent` itself, so the cleanup step can kill the agent it started.
+
+### Why SLIC_PHP_VERSION pins the job
+
+slic treats a value already in the environment as a command-line override, and that override beats
+the version a target's `slic.json` or `composer.json` asks for. `slic php-version set
+--skip-rebuild` alone only stages a version, which the first `slic use` consumes; any later `slic
+use`, including one in your own step, would otherwise switch the stack to that target's own PHP
+requirement.
+
+### Why SLIC_TOOLBOX_TARGET exists
+
+slic records the current target in its own run settings file rather than in the environment, so
+there is nothing else for [run-slic-suite](../run-slic-suite/) to read it from.
 
 ## Setting the site up
 
@@ -75,9 +108,9 @@ or fixtures. Do that in a `run:` step between this action and
 
 ## Debug
 
-`debug-enabled: 'true'` runs `slic debug on` and `slic config`, and sets the `debug-flag` output and
-the `DEBUG_FLAG` environment variable to `--debug`, which `run-slic-suite` appends to `slic run`.
-Anything else runs `slic xdebug off` and leaves the flag empty.
+`debug-enabled: 'true'` runs `slic debug on` and `slic config`, and sets both the `debug-flag`
+output and the `SLIC_TOOLBOX_DEBUG_FLAG` environment variable to `--debug`, which `run-slic-suite`
+appends to `slic run`. Anything else runs `slic xdebug off` and leaves the flag empty.
 
 It is honored on every event, so a workflow can hardcode it on a branch or a scheduled run:
 
