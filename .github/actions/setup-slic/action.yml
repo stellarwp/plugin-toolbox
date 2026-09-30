@@ -95,17 +95,27 @@ runs:
         path: ${{ inputs.slic-path }}
         fetch-depth: 1
 
+    # ------------------------------------------------------------------------------
+    # SLIC_PHP_VERSION is exported so that slic reads it as a command-line override.
+    # slic backs the variable up before it loads any env file, and a value that was
+    # already in the environment wins over the version a target's slic.json or
+    # composer.json asks for. Without it, `php-version set --skip-rebuild` only stages
+    # a version that the FIRST `slic use` consumes, and any later `slic use` switches
+    # the stack to the target's own PHP requirement instead.
+    # ------------------------------------------------------------------------------
     - name: Set up slic env vars
       id: env
       shell: bash
       env:
         SLIC_PATH: ${{ inputs.slic-path }}
+        PHP_VERSION: ${{ inputs.php-version }}
       run: |
         # Add special env vars for the slic containers.
         {
           echo "SLIC_BIN=${GITHUB_WORKSPACE}/${SLIC_PATH}/slic"
           echo "SLIC_WP_DIR=${GITHUB_WORKSPACE}/${SLIC_PATH}/_wordpress"
           echo "SLIC_WORDPRESS_DOCKERFILE=Dockerfile.base"
+          echo "SLIC_PHP_VERSION=${PHP_VERSION}"
         } >> "$GITHUB_ENV"
 
         echo "slic-bin=${GITHUB_WORKSPACE}/${SLIC_PATH}/slic" >> "$GITHUB_OUTPUT"

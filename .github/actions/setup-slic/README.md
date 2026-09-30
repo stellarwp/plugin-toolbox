@@ -39,7 +39,14 @@ as Playwright, calls its own commands after this action instead.
 
 Both are also exported to the environment, as `SLIC_BIN` and `DEBUG_FLAG`, so later steps in the
 job can call `${SLIC_BIN}` without wiring the output through. `setup-slic` also exports
-`SLIC_WP_DIR`, `SLIC_WORDPRESS_DOCKERFILE`, `SLIC`, `CI`, `SSH_AUTH_SOCK` and `SSH_AGENT_PID`.
+`SLIC_WP_DIR`, `SLIC_WORDPRESS_DOCKERFILE`, `SLIC_PHP_VERSION`, `SLIC`, `CI`, `SSH_AUTH_SOCK` and
+`SSH_AGENT_PID`.
+
+`SLIC_PHP_VERSION` is what pins the PHP version for the whole job. slic reads a value that is
+already in the environment as a command-line override, and that override beats the version a
+target's `slic.json` or `composer.json` asks for. `slic php-version set --skip-rebuild` alone only
+stages a version, which the first `slic use` consumes; any later `slic use`, including one in your
+own step, would otherwise switch the stack to that target's own PHP requirement.
 
 ## Setting the site up
 
