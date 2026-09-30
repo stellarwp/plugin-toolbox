@@ -17,7 +17,6 @@ rather than running the suite name as a command.
   with:
     suite: ${{ matrix.suite }}
     target: sfwd-lms
-    php-version: ${{ matrix.php-version }}
 ```
 
 ## Inputs
@@ -27,10 +26,9 @@ rather than running the suite name as a command.
 | `suite` | yes | | Codeception suite to run, e.g. `wpunit` |
 | `target` | yes | | The `slic use` target, re-selected before the suite runs. Also the default output path |
 | `suite-args` | no | `''` | Extra arguments for `slic run`, e.g. `--ext DotReporter` |
-| `php-version` | no | `''` | Only used to build the default artifact name. See [Artifact names](#artifact-names) |
 | `upload-output-on-failure` | no | `'false'` | Upload the test output directory when the suite fails |
 | `output-path` | no | `<target>/tests/_output/` | Directory to upload |
-| `output-artifact-name` | no | see below | Name of the uploaded artifact |
+| `output-artifact-name` | no | see [Artifact names](#artifact-names) | Name of the uploaded artifact |
 | `run-cleanup` | no | `'false'` | Run `slic down` and kill the ssh-agent at the end |
 
 ## Why target is required
@@ -42,9 +40,12 @@ dependencies, leaves the wrong one selected and the suite runs against it.
 ## Artifact names
 
 `actions/upload-artifact` rejects a name that another job in the same run already used, so every
-matrix leg needs a distinct one. The default is `test-output-php<php-version>-<suite>` when
-`php-version` is set and `test-output-<suite>` when it is not. A matrix over PHP versions therefore
-has to pass `php-version`, or set `output-artifact-name` itself. A matrix over suites alone does not.
+matrix leg needs a distinct one.
+
+The default is `test-output-php<version>-<suite>`, where the version is read from
+`SLIC_PHP_VERSION`, which [setup-slic](../setup-slic/) exports when it pins the stack. A matrix over
+PHP versions, over suites, or over both therefore names every leg without repeating the value here.
+Set `output-artifact-name` when a job needs something else.
 
 ## Output path
 

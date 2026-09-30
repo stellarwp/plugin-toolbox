@@ -17,13 +17,6 @@ inputs:
     description: 'Extra arguments appended to `slic run`, e.g. --ext DotReporter.'
     required: false
     default: ''
-  php-version:
-    description: >-
-      The PHP version the suite runs on. Only used to build the default artifact name. A job with a
-      matrix over PHP versions has to set this, or `output-artifact-name`, to keep artifact names
-      unique across matrix legs.
-    required: false
-    default: ''
   upload-output-on-failure:
     description: 'Upload the target test output directory as an artifact when the suite fails.'
     required: false
@@ -36,8 +29,9 @@ inputs:
     default: ''
   output-artifact-name:
     description: >-
-      Name of the uploaded artifact. Defaults to `test-output-php<php-version>-<suite>`, or
-      `test-output-<suite>` when php-version is empty.
+      Name of the uploaded artifact. Defaults to `test-output-php<version>-<suite>`, reading the
+      version setup-slic pinned the stack to, so a matrix over PHP versions names each leg without
+      repeating the value here.
     required: false
     default: ''
   run-cleanup:
@@ -54,16 +48,32 @@ runs:
     # command.
     # ------------------------------------------------------------------------------
     - name: Run suite ${{ inputs.suite }}
+      id: run
       shell: bash
       env:
         SUITE: ${{ inputs.suite }}
         SUITE_ARGS: ${{ inputs.suite-args }}
         TARGET: ${{ inputs.target }}
+        ARTIFACT_NAME: ${{ inputs.output-artifact-name }}
       run: |
         if [ -z "${SLIC_BIN:-}" ]; then
           echo "::error::SLIC_BIN is not set. Run the setup-slic action earlier in this job."
           exit 1
         fi
+
+        # Name the artifact before the suite runs: the upload step needs the name on
+        # the run that fails, and a step's outputs survive its failure only for what
+        # it wrote before failing. SLIC_PHP_VERSION is the version setup-slic pinned
+        # the stack to, so each leg of a PHP matrix gets its own name.
+        if [ -z "${ARTIFACT_NAME}" ]; then
+          if [ -n "${SLIC_PHP_VERSION:-}" ]; then
+            ARTIFACT_NAME="test-output-php${SLIC_PHP_VERSION}-${SUITE}"
+          else
+            ARTIFACT_NAME="test-output-${SUITE}"
+          fi
+        fi
+
+        echo "artifact-name=${ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
 
         ${SLIC_BIN} use "${TARGET}"
 
@@ -75,7 +85,7 @@ runs:
       if: failure() && inputs.upload-output-on-failure == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ inputs.output-artifact-name != '' && inputs.output-artifact-name || (inputs.php-version != '' && format('test-output-php{0}-{1}', inputs.php-version, inputs.suite) || format('test-output-{0}', inputs.suite)) }}
+        name: ${{ steps.run.outputs.artifact-name }}
         path: ${{ inputs.output-path != '' && inputs.output-path || format('{0}/tests/_output/', inputs.target) }}
         retention-days: 2
         overwrite: true
