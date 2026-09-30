@@ -1,5 +1,9 @@
 # Creates or moves git tags through the GitHub API. Knows nothing about versions: pair it with
 # .github/actions/resolve-floating-tags to move floating version tags, or hand it any tag name.
+#
+# The work lives in move.js. actions/github-script runs it with a pre-authenticated Octokit, so
+# there is no dependency to install and nothing to build: the file in the repository is the file
+# that runs.
 name: Move git tags
 description: Creates or moves the named git tags so that they point at a commit
 
@@ -41,75 +45,19 @@ runs:
   steps:
     - name: Create or move the tags
       id: move
-      shell: bash
+      uses: actions/github-script@v9
       env:
-        TAGS: ${{ inputs.tags }}
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so a tag name is data and
+        # never part of the program.
+        INPUT_TAGS: ${{ inputs.tags }}
         INPUT_SHA: ${{ inputs.sha }}
         INPUT_REPOSITORY: ${{ inputs.repository }}
-        GH_TOKEN: ${{ inputs.token }}
-      run: |
-        REPO="${INPUT_REPOSITORY:-$GITHUB_REPOSITORY}"
-        SHA="${INPUT_SHA:-$GITHUB_SHA}"
-
-        # Word splitting is intended: TAGS is a list, separated by spaces or newlines.
-        # shellcheck disable=SC2086,SC2153
-        set -- ${TAGS}
-
-        if [ "$#" -eq 0 ]; then
-          echo "No tags to move."
-          {
-            echo "created="
-            echo "moved="
-          } >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-
-        CREATED=()
-        MOVED=()
-
-        for TAG in "$@"; do
-          # Each name goes into an API path, so reject anything that is not a plain tag name. git
-          # forbids `..` in a ref name anyway, and refusing it here keeps a name from walking up out
-          # of the tags namespace.
-          if [[ ! "${TAG}" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || [[ "${TAG}" == *..* ]]; then
-            echo "::error::Refusing to write '${TAG}': it is not a plain tag name."
-            exit 1
-          fi
-
-          # A full ref would otherwise be written as a tag literally named refs/tags/v1.
-          if [[ "${TAG}" == refs/* ]]; then
-            echo "::error::Refusing to write '${TAG}': pass the tag name, e.g. '${TAG##*/}'."
-            exit 1
-          fi
-
-          # Ask whether the ref exists rather than letting a failed PATCH fall through to a POST. A
-          # PATCH also fails for a token without permission or a protected tag, and a fallback that
-          # ignored the error would report those as success.
-          #
-          # git/ref (singular) is the endpoint that 404s on a missing ref. git/refs (plural) matches
-          # by prefix, so it answers 200 for `tags/v1` whenever 1.0.0 exists, with no v1 to update.
-          if gh api "repos/${REPO}/git/ref/tags/${TAG}" --silent 2>/dev/null; then
-            # The API is used rather than `git push --force` so that the tag name never disappears,
-            # which is what keeps a Release attached to it.
-            gh api "repos/${REPO}/git/refs/tags/${TAG}" \
-              --method PATCH \
-              --raw-field sha="${SHA}" \
-              --field force=true \
-              --silent
-            echo "Moved ${TAG} to ${SHA}."
-            MOVED+=( "${TAG}" )
-          else
-            gh api "repos/${REPO}/git/refs" \
-              --method POST \
-              --raw-field ref="refs/tags/${TAG}" \
-              --raw-field sha="${SHA}" \
-              --silent
-            echo "Created ${TAG} at ${SHA}."
-            CREATED+=( "${TAG}" )
-          fi
-        done
-
-        {
-          echo "created=${CREATED[*]-}"
-          echo "moved=${MOVED[*]-}"
-        } >> "$GITHUB_OUTPUT"
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const { run } = require(`${process.env.ACTION_PATH}/move.js`)
+          await run({ github, core, env: process.env })

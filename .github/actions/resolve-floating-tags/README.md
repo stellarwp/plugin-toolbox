@@ -100,8 +100,7 @@ A prerelease is skipped by default, and it is detected without the caller passin
 
 Two signals are read, because either can occur alone. A tag with a suffix, `1.3.0-rc.1`, is a
 prerelease on its own. A tag that is a plain `1.3.0` but marked as a prerelease on GitHub is not
-visibly different, so the release behind the `tag` input is asked about directly with
-`gh release view`.
+visibly different, so the release behind the `tag` input is asked about directly.
 
 Build metadata is not a prerelease. `1.4.0+build.7` is a stable 1.4.0 and owns the tags a stable
 1.4.0 would. The metadata is not part of a tag name, so it resolves `v1` and `v1.4`.
@@ -151,18 +150,18 @@ the newest version of a line, so an outstanding 1.9.0-rc.1 does not hold `v1` ba
 
 ## Where the versions come from
 
-The newest version of a line is read from the repository's git tags, through `matching-refs` with
-`--paginate`. Every tag is read, however many there are.
+The newest version of a line is read from the repository's git tags, through `repos.listTags` with
+Octokit's `paginate`. Every tag is read, however many there are.
 
-`gh release list` is not used for it. That list is ordered by publication date and capped by a
-`--limit`, so on a repo with more releases than the cap a high version published long ago sits past
-the end. The comparison would then find nothing newer than the release being published and move
+A release listing is not used for it. Releases come back ordered by publication date and capped by
+a page limit, so on a repo with more releases than the limit a high version published long ago sits
+past the end. The comparison would then find nothing newer than the release being published and move
 `v1` backwards onto it. Publishing 1.2.5 on a repo whose 1.5.0 is old enough to fall past the cap is
 exactly the case that breaks, and it breaks silently. Tags have no such cap, and a draft release is
 excluded for free, since a draft has no tag.
 
 The Releases API is needed for one thing: whether the release behind the `tag` input is marked as a
-prerelease. That is asked with `gh release view` on that tag alone, not by listing releases.
+prerelease. That is one `repos.getReleaseByTag` call for that tag, not a listing.
 
 A tag whose name is a plain version therefore counts as a released version, even if the release
 behind it is marked as a prerelease on GitHub. A suffixed tag never counts, whatever it is marked
@@ -172,3 +171,20 @@ floating tag where it is.
 If the tags cannot be read at all, the job warns rather than failing and every requested tag
 resolves on the `tag` input alone. Nothing is then held back, so the tags follow whatever was
 published most recently rather than whatever is newest.
+
+## How it runs
+
+The logic is in `resolve.js`, run by [actions/github-script](https://github.com/actions/github-script),
+which supplies the Node runtime and an Octokit already authenticated with `token`. There is no
+dependency to install and no bundle to build: the file in the repository is the file that runs, so a
+change to it is reviewable as a diff.
+
+The script is loaded by path rather than inlined in the manifest, because github-script's `require`
+resolves against the workspace of the repository being built, not this action's directory. The path
+comes from `${{ github.action_path }}`.
+
+Inputs reach the script through `process.env`, never by being interpolated into it, so a tag name is
+data and cannot become part of the program.
+
+`tests/actions/resolve-floating-tags/resolve.test.js` covers the rules above. Run them with
+`node --test tests/`.

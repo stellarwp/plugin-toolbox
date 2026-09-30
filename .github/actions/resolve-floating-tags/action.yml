@@ -1,5 +1,9 @@
 # Works out which floating tags a released version should own: v1 and v1.2 for 1.2.3. Writing them
 # is a separate action: see .github/actions/move-git-tags.
+#
+# The decision lives in resolve.js. actions/github-script runs it with a pre-authenticated Octokit,
+# so there is no dependency to install and nothing to build: the file in the repository is the file
+# that runs.
 name: Resolve floating version tags
 description: Works out which v<major> and v<major>.<minor> tags a released version should own
 
@@ -58,182 +62,22 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Resolve the floating tags for this release
+    - name: Resolve the floating tags for the released version
       id: resolve
-      shell: bash
+      uses: actions/github-script@v9
       env:
-        TAG: ${{ inputs.tag }}
-        LEVELS: ${{ inputs.levels }}
-        ALLOW_PRERELEASES: ${{ inputs.allow-prereleases }}
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so a tag name is data and
+        # never part of the program.
+        INPUT_TAG: ${{ inputs.tag }}
+        INPUT_LEVELS: ${{ inputs.levels }}
+        INPUT_ALLOW_PRERELEASES: ${{ inputs.allow-prereleases }}
         INPUT_REPOSITORY: ${{ inputs.repository }}
-        GH_TOKEN: ${{ inputs.token }}
-      run: |
-        REPO="${INPUT_REPOSITORY:-$GITHUB_REPOSITORY}"
-
-        nothing_to_do() {
-          echo "::notice::Resolved no floating tags: $1"
-          {
-            echo "tags="
-            echo "skipped="
-            echo "version="
-          } >> "$GITHUB_OUTPUT"
-          exit 0
-        }
-
-        # A release tag may be written either way, 1.2.3 or v1.2.3, so everything below runs on the
-        # version without the v. The floating tags always carry the v, because that is what a
-        # `uses:` line resolves.
-        # shellcheck disable=SC2153 # TAG is the input, not a typo for TAGS.
-        VERSION="${TAG#v}"
-
-        # Neither a prerelease suffix nor build metadata is part of a floating tag name: 1.3.0-rc.1
-        # would own v1 and v1.3, never v1-rc. They are stripped in two steps because only the `-`
-        # suffix means prerelease. Build metadata does not: 1.4.0+build.7 is a stable 1.4.0.
-        RELEASE_VERSION="${VERSION%%+*}"
-        CORE="${RELEASE_VERSION%%-*}"
-
-        if [[ ! "${CORE}" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
-          nothing_to_do "${TAG} is not a numeric version."
-        fi
-
-        IFS='.' read -r -a PARTS <<< "${CORE}"
-
-        # Three parts is the floor so that the deepest floating tag, v<major>.<minor>, is always a
-        # shorter name than the release tag itself. A release tagged 1.2 would collide with v1.2.
-        # There is no upper limit: a fourth part is a hotfix, and the patterns below read it as
-        # another release of the same minor line rather than a line of its own.
-        if [ "${#PARTS[@]}" -lt 3 ]; then
-          nothing_to_do "${TAG} has ${#PARTS[@]} parts; at least three are needed."
-        fi
-
-        # Validate every requested level before resolving any, so a typo fails the job rather than
-        # quietly writing a shorter set of tags than the caller asked for.
-        WANT_MAJOR='false'
-        WANT_MINOR='false'
-        # Word splitting is intended: LEVELS is a list.
-        # shellcheck disable=SC2086,SC2153
-        set -- ${LEVELS}
-        for LEVEL in "$@"; do
-          case "${LEVEL}" in
-            major) WANT_MAJOR='true' ;;
-            minor) WANT_MINOR='true' ;;
-            *)
-              echo "::error::Unknown level '${LEVEL}' in levels. Use 'major', 'minor' or both."
-              exit 1
-              ;;
-          esac
-        done
-
-        if [ "${WANT_MAJOR}" != "true" ] && [ "${WANT_MINOR}" != "true" ]; then
-          echo "::error::levels named no floating tags to resolve."
-          exit 1
-        fi
-
-        # Every tag in the repository, as a bare version, one per line.
-        #
-        # Tags rather than `gh release list`, because that list is ordered by publication date and
-        # capped by --limit. A high version published long ago sits past the cap on a repo with
-        # enough releases, and the comparison below would then see nothing newer and move a tag
-        # backwards onto the release being published. matching-refs with --paginate has no cap.
-        # Using tags also excludes drafts on its own, since a draft release has no tag yet.
-        #
-        # Each name is normalised the way the `tag` input was, so a tag carrying build metadata
-        # compares as its own version. Suffixed tags need no filtering here: a prerelease cannot
-        # match the anchored numeric patterns below.
-        REFS="${RUNNER_TEMP:-/tmp}/floating-tag-refs.txt"
-        VERSIONS="${RUNNER_TEMP:-/tmp}/floating-tag-versions.txt"
-        if gh api --paginate "repos/${REPO}/git/matching-refs/tags" --jq '.[].ref' > "${REFS}"; then
-          sed -e 's|^refs/tags/||' -e 's/^v//' -e 's/+.*$//' "${REFS}" > "${VERSIONS}"
-        else
-          # Without the tags the comparison has nothing to read, so the floating tags resolve on the
-          # `tag` input alone. Its suffix is still a signal for the prerelease check below.
-          echo "::warning::Could not read ${REPO}'s tags. Resolving from the tag name alone."
-          : > "${VERSIONS}"
-        fi
-
-        # A suffix says prerelease on its own. A plain 1.3.0 marked as a prerelease on GitHub does
-        # not look any different, so the release behind `tag` is asked about directly. A tag with no
-        # release behind it answers nothing, which counts as not a prerelease.
-        IS_PRERELEASE='false'
-        if [ "${CORE}" != "${RELEASE_VERSION}" ]; then
-          IS_PRERELEASE='true'
-        elif [ "$(gh release view "${TAG}" --repo "${REPO}" \
-                   --json isPrerelease --jq '.isPrerelease' 2>/dev/null)" == "true" ]; then
-          IS_PRERELEASE='true'
-        fi
-
-        if [ "${IS_PRERELEASE}" == "true" ] && [ "${ALLOW_PRERELEASES}" != "true" ]; then
-          nothing_to_do "${TAG} is a prerelease. Set allow-prereleases to change that."
-        fi
-
-        # A prerelease tagged 1.3.0, marked as one only by GitHub's flag, is indistinguishable from
-        # a released version in a list of tag names. Drop this version from the comparison set so
-        # that such a release does not count as the released version blocking itself. A suffixed tag
-        # never matched the patterns to begin with, so this changes nothing for one.
-        if [ "${IS_PRERELEASE}" == "true" ]; then
-          grep -vxF "${CORE}" "${VERSIONS}" > "${VERSIONS}.cmp" || true
-          mv "${VERSIONS}.cmp" "${VERSIONS}"
-        fi
-
-        # The highest version matching $1. sort -V orders 1.10.0 above 1.9.0, and 1.2.3.1 above
-        # 1.2.3, which sort alone does neither.
-        highest_version_matching() {
-          grep -E "$1" "${VERSIONS}" | sort -V | tail -n 1
-        }
-
-        TAGS=()
-        SKIPPED=()
-
-        # Fixed order, so the output reads shortest first whatever order levels were written in.
-        # Each pattern is the tag's own numbers followed by at least one more part, which is what
-        # makes a 1.2.3.1 hotfix a member of the 1.2 line and of the 1.x line, competing with 1.2.3
-        # for both tags. Anchoring both ends keeps 122.3.4 from counting as a 1.2 release.
-        add_level() {
-          local floating="$1" pattern="$2" newest higher
-
-          newest="$(highest_version_matching "${pattern}")"
-
-          # No released version in this line: the first release of a new line, or a repo whose tags
-          # could not be read. Nothing can be newer, so the tag resolves either way.
-          if [ -z "${newest}" ]; then
-            TAGS+=( "${floating}" )
-            return
-          fi
-
-          # A prerelease never takes a tag away from a released version. Anyone pinned to a line
-          # that has already had one expects a released version from it, so only a line that has
-          # never had one may point at a prerelease. A 1.4.0-rc.1 therefore takes v1.4, which has
-          # nothing released behind it, and leaves v1 on 1.3.0.
-          if [ "${IS_PRERELEASE}" == "true" ]; then
-            echo "::notice::${floating} stays on ${newest}: ${VERSION} is a prerelease."
-            SKIPPED+=( "${floating}" )
-            return
-          fi
-
-          # Both sides are bare numbers here, so sort -V is reliable. Comparing the tags as written
-          # would not be: sort -V puts 1.4.0-rc.1 above 1.4.0, the opposite of semver.
-          higher="$(printf '%s\n%s\n' "${newest}" "${CORE}" | sort -V | tail -n 1)"
-          if [ "${higher}" != "${CORE}" ]; then
-            echo "::notice::${floating} stays where it is: ${newest} is newer than ${VERSION}."
-            SKIPPED+=( "${floating}" )
-            return
-          fi
-
-          TAGS+=( "${floating}" )
-        }
-
-        if [ "${WANT_MAJOR}" == "true" ]; then
-          add_level "v${PARTS[0]}" "^${PARTS[0]}(\\.[0-9]+)+$"
-        fi
-
-        if [ "${WANT_MINOR}" == "true" ]; then
-          add_level "v${PARTS[0]}.${PARTS[1]}" "^${PARTS[0]}\\.${PARTS[1]}(\\.[0-9]+)+$"
-        fi
-
-        echo "Resolved for ${VERSION}: ${TAGS[*]-none}"
-
-        {
-          echo "tags=${TAGS[*]-}"
-          echo "skipped=${SKIPPED[*]-}"
-          echo "version=${VERSION}"
-        } >> "$GITHUB_OUTPUT"
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const { run } = require(`${process.env.ACTION_PATH}/resolve.js`)
+          await run({ github, core, env: process.env })

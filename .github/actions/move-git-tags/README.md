@@ -72,12 +72,13 @@ Writing the refs through the API rather than `git push --force` means the tag na
 for a moment, which is what keeps a GitHub Release attached to it. It also means the job needs no
 checkout of the repo to move a tag.
 
-Each tag is checked with `git/ref/tags/<name>` before being written, instead of trying a PATCH and
-falling back to a POST. A PATCH also fails for a token without permission or a protected tag, and a
-fallback would report those as a successful creation.
+Each tag is read with `git.getRef` before being written, instead of trying `git.updateRef` and
+creating the tag when that fails. An update also fails for a token without permission or a protected
+tag, and a fallback would report those as a successful creation. Only a 404 is read as "does not
+exist"; any other status fails the job.
 
-`git/ref` is singular on purpose. The plural `git/refs/tags/v1` matches by prefix, so it answers
-200 whenever a `v1.0.0` tag exists even when there is no `v1` to update:
+`getRef` is the single-ref endpoint on purpose. `listMatchingRefs` matches by prefix, so it answers
+for `tags/v1` whenever a `v1.0.0` tag exists even when there is no `v1` to update:
 
 ```console
 $ gh api repos/stellarwp/changelogger/git/refs/tags/0.1 --jq 'map(.ref)'
@@ -86,6 +87,9 @@ $ gh api repos/stellarwp/changelogger/git/refs/tags/0.1 --jq 'map(.ref)'
 $ gh api repos/stellarwp/changelogger/git/ref/tags/0.1
 gh: Not Found (HTTP 404)
 ```
+
+The two calls also spell the ref differently: `getRef` and `updateRef` take `tags/v1`, while
+`createRef` takes the full `refs/tags/v1`.
 
 ## Tag names
 
@@ -103,3 +107,19 @@ message of their own. A floating tag is repointed on every release, so an annota
 be replaced each time.
 
 A release tag that has to be annotated or signed is created by whoever cuts the release, not here.
+
+## How it runs
+
+The logic is in `move.js`, run by [actions/github-script](https://github.com/actions/github-script),
+which supplies the Node runtime and an Octokit already authenticated with `token`. There is no
+dependency to install and no bundle to build: the file in the repository is the file that runs, so a
+change to it is reviewable as a diff.
+
+The script is loaded by path rather than inlined in the manifest, because github-script's `require`
+resolves against the workspace of the repository being built, not this action's directory. The path
+comes from `${{ github.action_path }}`.
+
+Inputs reach the script through `process.env`, never by being interpolated into it, so a tag name is
+data and cannot become part of the program.
+
+`tests/actions/move-git-tags/move.test.js` covers the rules above. Run them with `node --test tests/`.

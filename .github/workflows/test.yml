@@ -1,0 +1,29 @@
+name: Tests
+
+# This repo's own checks. A bug here reaches every repo that pins a tag from it, so the logic in the
+# actions is unit tested rather than only exercised by a real release.
+#
+# Run it locally: `node --test tests/`
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # The version actions/github-script@v9 runs the action scripts on, so the tests run on the
+      # same one. There is nothing to install: the scripts have no dependencies of their own.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Run the unit tests
+        run: node --test tests/
