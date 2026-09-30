@@ -3,7 +3,7 @@ name: Tests
 # This repo's own checks. A bug here reaches every repo that pins a tag from it, so the logic in the
 # actions is unit tested rather than only exercised by a real release.
 #
-# Run it locally: `node --test tests/`
+# Run it locally: `node --test`
 
 on:
   push:
@@ -25,5 +25,8 @@ jobs:
         with:
           node-version: '24'
 
+      # No path argument: `node --test <dir>` is read as a module to load rather than a directory
+      # to search on some Node versions, including the 24.x the runner ships. Bare `node --test`
+      # finds every *.test.js under the repository on all of them.
       - name: Run the unit tests
-        run: node --test tests/
+        run: node --test

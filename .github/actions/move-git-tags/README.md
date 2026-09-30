@@ -122,4 +122,4 @@ comes from `${{ github.action_path }}`.
 Inputs reach the script through `process.env`, never by being interpolated into it, so a tag name is
 data and cannot become part of the program.
 
-`tests/actions/move-git-tags/move.test.js` covers the rules above. Run them with `node --test tests/`.
+`tests/actions/move-git-tags/move.test.js` covers the rules above. Run them with `node --test`.
