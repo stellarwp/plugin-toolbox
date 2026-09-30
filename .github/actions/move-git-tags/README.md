@@ -12,7 +12,6 @@ floating version tags a release should own and this action writes them:
   uses: stellarwp/plugin-toolbox/.github/actions/resolve-floating-tags@v1
   with:
     tag: ${{ github.event.release.tag_name }}
-    is-prerelease: ${{ github.event.release.prerelease }}
 
 - name: Move them onto the released commit
   uses: stellarwp/plugin-toolbox/.github/actions/move-git-tags@v1

@@ -37,7 +37,6 @@ jobs:
         uses: ./.github/actions/resolve-floating-tags
         with:
           tag: ${{ github.event.release.tag_name }}
-          is-prerelease: ${{ github.event.release.prerelease }}
 
       - name: Move them onto the released commit
         uses: ./.github/actions/move-git-tags
