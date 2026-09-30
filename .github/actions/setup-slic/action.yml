@@ -16,10 +16,10 @@ inputs:
     description: >-
       The directory `slic here` runs in. It becomes slic's plugins directory, so it must be the
       parent of the target checkout. Defaults to the workspace, which is correct when the target is
-      checked out into a subdirectory. Repos checked out at the workspace root pass
-      `${{ github.workspace }}/..`. A theme target needs a directory named `themes` here: that name
+      checked out into a subdirectory. A repo checked out at the workspace root passes the
+      workspace's parent instead. A theme target needs a directory named `themes` here: that name
       is what makes `slic here` set SLIC_THEMES_DIR to the checkout rather than to slic's own
-      themes directory.
+      themes directory. See the action's README for each layout.
     required: false
     default: ''
   ref:
@@ -143,11 +143,13 @@ runs:
     # ------------------------------------------------------------------------------
     - name: Set up slic for CI
       shell: bash
-      working-directory: ${{ inputs.here-dir != '' && inputs.here-dir || github.workspace }}
       env:
+        HERE_DIR: ${{ inputs.here-dir }}
         PHP_VERSION: ${{ inputs.php-version }}
         COMPOSER_CACHE_DIR: ${{ inputs.composer-cache-dir }}
       run: |
+        cd "${HERE_DIR:-$GITHUB_WORKSPACE}"
+
         "${SLIC_BIN}" here
         "${SLIC_BIN}" interactive off
         "${SLIC_BIN}" build-prompt off
