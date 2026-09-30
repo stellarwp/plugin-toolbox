@@ -63,14 +63,25 @@ runs:
 
         # Name the artifact before the suite runs: the upload step needs the name on
         # the run that fails, and a step's outputs survive its failure only for what
-        # it wrote before failing. SLIC_PHP_VERSION is the version setup-slic pinned
-        # the stack to, so each leg of a PHP matrix gets its own name.
+        # it wrote before failing.
+        #
+        # The name carries every dimension a job can vary: the target, the PHP version
+        # setup-slic pinned the stack to, and the suite. The upload overwrites a
+        # matching name so re-running a failed job replaces its own output from the
+        # earlier attempt, which means a name shared with a different job would
+        # destroy that job's output instead.
         if [ -z "${ARTIFACT_NAME}" ]; then
+          # An artifact name cannot contain / : < > | * ? " or \, and a target can be
+          # a subdirectory such as the-events-calendar/common.
+          safe_target="$(printf '%s' "${TARGET}" | tr -c 'a-zA-Z0-9._-' '-')"
+
+          ARTIFACT_NAME="test-output-${safe_target}"
+
           if [ -n "${SLIC_PHP_VERSION:-}" ]; then
-            ARTIFACT_NAME="test-output-php${SLIC_PHP_VERSION}-${SUITE}"
-          else
-            ARTIFACT_NAME="test-output-${SUITE}"
+            ARTIFACT_NAME="${ARTIFACT_NAME}-php${SLIC_PHP_VERSION}"
           fi
+
+          ARTIFACT_NAME="${ARTIFACT_NAME}-${SUITE}"
         fi
 
         echo "artifact-name=${ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"

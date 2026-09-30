@@ -39,13 +39,16 @@ dependencies, leaves the wrong one selected and the suite runs against it.
 
 ## Artifact names
 
-`actions/upload-artifact` rejects a name that another job in the same run already used, so every
-matrix leg needs a distinct one.
+The default is `test-output-<target>-php<version>-<suite>`, where the version is read from
+`SLIC_PHP_VERSION`, which [setup-slic](../setup-slic/) exports when it pins the stack. Characters an
+artifact name cannot hold are replaced with `-`, so a target such as `the-events-calendar/common`
+becomes `the-events-calendar-common`.
 
-The default is `test-output-php<version>-<suite>`, where the version is read from
-`SLIC_PHP_VERSION`, which [setup-slic](../setup-slic/) exports when it pins the stack. A matrix over
-PHP versions, over suites, or over both therefore names every leg without repeating the value here.
-Set `output-artifact-name` when a job needs something else.
+The name carries all three dimensions because the upload passes `overwrite: true`. That is what lets
+a re-run of a failed job replace the output from its earlier attempt, since artifacts belong to the
+workflow run rather than the attempt. The same setting means two jobs sharing a name would not
+collide loudly: the later upload would delete the earlier job's output. A job that varies on
+something beyond target, PHP version and suite therefore has to set `output-artifact-name`.
 
 ## Output path
 
