@@ -143,14 +143,14 @@ runs:
         PHP_VERSION: ${{ inputs.php-version }}
         COMPOSER_CACHE_DIR: ${{ inputs.composer-cache-dir }}
       run: |
-        ${SLIC_BIN} here
-        ${SLIC_BIN} interactive off
-        ${SLIC_BIN} build-prompt off
-        ${SLIC_BIN} build-subdir off
-        ${SLIC_BIN} php-version set "${PHP_VERSION}" --skip-rebuild
+        "${SLIC_BIN}" here
+        "${SLIC_BIN}" interactive off
+        "${SLIC_BIN}" build-prompt off
+        "${SLIC_BIN}" build-subdir off
+        "${SLIC_BIN}" php-version set "${PHP_VERSION}" --skip-rebuild
 
         if [ -n "${COMPOSER_CACHE_DIR}" ]; then
-          ${SLIC_BIN} composer-cache set "${COMPOSER_CACHE_DIR}"
+          "${SLIC_BIN}" composer-cache set "${COMPOSER_CACHE_DIR}"
         fi
 
     - name: Define if we need the debug flag
@@ -161,11 +161,11 @@ runs:
       run: |
         if [ "${DEBUG_ENABLED}" == "true" ]; then
           debug_flag="--debug"
-          ${SLIC_BIN} debug on
-          ${SLIC_BIN} config
+          "${SLIC_BIN}" debug on
+          "${SLIC_BIN}" config
         else
           debug_flag=""
-          ${SLIC_BIN} xdebug off
+          "${SLIC_BIN}" xdebug off
         fi
 
         echo "DEBUG_FLAG=${debug_flag}" >> "$GITHUB_ENV"
@@ -186,7 +186,7 @@ runs:
         set -- ${SERVICES}
 
         for service in "$@"; do
-          ${SLIC_BIN} up "${service}"
+          "${SLIC_BIN}" up "${service}"
         done
 
     # ------------------------------------------------------------------------------
@@ -220,8 +220,8 @@ runs:
           fi
 
           echo "::group::slic composer install for ${target}"
-          ${SLIC_BIN} use "${target}"
-          ${SLIC_BIN} composer install "$@"
+          "${SLIC_BIN}" use "${target}"
+          "${SLIC_BIN}" composer install "$@"
           echo "::endgroup::"
         done <<< "${COMPOSER_INSTALL}"
 
@@ -235,7 +235,7 @@ runs:
           docker network prune -f
         fi
 
-        ${SLIC_BIN} use "${TARGET}"
+        "${SLIC_BIN}" use "${TARGET}"
 
     # ------------------------------------------------------------------------------
     # `wp core download --force` replaces the core files without touching the
@@ -264,14 +264,14 @@ runs:
           exit 1
         fi
 
-        ${SLIC_BIN} wp core download --version="${WP_VERSION}" --force
-        ${SLIC_BIN} wp core update-db
+        "${SLIC_BIN}" wp core download --version="${WP_VERSION}" --force
+        "${SLIC_BIN}" wp core update-db
 
     - name: Show slic info
       shell: bash
       run: |
-        ${SLIC_BIN} info
-        ${SLIC_BIN} wp core version
+        "${SLIC_BIN}" info
+        "${SLIC_BIN}" wp core version
 
     - name: Verify PHP version is correct inside slic
       if: inputs.verify-php-version == 'true'
@@ -279,7 +279,7 @@ runs:
       env:
         PHP_VERSION: ${{ inputs.php-version }}
       run: |
-        ACTUAL_VERSION=$(${SLIC_BIN} dc exec wordpress php -v | grep -oP '^PHP \K[\d\.]+')
+        ACTUAL_VERSION=$("${SLIC_BIN}" dc exec wordpress php -v | grep -oP '^PHP \K[\d\.]+')
         echo "Detected PHP version: $ACTUAL_VERSION"
 
         if [[ "$ACTUAL_VERSION" == ${PHP_VERSION}* ]]; then

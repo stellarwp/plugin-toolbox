@@ -75,11 +75,11 @@ runs:
 
         echo "artifact-name=${ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
 
-        ${SLIC_BIN} use "${TARGET}"
+        "${SLIC_BIN}" use "${TARGET}"
 
         # Word splitting is intended: SUITE_ARGS and DEBUG_FLAG are argument lists.
         # shellcheck disable=SC2086
-        ${SLIC_BIN} run "${SUITE}" ${SUITE_ARGS} ${DEBUG_FLAG:-}
+        "${SLIC_BIN}" run "${SUITE}" ${SUITE_ARGS} ${DEBUG_FLAG:-}
 
     - name: Upload failed test data as an artifact
       if: failure() && inputs.upload-output-on-failure == 'true'
@@ -102,7 +102,7 @@ runs:
         status=0
 
         if [ -n "${SLIC_BIN:-}" ]; then
-          ${SLIC_BIN} down || status=$?
+          "${SLIC_BIN}" down || status=$?
         fi
 
         ssh-agent -k > /dev/null 2>&1 || true
