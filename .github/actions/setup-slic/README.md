@@ -23,7 +23,6 @@ as Playwright, calls its own commands after this action instead.
 | `slic-repository` | no | `stellarwp/slic` | Repository to check slic out from |
 | `slic-path` | no | `slic` | Path in the workspace to check slic out into |
 | `wp-version` | no | `latest` | `latest`, an explicit version like `6.6`, or `''` to keep the image's version |
-| `install-theme` | no | `''` | Theme slug to install from wordpress.org and activate as the site theme |
 | `services` | no | `''` | Extra slic services to start, e.g. `chrome`. See [Services](#services) |
 | `composer-install` | no | `''` | Targets to run `slic composer install` for, one `<target> [args]` per line |
 | `composer-cache-dir` | no | `''` | Host directory for `slic composer-cache set` |
@@ -41,6 +40,25 @@ as Playwright, calls its own commands after this action instead.
 Both are also exported to the environment, as `SLIC_BIN` and `DEBUG_FLAG`, so later steps in the
 job can call `${SLIC_BIN}` without wiring the output through. `setup-slic` also exports
 `SLIC_WP_DIR`, `SLIC_WORDPRESS_DOCKERFILE`, `SLIC`, `CI`, `SSH_AUTH_SOCK` and `SSH_AGENT_PID`.
+
+## Setting the site up
+
+This action provisions slic and the WordPress stack. It does not install themes, plugins, options
+or fixtures. Do that in a `run:` step between this action and
+[run-slic-suite](../run-slic-suite/), where wp-cli's full flag surface is available:
+
+```yaml
+- uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1
+  with:
+    php-version: ${{ matrix.php-version }}
+    target: sfwd-lms
+
+- name: Set the site up for the suite
+  run: |
+    ${SLIC_BIN} wp theme install twentytwenty --activate
+    ${SLIC_BIN} wp plugin install elementor --activate
+    ${SLIC_BIN} wp plugin install woocommerce --version=8.5.0
+```
 
 ## Debug
 
@@ -112,7 +130,6 @@ The workspace is the target, so `here-dir` has to be its parent.
     target: the-events-calendar
     here-dir: ${{ github.workspace }}/..
     wp-version: '6.6'
-    install-theme: twentytwenty
     services: chrome
     composer-install: |
       the-events-calendar/common --no-dev

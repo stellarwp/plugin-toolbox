@@ -41,12 +41,6 @@ inputs:
       explicit version such as 6.6 pins it. An empty value leaves the image's version alone.
     required: false
     default: 'latest'
-  install-theme:
-    description: >-
-      A theme slug to install from wordpress.org and activate, e.g. twentytwenty. This is the theme
-      the site runs under, not the target under test: a theme repo names itself in `target`.
-    required: false
-    default: ''
   services:
     description: 'Space or newline separated slic services to start, e.g. chrome.'
     required: false
@@ -257,13 +251,6 @@ runs:
         fi
 
         ${SLIC_BIN} wp core download --version="${WP_VERSION}" --force
-
-    - name: Install the site theme
-      if: inputs.install-theme != ''
-      shell: bash
-      env:
-        INSTALL_THEME: ${{ inputs.install-theme }}
-      run: ${SLIC_BIN} wp theme install "${INSTALL_THEME}" --activate
 
     - name: Show slic info
       shell: bash
