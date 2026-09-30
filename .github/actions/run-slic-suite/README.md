@@ -16,7 +16,6 @@ rather than running the suite name as a command.
 - uses: stellarwp/plugin-toolbox/.github/actions/run-slic-suite@v1
   with:
     suite: ${{ matrix.suite }}
-    target: sfwd-lms
 ```
 
 ## Inputs
@@ -24,18 +23,22 @@ rather than running the suite name as a command.
 | Input | Required | Default | What it does |
 |---|---|---|---|
 | `suite` | yes | | Codeception suite to run, e.g. `wpunit` |
-| `target` | yes | | The `slic use` target, re-selected before the suite runs. Also the default output path |
+| `target` | no | what `setup-slic` selected | The `slic use` target, re-selected before the suite runs. Also the default output path |
 | `suite-args` | no | `''` | Extra arguments for `slic run`, e.g. `--ext DotReporter` |
 | `upload-output-on-failure` | no | `'false'` | Upload the test output directory when the suite fails |
 | `output-path` | no | `<target>/tests/_output/` | Directory to upload |
 | `output-artifact-name` | no | see [Artifact names](#artifact-names) | Name of the uploaded artifact |
 | `run-cleanup` | no | `'false'` | Run `slic down` and kill the ssh-agent at the end |
 
-## Why target is required
+## When to pass target
 
-The action runs `slic use <target>` before `slic run`. `setup-slic` already selects the target, but
-anything in between that calls `slic use` for another target, such as installing a fixture plugin's
-dependencies, leaves the wrong one selected and the suite runs against it.
+Usually never. `setup-slic` exports the target it selected as `SLIC_TOOLBOX_TARGET` and this action
+reads it, so a job names its target once.
+
+Pass it when a step between the two actions ran `slic use` for a different target, such as
+installing a fixture plugin's dependencies. slic records the current target in its own run settings
+file rather than in the environment, so this action cannot detect that switch; it re-selects
+whatever target it resolves before running the suite.
 
 ## Artifact names
 
@@ -60,7 +63,6 @@ after it. Set it explicitly on any other layout:
 - uses: stellarwp/plugin-toolbox/.github/actions/run-slic-suite@v1
   with:
     suite: ${{ matrix.suite }}
-    target: the-events-calendar
     suite-args: --ext DotReporter
     output-path: tests/_output/
     upload-output-on-failure: 'true'

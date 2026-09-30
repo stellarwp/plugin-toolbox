@@ -9,10 +9,11 @@ inputs:
     required: true
   target:
     description: >-
-      The slic target the suite belongs to, e.g. sfwd-lms. Selected with `slic use` before the
-      suite runs, so a job that switched targets after setup-slic still runs against the right one.
-      Also the default path from the workspace to the target checkout.
-    required: true
+      The slic target the suite belongs to, e.g. sfwd-lms. Defaults to the one setup-slic selected,
+      so a job names its target once. Pass it only when a step between the two actions selected a
+      different target, since it is re-selected with `slic use` before the suite runs.
+    required: false
+    default: ''
   suite-args:
     description: 'Extra arguments appended to `slic run`, e.g. --ext DotReporter.'
     required: false
@@ -43,9 +44,9 @@ runs:
   using: 'composite'
   steps:
     # ------------------------------------------------------------------------------
-    # SLIC_BIN and DEBUG_FLAG are exported to the environment by setup-slic. Fail with
-    # a clear message rather than letting an empty ${SLIC_BIN} run the suite name as a
-    # command.
+    # SLIC_BIN, DEBUG_FLAG, SLIC_PHP_VERSION and SLIC_TOOLBOX_TARGET are exported to
+    # the environment by setup-slic. Fail with a clear message rather than letting an
+    # empty ${SLIC_BIN} run the suite name as a command.
     # ------------------------------------------------------------------------------
     - name: Run suite ${{ inputs.suite }}
       id: run
@@ -55,16 +56,29 @@ runs:
         SUITE_ARGS: ${{ inputs.suite-args }}
         TARGET: ${{ inputs.target }}
         ARTIFACT_NAME: ${{ inputs.output-artifact-name }}
+        OUTPUT_PATH: ${{ inputs.output-path }}
       run: |
         if [ -z "${SLIC_BIN:-}" ]; then
           echo "::error::SLIC_BIN is not set. Run the setup-slic action earlier in this job."
           exit 1
         fi
 
-        # Name the artifact before the suite runs: the upload step needs the name on
-        # the run that fails, and a step's outputs survive its failure only for what
-        # it wrote before failing.
-        #
+        if [ -z "${TARGET}" ]; then
+          TARGET="${SLIC_TOOLBOX_TARGET:-}"
+        fi
+
+        if [ -z "${TARGET}" ]; then
+          echo "::error::No slic target. Run the setup-slic action earlier in this job, or pass target."
+          exit 1
+        fi
+
+        # Resolve the artifact name and path before the suite runs: the upload step
+        # needs them on the run that fails, and a step's outputs survive its failure
+        # only for what it wrote before failing.
+        if [ -z "${OUTPUT_PATH}" ]; then
+          OUTPUT_PATH="${TARGET}/tests/_output/"
+        fi
+
         # The name carries every dimension a job can vary: the target, the PHP version
         # setup-slic pinned the stack to, and the suite. The upload overwrites a
         # matching name so re-running a failed job replaces its own output from the
@@ -84,7 +98,10 @@ runs:
           ARTIFACT_NAME="${ARTIFACT_NAME}-${SUITE}"
         fi
 
-        echo "artifact-name=${ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
+        {
+          echo "artifact-name=${ARTIFACT_NAME}"
+          echo "output-path=${OUTPUT_PATH}"
+        } >> "$GITHUB_OUTPUT"
 
         "${SLIC_BIN}" use "${TARGET}"
 
@@ -97,7 +114,7 @@ runs:
       uses: actions/upload-artifact@v4
       with:
         name: ${{ steps.run.outputs.artifact-name }}
-        path: ${{ inputs.output-path != '' && inputs.output-path || format('{0}/tests/_output/', inputs.target) }}
+        path: ${{ steps.run.outputs.output-path }}
         retention-days: 2
         overwrite: true
 

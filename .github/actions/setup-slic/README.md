@@ -36,11 +36,17 @@ as Playwright, calls its own commands after this action instead.
 |---|---|
 | `slic-bin` | Absolute path to the slic binary |
 | `debug-flag` | `--debug` when debug is on for this run, empty otherwise |
+| `target` | The target this action selected |
 
-Both are also exported to the environment, as `SLIC_BIN` and `DEBUG_FLAG`, so later steps in the
-job can call `${SLIC_BIN}` without wiring the output through. `setup-slic` also exports
-`SLIC_WP_DIR`, `SLIC_WORDPRESS_DOCKERFILE`, `SLIC_PHP_VERSION`, `SLIC`, `CI`, `SSH_AUTH_SOCK` and
-`SSH_AGENT_PID`.
+All three are also exported to the environment, as `SLIC_BIN`, `DEBUG_FLAG` and
+`SLIC_TOOLBOX_TARGET`, so later steps in the job can call `${SLIC_BIN}` without wiring the output
+through. `setup-slic` also exports
+`SLIC_WP_DIR`, `SLIC_WORDPRESS_DOCKERFILE`, `SLIC_PHP_VERSION`, `SLIC_TOOLBOX_TARGET`, `SLIC`, `CI`,
+`SSH_AUTH_SOCK` and `SSH_AGENT_PID`.
+
+`SLIC_TOOLBOX_TARGET` is how [run-slic-suite](../run-slic-suite/) knows which target to run against
+without being told again. slic records the current target in its own run settings file rather than
+in the environment, so there is nothing else to read it from.
 
 `SLIC_PHP_VERSION` is what pins the PHP version for the whole job. slic reads a value that is
 already in the environment as a command-line override, and that override beats the version a

@@ -83,6 +83,11 @@ outputs:
       `--debug` when debug is on for this run, empty otherwise. Also exported to the environment as
       DEBUG_FLAG, which run-slic-suite appends to `slic run`.
     value: ${{ steps.debug-flag.outputs.debug-flag }}
+  target:
+    description: >-
+      The target this action selected. Also exported to the environment as SLIC_TOOLBOX_TARGET,
+      which run-slic-suite reads when it is given no target of its own.
+    value: ${{ steps.target.outputs.target }}
 
 runs:
   using: 'composite'
@@ -226,6 +231,7 @@ runs:
         done <<< "${COMPOSER_INSTALL}"
 
     - name: Select the target under test
+      id: target
       shell: bash
       env:
         TARGET: ${{ inputs.target }}
@@ -236,6 +242,12 @@ runs:
         fi
 
         "${SLIC_BIN}" use "${TARGET}"
+
+        # run-slic-suite reads this when no target is passed to it, so a job names
+        # the target once. slic records the selection in its own run settings file
+        # rather than in the environment, so there is nothing else to read it from.
+        echo "SLIC_TOOLBOX_TARGET=${TARGET}" >> "$GITHUB_ENV"
+        echo "target=${TARGET}" >> "$GITHUB_OUTPUT"
 
     # ------------------------------------------------------------------------------
     # `wp core download --force` replaces the core files without touching the
