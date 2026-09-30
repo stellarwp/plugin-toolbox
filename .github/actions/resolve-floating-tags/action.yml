@@ -1,0 +1,181 @@
+# Works out which floating tags a released version should own: v1 and v1.2 for 1.2.3. Writing them
+# is a separate action: see .github/actions/move-git-tags.
+name: Resolve floating version tags
+description: Works out which v<major> and v<major>.<minor> tags a released version should own
+
+inputs:
+  tag:
+    description: >-
+      The release tag to resolve, with or without a leading `v`, e.g. `1.2.3` or `v1.2.3`. A tag
+      that is not three dot-separated numbers resolves to no tags, which is what keeps a prerelease
+      such as `1.2.3-rc.1` from capturing a floating tag.
+    required: true
+  levels:
+    description: >-
+      Which floating tags to resolve, space separated: `major` for v1, `minor` for v1.2. Drop
+      `minor` on a repo whose consumers only ever pin a major.
+    required: false
+    default: 'major minor'
+  is-prerelease:
+    description: >-
+      Resolve no tags when `true`. Wire this to the release event's `prerelease` flag so that a
+      release marked as a prerelease on GitHub is skipped even when its tag is a plain `X.Y.Z`. The
+      tag pattern alone does not catch that case.
+    required: false
+    default: 'false'
+  require-newest:
+    description: >-
+      Only resolve a floating tag when this release is the newest one that tag covers, so that
+      publishing a patch on an older line does not drag the tag backwards. Reads the repository's
+      GitHub Releases; see the action's README. Set to `false` on a repo that publishes no Releases,
+      since the check has nothing to read there, and this action then calls no API at all.
+    required: false
+    default: 'true'
+  repository:
+    description: 'The `<owner>/<repo>` whose releases to compare against. Defaults to the current one.'
+    required: false
+    default: ''
+  token:
+    description: >-
+      Token used to read the release list when `require-newest` is on. It needs no more than read
+      access to the repository's contents. Unused when `require-newest` is `false`.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  tags:
+    description: >-
+      The floating tags this version should own, space separated, e.g. `v1 v1.2`. Pass it straight
+      to move-git-tags. Empty when the version was rejected or every tag was held back.
+    value: ${{ steps.resolve.outputs.tags }}
+  skipped:
+    description: >-
+      The floating tags a newer release already owns, space separated. Empty when the version itself
+      was rejected; read `version` to tell the two apart.
+    value: ${{ steps.resolve.outputs.skipped }}
+  version:
+    description: >-
+      The released version without its leading `v`, e.g. `1.2.3`. Empty when the tag was not an
+      X.Y.Z version or the release was a prerelease.
+    value: ${{ steps.version.outputs.version }}
+  major:
+    description: 'The major number, e.g. `1`. Empty when the version was rejected.'
+    value: ${{ steps.version.outputs.major }}
+  minor:
+    description: 'The minor number, e.g. `2`. Empty when the version was rejected.'
+    value: ${{ steps.version.outputs.minor }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Read the version out of the release tag
+      id: version
+      shell: bash
+      env:
+        TAG: ${{ inputs.tag }}
+        IS_PRERELEASE: ${{ inputs.is-prerelease }}
+      run: |
+        if [ "${IS_PRERELEASE}" == "true" ]; then
+          echo "::notice::Resolved no floating tags: ${TAG} is marked as a prerelease."
+          echo "proceed=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # A release tag may be written either way, 1.2.3 or v1.2.3, so the comparisons below all run
+        # on the version without the v. The floating tags always carry the v, because that is what a
+        # `uses:` line resolves.
+        VERSION="${TAG#v}"
+
+        if [[ ! "${VERSION}" =~ ^([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+          echo "::notice::Resolved no floating tags: ${TAG} is not an X.Y.Z version."
+          echo "proceed=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        {
+          echo "proceed=true"
+          echo "version=${VERSION}"
+          echo "major=${BASH_REMATCH[1]}"
+          echo "minor=${BASH_REMATCH[2]}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Resolve the floating tags for this version
+      id: resolve
+      if: steps.version.outputs.proceed == 'true'
+      shell: bash
+      env:
+        VERSION: ${{ steps.version.outputs.version }}
+        MAJOR: ${{ steps.version.outputs.major }}
+        MINOR: ${{ steps.version.outputs.minor }}
+        LEVELS: ${{ inputs.levels }}
+        REQUIRE_NEWEST: ${{ inputs.require-newest }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        REPO="${INPUT_REPOSITORY:-$GITHUB_REPOSITORY}"
+
+        # Each entry pairs a floating tag with the pattern for the releases it covers. The patterns
+        # anchor at both ends so a longer number cannot match a shorter one: 122.3.4 is not a 1.2
+        # release.
+        ENTRIES=()
+        # Word splitting is intended: LEVELS is a list.
+        # shellcheck disable=SC2086,SC2153
+        set -- ${LEVELS}
+        for LEVEL in "$@"; do
+          case "${LEVEL}" in
+            major) ENTRIES+=( "v${MAJOR}|^${MAJOR}\.[0-9]+\.[0-9]+$" ) ;;
+            minor) ENTRIES+=( "v${MAJOR}.${MINOR}|^${MAJOR}\.${MINOR}\.[0-9]+$" ) ;;
+            *)
+              echo "::error::Unknown level '${LEVEL}' in levels. Use 'major', 'minor' or both."
+              exit 1
+              ;;
+          esac
+        done
+
+        if [ "${#ENTRIES[@]}" -eq 0 ]; then
+          echo "::error::levels named no floating tags to resolve."
+          exit 1
+        fi
+
+        # The highest version matching $1 among published, non-prerelease releases. sort -V orders
+        # 1.10.0 above 1.9.0, which sort alone does not. The limit is well past the number of
+        # releases in one version line; releases come back newest first, so an older line's newest
+        # release is never the entry that falls off the end.
+        newest_version_matching() {
+          gh release list --repo "${REPO}" --limit 200 \
+            --json tagName,isPrerelease,isDraft \
+            --jq '.[] | select(.isPrerelease == false and .isDraft == false) | .tagName' \
+            | sed 's/^v//' \
+            | grep -E "$1" \
+            | sort -V \
+            | tail -n 1
+        }
+
+        TAGS=()
+        SKIPPED=()
+
+        for ENTRY in "${ENTRIES[@]}"; do
+          FLOATING="${ENTRY%%|*}"
+          PATTERN="${ENTRY#*|}"
+
+          if [ "${REQUIRE_NEWEST}" == "true" ]; then
+            NEWEST="$(newest_version_matching "${PATTERN}")"
+            # An empty result means this release is not listed yet, which happens when a repo tags
+            # without publishing Releases. Falling back to resolving the tag keeps that case working
+            # rather than silently moving nothing.
+            if [ -n "${NEWEST}" ] && [ "${NEWEST}" != "${VERSION}" ]; then
+              echo "::notice::${FLOATING} stays where it is: ${NEWEST} is newer than ${VERSION}."
+              SKIPPED+=( "${FLOATING}" )
+              continue
+            fi
+          fi
+
+          TAGS+=( "${FLOATING}" )
+        done
+
+        echo "Resolved for ${VERSION}: ${TAGS[*]-none}"
+
+        {
+          echo "tags=${TAGS[*]-}"
+          echo "skipped=${SKIPPED[*]-}"
+        } >> "$GITHUB_OUTPUT"

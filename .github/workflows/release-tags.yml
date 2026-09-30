@@ -1,0 +1,45 @@
+name: Move floating version tags
+
+# This repo's own release automation, and the example other repos copy.
+#
+# Consuming repos pin a floating tag ("uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1"),
+# so every published release has to move v<major> and v<major>.<minor> onto the released commit.
+#
+# The work is split into two actions so that either half can be used on its own:
+# resolve-floating-tags works out which tags the version should own, move-git-tags writes them. To
+# run this in another repo, copy this file and replace the local `uses:` paths with
+# `stellarwp/plugin-toolbox/.github/actions/<action>@v1`.
+#
+# Run it locally: you cannot, it only makes sense against real refs. Check a release afterwards
+# with `gh api repos/stellarwp/plugin-toolbox/git/ref/tags/v1 --jq .object.sha`.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  move-floating-tags:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # move-git-tags writes the tag refs
+    steps:
+      # Only so that the two `uses: ./` paths below resolve. Neither action reads the working tree,
+      # so a repo calling them by their `@v1` path needs no checkout at all.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Resolve the floating tags for this release
+        id: floating
+        uses: ./.github/actions/resolve-floating-tags
+        with:
+          tag: ${{ github.event.release.tag_name }}
+          is-prerelease: ${{ github.event.release.prerelease }}
+
+      - name: Move them onto the released commit
+        uses: ./.github/actions/move-git-tags
+        with:
+          tags: ${{ steps.floating.outputs.tags }}
