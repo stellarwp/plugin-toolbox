@@ -80,10 +80,25 @@ runs:
         retention-days: 2
         overwrite: true
 
+    # ------------------------------------------------------------------------------
+    # `shell: bash` runs with -e, so a failing teardown would skip everything after
+    # it. Each step records its status and the last one reports it, so the ssh-agent
+    # and its socket are cleaned up either way.
+    # ------------------------------------------------------------------------------
     - name: Clean up the environment
       if: always() && inputs.run-cleanup == 'true'
       shell: bash
       run: |
-        ${SLIC_BIN} down
-        ssh-agent -k > /dev/null
-        rm -f "$SSH_AUTH_SOCK"
+        status=0
+
+        if [ -n "${SLIC_BIN:-}" ]; then
+          ${SLIC_BIN} down || status=$?
+        fi
+
+        ssh-agent -k > /dev/null 2>&1 || true
+
+        if [ -n "${SSH_AUTH_SOCK:-}" ]; then
+          rm -f "${SSH_AUTH_SOCK}"
+        fi
+
+        exit "${status}"
