@@ -18,9 +18,8 @@ as input:
     tags: ${{ steps.floating.outputs.tags }}
 ```
 
-The two are separate so that either half can be used alone: a repo with its own tag-writing step
-can read `tags` from here, and a repo that wants to move a `stable` or `latest` tag can call
-move-git-tags without this action.
+The two are separate so that either half can be used alone, and so that a repo can put its own steps
+between them. See [Building between the two steps](#building-between-the-two-steps).
 
 ## Inputs
 
@@ -171,6 +170,43 @@ floating tag where it is.
 If the tags cannot be read at all, the job warns rather than failing and every requested tag
 resolves on the `tag` input alone. Nothing is then held back, so the tags follow whatever was
 published most recently rather than whatever is newest.
+
+## Building between the two steps
+
+A repo that commits build output at release time has a commit to make before it knows which commit
+the tags should point at. The two actions are separate partly for this: this one reads only tag
+names and the release, so it can run before the build, and move-git-tags takes the commit as an
+input rather than using the one the workflow started on.
+
+```yaml
+- name: Resolve the floating tags for the released version
+  id: floating
+  uses: stellarwp/plugin-toolbox/.github/actions/resolve-floating-tags@v1
+  with:
+    tag: ${{ github.event.release.tag_name }}
+
+- name: Build, commit and push on top of the released commit
+  id: build
+  run: |
+    # ... build, commit, and push the commit to a branch ...
+    echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+- name: Point the release tag and the floating tags at the build
+  uses: stellarwp/plugin-toolbox/.github/actions/move-git-tags@v1
+  with:
+    tags: ${{ github.event.release.tag_name }} ${{ steps.floating.outputs.tags }}
+    sha: ${{ steps.build.outputs.sha }}
+```
+
+The release tag is just another name to move-git-tags, so it can be moved in the same call. Moving
+it through the API rather than by force-pushing is what keeps the Release attached to it.
+
+Which tags are resolved does not depend on where the build lands. Tag names are what this action
+reads, and a build commit changes what a tag points at, not what it is called, so running it before
+or after the build gives the same answer.
+
+The build commit has to be pushed before any tag can point at it. A ref can only name an object the
+remote already has, so moving a tag to a commit that exists only on the runner fails.
 
 ## How it runs
 

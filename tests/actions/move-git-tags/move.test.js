@@ -191,3 +191,36 @@ test('run prefers the sha and repository it is given', async () => {
   assert.deepEqual(github.calls, ['getRef tags/v2', 'updateRef tags/v2 -> chosen1 force=true'])
   assert.deepEqual(core.outputs, { created: '', moved: 'v2' })
 })
+
+test('a release tag moves alongside the floating tags, to a commit made later', async () => {
+  /**
+   * The pattern a repo with a build step uses: resolve the floating tags from the released tag,
+   * build and commit, then point the release tag and the floating tags at the build commit. The
+   * release tag is just another name to this action, and the sha is an input rather than the commit
+   * the workflow started on.
+   */
+  const github = fakeGithub({ existing: ['v1.2.3', 'v1'] })
+  const core = fakeCore()
+
+  await run({
+    github,
+    core,
+    env: {
+      INPUT_TAGS: 'v1.2.3 v1 v1.2',
+      INPUT_SHA: 'bui1dc0mmit',
+      GITHUB_REPOSITORY: 'stellarwp/plugin-toolbox',
+      GITHUB_SHA: 'thereleasedcommit',
+    },
+  })
+
+  assert.deepEqual(github.calls, [
+    'getRef tags/v1.2.3',
+    'updateRef tags/v1.2.3 -> bui1dc0mmit force=true',
+    'getRef tags/v1',
+    'updateRef tags/v1 -> bui1dc0mmit force=true',
+    'getRef tags/v1.2',
+    'createRef refs/tags/v1.2 -> bui1dc0mmit',
+  ])
+  assert.deepEqual(core.outputs, { created: 'v1.2', moved: 'v1.2.3 v1' })
+})
+

@@ -19,8 +19,9 @@ floating version tags a release should own and this action writes them:
     tags: ${{ steps.floating.outputs.tags }}
 ```
 
-Any tag name works, so it also moves a `stable` or `latest` pointer. `sha` defaults to the commit
-the run is for, so most callers pass only the names:
+Any tag name works, so it also moves a `stable` or `latest` pointer, or a release tag that has to be
+repointed at a build commit. `sha` defaults to the commit the run is for, so most callers pass only
+the names:
 
 ```yaml
 - uses: stellarwp/plugin-toolbox/.github/actions/move-git-tags@v1
