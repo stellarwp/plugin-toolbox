@@ -104,8 +104,8 @@ being sent.
 ## Lightweight tags only
 
 The refs are written straight to a commit, so these are lightweight tags with no tagger, date or
-message of their own. A floating tag is repointed on every release, so an annotated tag object would
-be replaced each time.
+message of their own. A floating tag is repointed every time a release claims it, so an annotated tag
+object would be replaced each time.
 
 A release tag that has to be annotated or signed is created by whoever cuts the release, not here.
 
