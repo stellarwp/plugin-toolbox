@@ -28,7 +28,7 @@ rather than running the suite name as a command.
 | `upload-output-on-failure` | no | `'false'` | Upload the test output directory when the suite fails |
 | `output-path` | no | `<target>/tests/_output/` | Directory to upload |
 | `output-artifact-name` | no | see [Artifact names](#artifact-names) | Name of the uploaded artifact |
-| `run-cleanup` | no | `'false'` | Run `slic down` and kill the ssh-agent at the end |
+| `run-cleanup` | no | `'false'` | Run `slic down` and kill the ssh-agent at the end. See [Cleanup](#cleanup) |
 
 ## When to pass target
 
@@ -67,6 +67,30 @@ after it. Set it explicitly on any other layout:
     output-path: tests/_output/
     upload-output-on-failure: 'true'
     run-cleanup: 'true'
+```
+
+## Cleanup
+
+`run-cleanup: 'true'` runs `slic down`, kills the ssh-agent and removes its socket. It runs whether
+the suite passed or failed, and a failing teardown still reports the suite's own exit status.
+
+It is off by default because a GitHub-hosted or Blacksmith runner is a fresh VM that is destroyed
+when the job ends, taking the containers and the agent with it. Tearing them down first only spends
+time.
+
+Turn it on for a runner that outlives the job, such as a self-hosted one, where containers, volumes,
+networks and the ssh-agent would otherwise leak into whatever job lands on that machine next.
+
+A matrix is not a reason to leave it off. Each leg is a separate job on a separate runner, so no
+stack is shared between them and nothing carries over either way.
+
+A job that calls [setup-slic](../setup-slic/) without this action, a Playwright job for example, has
+no cleanup input to set. On a persistent runner it needs its own step:
+
+```yaml
+- name: Tear the stack down
+  if: always()
+  run: ${SLIC_BIN} down
 ```
 
 ## Suites this action does not run

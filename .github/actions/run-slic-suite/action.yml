@@ -36,7 +36,11 @@ inputs:
     required: false
     default: ''
   run-cleanup:
-    description: 'Whether to run the cleanup step (slic down, ssh-agent -k) at the end.'
+    description: >-
+      Run `slic down` and kill the ssh-agent after the suite. Off by default because an ephemeral
+      runner is destroyed with the job, which takes the containers and the agent with it. Turn it on
+      for a runner that outlives the job, such as a self-hosted one, where they would otherwise
+      leak into the next job.
     required: false
     default: 'false'
 
