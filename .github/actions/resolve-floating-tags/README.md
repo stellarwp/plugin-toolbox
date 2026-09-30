@@ -29,8 +29,8 @@ move-git-tags without this action.
 | `tag` | yes | | The release tag, with or without a leading `v`, e.g. `1.2.3` or `v1.2.3` |
 | `levels` | no | `'major minor'` | Which tags to resolve: `major` for `v1`, `minor` for `v1.2` |
 | `allow-prereleases` | no | `'false'` | Let a prerelease own a tag whose line has had no stable release. See [Prereleases](#prereleases) |
-| `repository` | no | current repo | The `<owner>/<repo>` whose releases to read |
-| `token` | no | `github.token` | Reads the release list. Read access is enough |
+| `repository` | no | current repo | The `<owner>/<repo>` whose tags and releases to read |
+| `token` | no | `github.token` | Reads the repo's tags, and the prerelease flag of the tag passed in. Read access is enough |
 
 ## Outputs
 
@@ -100,7 +100,8 @@ A prerelease is skipped by default, and it is detected without the caller passin
 
 Two signals are read, because either can occur alone. A tag with a suffix, `1.3.0-rc.1`, is a
 prerelease on its own. A tag that is a plain `1.3.0` but marked as a prerelease on GitHub is not
-visibly different, so the flag is read from the release list, which this action fetches anyway.
+visibly different, so the release behind the `tag` input is asked about directly with
+`gh release view`.
 
 Build metadata is not a prerelease. `1.4.0+build.7` is a stable 1.4.0 and owns the tags a stable
 1.4.0 would. The metadata is not part of a tag name, so it resolves `v1` and `v1.4`.
@@ -145,23 +146,29 @@ precedence, which `sort -V` does not do. Stable releases are ordered, and are ne
 The same rule gives a brand new major line to its own prerelease. Publishing 2.0.0-rc.1 with no
 stable 2.x released resolves `v2` and `v2.0`, since nothing stable is behind either tag.
 
-A prerelease never blocks a stable release either. Only stable releases are considered when working
-out the newest release of a line, so an outstanding 1.9.0-rc.1 does not hold `v1` back from a stable
-1.3.1.
+A prerelease never blocks a released version either. A suffixed tag is not counted when working out
+the newest version of a line, so an outstanding 1.9.0-rc.1 does not hold `v1` back from 1.3.1.
 
-## Repos with no Releases
+## Where the versions come from
 
-Everything above, for stable and prereleases alike, is decided from the repository's GitHub
-Releases, read once through `gh release list`. Git tags are not used, because the prerelease and
-draft flags are not in them. Drafts are left out, since their tag does not exist yet.
+The newest version of a line is read from the repository's git tags, through `matching-refs` with
+`--paginate`. Every tag is read, however many there are.
 
-A repo that pushes tags without publishing Releases has nothing for any of it to read. The release
-being published is itself absent from the list, so nothing can be newer than it and every requested
-tag resolves on the tag name alone. The same path runs when the read fails outright, with a warning
-rather than a failed job.
+`gh release list` is not used for it. That list is ordered by publication date and capped by a
+`--limit`, so on a repo with more releases than the cap a high version published long ago sits past
+the end. The comparison would then find nothing newer than the release being published and move
+`v1` backwards onto it. Publishing 1.2.5 on a repo whose 1.5.0 is old enough to fall past the cap is
+exactly the case that breaks, and it breaks silently. Tags have no such cap, and a draft release is
+excluded for free, since a draft has no tag.
 
-No release is held back on such a repo, so the tags follow whatever was published most recently
-rather than whatever is newest. Publishing 1.2.5 after 1.3.0 moves `v1` to 1.2.5 there.
+The Releases API is needed for one thing: whether the release behind the `tag` input is marked as a
+prerelease. That is asked with `gh release view` on that tag alone, not by listing releases.
 
-The read is capped at the 200 most recent releases. They come back newest first, so the newest
-release of an older line is never the entry that falls off the end.
+A tag whose name is a plain version therefore counts as a released version, even if the release
+behind it is marked as a prerelease on GitHub. A suffixed tag never counts, whatever it is marked
+as. This affects only which version is treated as the newest of a line, and it errs toward holding a
+floating tag where it is.
+
+If the tags cannot be read at all, the job warns rather than failing and every requested tag
+resolves on the `tag` input alone. Nothing is then held back, so the tags follow whatever was
+published most recently rather than whatever is newest.

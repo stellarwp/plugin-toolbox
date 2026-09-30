@@ -27,13 +27,13 @@ inputs:
     required: false
     default: 'false'
   repository:
-    description: 'The `<owner>/<repo>` whose releases to read. Defaults to the current one.'
+    description: 'The `<owner>/<repo>` whose tags and releases to read. Defaults to the current one.'
     required: false
     default: ''
   token:
     description: >-
-      Token used to read the release list, which is where the prerelease flag and the other releases
-      of this version line are read from. Read access to the repository's contents is enough.
+      Token used to read the repository's tags, and the prerelease flag of the release named by
+      `tag`. Read access to the repository's contents is enough.
     required: false
     default: ${{ github.token }}
 
@@ -129,36 +129,36 @@ runs:
           exit 1
         fi
 
-        # One read serves both questions below: whether this release is a prerelease, and which
-        # release is the newest of each version line. Drafts are left out because their tag does not
-        # exist yet. The limit is well past the number of releases in one line, and releases come
-        # back newest first, so an older line's newest release never falls off the end.
-        # Every row is normalised the same way this tag was, so that a release carrying build
-        # metadata or a suffix still compares as its own version. Column 1 is the bare version,
-        # column 2 whether it is a prerelease, column 3 the tag as written.
-        RELEASES="${RUNNER_TEMP:-/tmp}/floating-tag-releases.tsv"
-        # shellcheck disable=SC2016 # The $ names below are jq bindings, not shell expansions.
-        if ! gh release list --repo "${REPO}" --limit 200 \
-          --json tagName,isPrerelease,isDraft \
-          --jq '.[] | select(.isDraft == false)
-                | (.tagName | sub("^v"; "")) as $raw
-                | ($raw | sub("\\+.*$"; "")) as $rel
-                | ($rel | sub("-.*$"; "")) as $core
-                | [$core, (if .isPrerelease or ($core != $rel) then "pre" else "stable" end), $raw]
-                | @tsv' > "${RELEASES}"
-        then
-          # Without the list, the suffix is still a signal and the backwards check has nothing to
-          # compare against, so the tags resolve on the tag name alone.
-          echo "::warning::Could not read ${REPO}'s releases. Resolving from the tag name alone."
-          : > "${RELEASES}"
+        # Every tag in the repository, as a bare version, one per line.
+        #
+        # Tags rather than `gh release list`, because that list is ordered by publication date and
+        # capped by --limit. A high version published long ago sits past the cap on a repo with
+        # enough releases, and the comparison below would then see nothing newer and move a tag
+        # backwards onto the release being published. matching-refs with --paginate has no cap.
+        # Using tags also excludes drafts on its own, since a draft release has no tag yet.
+        #
+        # Each name is normalised the way the `tag` input was, so a tag carrying build metadata
+        # compares as its own version. Suffixed tags need no filtering here: a prerelease cannot
+        # match the anchored numeric patterns below.
+        REFS="${RUNNER_TEMP:-/tmp}/floating-tag-refs.txt"
+        VERSIONS="${RUNNER_TEMP:-/tmp}/floating-tag-versions.txt"
+        if gh api --paginate "repos/${REPO}/git/matching-refs/tags" --jq '.[].ref' > "${REFS}"; then
+          sed -e 's|^refs/tags/||' -e 's/^v//' -e 's/+.*$//' "${REFS}" > "${VERSIONS}"
+        else
+          # Without the tags the comparison has nothing to read, so the floating tags resolve on the
+          # `tag` input alone. Its suffix is still a signal for the prerelease check below.
+          echo "::warning::Could not read ${REPO}'s tags. Resolving from the tag name alone."
+          : > "${VERSIONS}"
         fi
 
         # A suffix says prerelease on its own. A plain 1.3.0 marked as a prerelease on GitHub does
-        # not look any different, so the flag is read from the release list as well.
-        LISTED_AS="$(awk -F'\t' -v t="${VERSION}" '$3 == t { print $2; exit }' "${RELEASES}")"
-
+        # not look any different, so the release behind `tag` is asked about directly. A tag with no
+        # release behind it answers nothing, which counts as not a prerelease.
         IS_PRERELEASE='false'
-        if [ "${CORE}" != "${RELEASE_VERSION}" ] || [ "${LISTED_AS}" == "pre" ]; then
+        if [ "${CORE}" != "${RELEASE_VERSION}" ]; then
+          IS_PRERELEASE='true'
+        elif [ "$(gh release view "${TAG}" --repo "${REPO}" \
+                   --json isPrerelease --jq '.isPrerelease' 2>/dev/null)" == "true" ]; then
           IS_PRERELEASE='true'
         fi
 
@@ -166,15 +166,19 @@ runs:
           nothing_to_do "${TAG} is a prerelease. Set allow-prereleases to change that."
         fi
 
-        # The newest stable version matching $1. sort -V orders 1.10.0 above 1.9.0, and 1.2.3.1
-        # above 1.2.3, which sort alone does neither. Prereleases are left out: a floating tag
-        # position belongs to a stable release unless the caller asked otherwise, and the patterns
-        # exclude suffixed tags anyway.
-        newest_stable_matching() {
-          awk -F'\t' '$2 == "stable" { print $1 }' "${RELEASES}" \
-            | grep -E "$1" \
-            | sort -V \
-            | tail -n 1
+        # A prerelease tagged 1.3.0, marked as one only by GitHub's flag, is indistinguishable from
+        # a released version in a list of tag names. Drop this version from the comparison set so
+        # that such a release does not count as the released version blocking itself. A suffixed tag
+        # never matched the patterns to begin with, so this changes nothing for one.
+        if [ "${IS_PRERELEASE}" == "true" ]; then
+          grep -vxF "${CORE}" "${VERSIONS}" > "${VERSIONS}.cmp" || true
+          mv "${VERSIONS}.cmp" "${VERSIONS}"
+        fi
+
+        # The highest version matching $1. sort -V orders 1.10.0 above 1.9.0, and 1.2.3.1 above
+        # 1.2.3, which sort alone does neither.
+        highest_version_matching() {
+          grep -E "$1" "${VERSIONS}" | sort -V | tail -n 1
         }
 
         TAGS=()
@@ -187,21 +191,21 @@ runs:
         add_level() {
           local floating="$1" pattern="$2" newest higher
 
-          newest="$(newest_stable_matching "${pattern}")"
+          newest="$(highest_version_matching "${pattern}")"
 
-          # No stable release in this line: the first release of a new line, or a repo that tags
-          # without publishing Releases. Nothing can be newer, so the tag resolves either way.
+          # No released version in this line: the first release of a new line, or a repo whose tags
+          # could not be read. Nothing can be newer, so the tag resolves either way.
           if [ -z "${newest}" ]; then
             TAGS+=( "${floating}" )
             return
           fi
 
-          # A prerelease never takes a tag away from a stable release. Anyone pinned to a line that
-          # has already had a stable release expects a released version from it, so only a line that
-          # has never had one may point at a prerelease. A 1.4.0-rc.1 therefore takes v1.4, which
-          # has no stable release behind it, and leaves v1 on 1.3.0.
+          # A prerelease never takes a tag away from a released version. Anyone pinned to a line
+          # that has already had one expects a released version from it, so only a line that has
+          # never had one may point at a prerelease. A 1.4.0-rc.1 therefore takes v1.4, which has
+          # nothing released behind it, and leaves v1 on 1.3.0.
           if [ "${IS_PRERELEASE}" == "true" ]; then
-            echo "::notice::${floating} stays on stable ${newest}: ${VERSION} is a prerelease."
+            echo "::notice::${floating} stays on ${newest}: ${VERSION} is a prerelease."
             SKIPPED+=( "${floating}" )
             return
           fi
