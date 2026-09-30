@@ -1,0 +1,89 @@
+# Runs a Codeception suite through slic. Provisioning the stack is a separate action: see
+# .github/actions/setup-slic, which must run first in the same job.
+name: Run a slic suite
+description: Runs a Codeception suite through slic, uploads its output on failure and tears the stack down
+
+inputs:
+  suite:
+    description: 'The Codeception suite to run, e.g. integration or wpunit.'
+    required: true
+  target:
+    description: >-
+      The slic target the suite belongs to, e.g. sfwd-lms. Selected with `slic use` before the
+      suite runs, so a job that switched targets after setup-slic still runs against the right one.
+      Also the default path from the workspace to the target checkout.
+    required: true
+  suite-args:
+    description: 'Extra arguments appended to `slic run`, e.g. --ext DotReporter.'
+    required: false
+    default: ''
+  php-version:
+    description: >-
+      The PHP version the suite runs on. Only used to build the default artifact name. A job with a
+      matrix over PHP versions has to set this, or `output-artifact-name`, to keep artifact names
+      unique across matrix legs.
+    required: false
+    default: ''
+  upload-output-on-failure:
+    description: 'Upload the target test output directory as an artifact when the suite fails.'
+    required: false
+    default: 'false'
+  output-path:
+    description: >-
+      Path from the workspace to the directory the suite writes output to. Defaults to
+      `<target>/tests/_output/`.
+    required: false
+    default: ''
+  output-artifact-name:
+    description: >-
+      Name of the uploaded artifact. Defaults to `test-output-php<php-version>-<suite>`, or
+      `test-output-<suite>` when php-version is empty.
+    required: false
+    default: ''
+  run-cleanup:
+    description: 'Whether to run the cleanup step (slic down, ssh-agent -k) at the end.'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    # ------------------------------------------------------------------------------
+    # SLIC_BIN and DEBUG_FLAG are exported to the environment by setup-slic. Fail with
+    # a clear message rather than letting an empty ${SLIC_BIN} run the suite name as a
+    # command.
+    # ------------------------------------------------------------------------------
+    - name: Run suite ${{ inputs.suite }}
+      shell: bash
+      env:
+        SUITE: ${{ inputs.suite }}
+        SUITE_ARGS: ${{ inputs.suite-args }}
+        TARGET: ${{ inputs.target }}
+      run: |
+        if [ -z "${SLIC_BIN:-}" ]; then
+          echo "::error::SLIC_BIN is not set. Run the setup-slic action earlier in this job."
+          exit 1
+        fi
+
+        ${SLIC_BIN} use "${TARGET}"
+
+        # Word splitting is intended: SUITE_ARGS and DEBUG_FLAG are argument lists.
+        # shellcheck disable=SC2086
+        ${SLIC_BIN} run "${SUITE}" ${SUITE_ARGS} ${DEBUG_FLAG:-}
+
+    - name: Upload failed test data as an artifact
+      if: failure() && inputs.upload-output-on-failure == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.output-artifact-name != '' && inputs.output-artifact-name || (inputs.php-version != '' && format('test-output-php{0}-{1}', inputs.php-version, inputs.suite) || format('test-output-{0}', inputs.suite)) }}
+        path: ${{ inputs.output-path != '' && inputs.output-path || format('{0}/tests/_output/', inputs.target) }}
+        retention-days: 2
+        overwrite: true
+
+    - name: Clean up the environment
+      if: always() && inputs.run-cleanup == 'true'
+      shell: bash
+      run: |
+        ${SLIC_BIN} down
+        ssh-agent -k > /dev/null
+        rm -f "$SSH_AUTH_SOCK"
