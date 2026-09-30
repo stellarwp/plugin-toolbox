@@ -198,8 +198,8 @@ runs:
 
           # A prerelease never takes a tag away from a stable release. Anyone pinned to a line that
           # has already had a stable release expects a released version from it, so only a line that
-          # has never had one may point at a prerelease. That is what gives a 1.4.0-rc.1 the v1.4
-          # tag, which has no stable release behind it, while leaving v1 on 1.3.0.
+          # has never had one may point at a prerelease. A 1.4.0-rc.1 therefore takes v1.4, which
+          # has no stable release behind it, and leaves v1 on 1.3.0.
           if [ "${IS_PRERELEASE}" == "true" ]; then
             echo "::notice::${floating} stays on stable ${newest}: ${VERSION} is a prerelease."
             SKIPPED+=( "${floating}" )

@@ -56,12 +56,12 @@ line:
 So consumers pinned to `@v1.2` get the patch, and consumers pinned to `@v1` keep 1.3.0 rather than
 being moved back to older code. `v1` appears in `skipped` and `tags` holds `v1.2` alone.
 
-This is also what makes publishing out of order safe. Cutting 1.1.1 while `v1` points at 1.2.0 moves
-`v1.1` and leaves `v1` alone.
+Publishing out of order follows the same rule. Cutting 1.1.1 while `v1` points at 1.2.0 moves `v1.1`
+and leaves `v1` alone.
 
 A newer **major** never holds a lower one back, because it is not in the same line. With 2.1.0
 released, publishing 1.2.4 as the newest 1.x still resolves both `v1` and `v1.2`. Someone pinned to
-`@v1` asked for the 1.x line, so a backport on it is theirs.
+`@v1` asked for the 1.x line, so a backport on it goes to them.
 
 ## Hotfix versions with a fourth part
 
@@ -108,8 +108,7 @@ Build metadata is not a prerelease. `1.4.0+build.7` is a stable 1.4.0 and owns t
 `allow-prereleases: 'true'` lets a prerelease own a floating tag, but only one whose line has had no
 stable release yet. A prerelease never takes a tag away from a stable release.
 
-That is what makes the flag useful rather than dangerous. Publishing 1.4.0-rc.1 while the newest
-stable release is 1.3.0:
+Publishing 1.4.0-rc.1 while the newest stable release is 1.3.0:
 
 | Tag | Line it covers | Stable release in that line | Result |
 |---|---|---|---|
@@ -119,9 +118,9 @@ stable release is 1.3.0:
 So `@v1.4` is how someone opts into testing the 1.4 line before it ships, and `@v1` keeps handing
 everyone else the newest stable release.
 
-Each rc replaces the one before it on `v1.4`, and the stable release then takes the tag off the last
-rc. Only stable releases are counted when finding the newest in a line, so rc.1 never stands in
-rc.2's way, and neither of them holds 1.4.0 back:
+Each rc replaces the one before it on `v1.4`, and 1.4.0 then replaces the last rc. Only stable
+releases are counted when finding the newest in a line, so rc.1 does not block rc.2, and neither rc
+blocks 1.4.0:
 
 | Publishing | Stable releases so far | `v1` | `v1.4` |
 |---|---|---|---|
@@ -130,10 +129,9 @@ rc.2's way, and neither of them holds 1.4.0 back:
 | 1.4.0 | 1.3.0, 1.4.0 | moves to 1.4.0 | moves to 1.4.0, replacing rc.2 |
 | 1.4.1-rc.1 | 1.3.0, 1.4.0 | stays at 1.4.0 | stays at 1.4.0 |
 
-The last row is the rule at work in the other direction. A line that has never had a stable release
-is the whole test, not which version is higher, so once 1.4.0 has shipped the 1.4 line has a stable
-release in it and no later 1.4 prerelease can take either tag. Publishing an rc out of order behaves
-the same way:
+The last row follows from the same rule. The test is whether the line has ever had a stable release,
+not which version is higher, so once 1.4.0 has shipped the 1.4 line has a stable release in it and
+no later 1.4 prerelease can take either tag. Publishing an rc out of order behaves the same way:
 
 | Publishing | Stable releases | `v1` | `v1.4` |
 |---|---|---|---|
@@ -153,12 +151,17 @@ out the newest release of a line, so an outstanding 1.9.0-rc.1 does not hold `v1
 
 ## Repos with no Releases
 
-The comparison reads GitHub Releases through `gh release list`, not git tags, because that is where
-the prerelease and draft flags live. Drafts are left out, since their tag does not exist yet.
+Everything above, for stable and prereleases alike, is decided from the repository's GitHub
+Releases, read once through `gh release list`. Git tags are not used, because the prerelease and
+draft flags are not in them. Drafts are left out, since their tag does not exist yet.
 
-A repo that pushes tags without publishing Releases has nothing for the comparison to read. The
-release being published is then absent from the list, so nothing can be newer than it and the tags
-resolve on the tag name alone. The same path runs when the read fails outright, with a warning.
+A repo that pushes tags without publishing Releases has nothing for any of it to read. The release
+being published is itself absent from the list, so nothing can be newer than it and every requested
+tag resolves on the tag name alone. The same path runs when the read fails outright, with a warning
+rather than a failed job.
+
+No release is held back on such a repo, so the tags follow whatever was published most recently
+rather than whatever is newest. Publishing 1.2.5 after 1.3.0 moves `v1` to 1.2.5 there.
 
 The read is capped at the 200 most recent releases. They come back newest first, so the newest
 release of an older line is never the entry that falls off the end.

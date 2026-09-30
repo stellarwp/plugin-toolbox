@@ -84,7 +84,7 @@ runs:
 
           # Ask whether the ref exists rather than letting a failed PATCH fall through to a POST. A
           # PATCH also fails for a token without permission or a protected tag, and a fallback that
-          # swallowed the error would report those as success.
+          # ignored the error would report those as success.
           #
           # git/ref (singular) is the endpoint that 404s on a missing ref. git/refs (plural) matches
           # by prefix, so it answers 200 for `tags/v1` whenever 1.0.0 exists, with no v1 to update.
