@@ -28,6 +28,10 @@ jobs:
     steps:
       # Only so that the two `uses: ./` paths below resolve. Neither action reads the working tree,
       # so a repo calling them by their `@v1` path needs no checkout at all.
+      #
+      # No ref on purpose: the actions run at the released commit, not at the version on the default
+      # branch. A release event reads this workflow from the released commit too, so the workflow and
+      # the actions it calls are always the same revision.
       - uses: actions/checkout@v6
         with:
           fetch-depth: 1
