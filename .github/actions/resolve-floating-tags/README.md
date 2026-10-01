@@ -103,15 +103,14 @@ fine, since every version is compared with the `v` stripped.
 
 ## Versions below 1.0.0
 
-A 0.x release resolves `v0` and `v0.1`, and the lines are compared the same way as any other: a 0.1.2
-backport published while 0.2.0 is out moves `v0.1` and leaves `v0` on 0.2.0.
+A 0.x release resolves `v0` and `v0.1`. The lines are compared as any others are: a 0.1.2 backport
+published while 0.2.0 is out moves `v0.1` and leaves `v0` on 0.2.0.
 
-Semver puts breaking changes in the minor below 1.0.0, so `v0` can break where `v1` cannot. This
-repo offers it anyway. `v0` tracks the newest 0.x, and pinning it accepts that a minor release can
-break you.
+Semver puts breaking changes in the minor below 1.0.0, so `v0` carries them where `v1` does not.
+This repo writes `v0` regardless: it tracks the newest 0.x, and a consumer pinning it receives every
+0.x release, breaking or not.
 
-A repo that would rather not offer that sets `levels: minor`, which resolves `v0.1` and no `v0`,
-leaving consumers to pin a line that does not move across minors.
+`levels: minor` resolves `v0.1` and no `v0`, for a repo that does not want to publish a `v0`.
 
 ## Prereleases
 
