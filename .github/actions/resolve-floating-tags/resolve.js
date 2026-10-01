@@ -43,6 +43,16 @@ function toParts(version) {
  * which a string comparison gets right. Missing trailing parts count as zero, so 1.2.3 and 1.2.3.0
  * are the same version.
  *
+ * The semver package cannot express a version with four parts: 1.2.3.4 is invalid with or without
+ * its `loose` option, and comparing one throws. `coerce` drops the fourth part, so a 1.2.3.1 hotfix
+ * would compare equal to the 1.2.3 it patches and v1.2 would stop moving to a hotfix. A dependency
+ * would also have to be installed by every repository calling this action, since github-script
+ * resolves one from the calling repository's directory.
+ *
+ * semver does have prerelease precedence, ordering 1.4.0-rc.1 below 1.4.0, and this does not. No
+ * suffixed version reaches this function: releasedVersions keeps only numeric versions, and `core`
+ * has any suffix stripped. See Prereleases in the action's README.
+ *
  * @param {string} a A numeric version.
  * @param {string} b The version to compare it against.
  *
