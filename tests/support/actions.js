@@ -18,7 +18,14 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 
-/** Builds the JSON Response a rule describes. */
+/**
+ * Builds the Response a rule describes, as the API would have sent it.
+ *
+ * @param {number} status  HTTP status, defaulting to 200.
+ * @param {object} body    Value to send as the JSON body.
+ * @param {object} headers Extra headers, merged over the JSON content type.
+ * @returns {Response} The response for the fetch to return.
+ */
 function jsonResponse({ status = 200, body = {}, headers = {} }) {
   return new Response(JSON.stringify(body), {
     status,
@@ -85,7 +92,7 @@ function recordingFetch(rules = []) {
  * A real Octokit with the network replaced.
  *
  * @param {object[]} rules Passed to recordingFetch.
- * @returns {Promise<{github: object, requests: object[]}>}
+ * @returns {Promise<{github: object, requests: object[]}>} The client, and the requests it records.
  */
 async function octokitFor(rules = []) {
   const { getOctokit } = await import('@actions/github')
@@ -94,7 +101,16 @@ async function octokitFor(rules = []) {
   return { github: getOctokit('test-token', { request: { fetch } }), requests }
 }
 
-/** Reads back the outputs @actions/core appended to its GITHUB_OUTPUT file. */
+/**
+ * Reads back the outputs @actions/core appended to its GITHUB_OUTPUT file.
+ *
+ * core writes each one as a heredoc, `name<<delimiter`, the value, then the delimiter again, which
+ * is the format a later workflow step reads. Parsing it rather than recording the calls means the
+ * assertion is what the step actually handed on.
+ *
+ * @param {string} file Path to the GITHUB_OUTPUT file.
+ * @returns {object} Each output name mapped to its value.
+ */
 function readOutputs(file) {
   const outputs = {}
   const content = fs.readFileSync(file, 'utf8')
@@ -121,7 +137,8 @@ function readOutputs(file) {
  * before the runner reports the result.
  *
  * @param {object} t The node:test context, used to restore stdout afterwards.
- * @returns {Promise<{core: object, outputs: Function, logged: Function}>}
+ * @returns {Promise<{core: object, outputs: Function, logged: Function}>} The toolkit, a reader for
+ *          its outputs, and a reader for everything it wrote to the log.
  */
 async function coreWithOutputs(t) {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-output-')), 'output')
@@ -157,7 +174,8 @@ async function coreWithOutputs(t) {
  * @param {object}   t     The node:test context.
  * @param {object[]} rules Passed to recordingFetch.
  * @returns {Promise<{github: object, requests: object[], core: object, outputs: Function,
- *                    logged: Function}>}
+ *          logged: Function}>} Everything a test needs: the client, the requests it records, the
+ *          toolkit, and readers for its outputs and its log.
  */
 async function actionsFor(t, rules = []) {
   const { github, requests } = await octokitFor(rules)

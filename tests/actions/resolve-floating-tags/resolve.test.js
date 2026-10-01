@@ -15,12 +15,24 @@ const { actionsFor } = require('../../support/actions.js')
 const TAGS_PATH = /\/repos\/stellarwp\/plugin-toolbox\/tags(\?|$)/
 const RELEASE_PATH = (tag) => `/repos/stellarwp/plugin-toolbox/releases/tags/${tag}`
 
-/** A tag listing, as repos.listTags returns it. */
+/**
+ * A page of the tag listing, shaped the way repos.listTags returns it.
+ *
+ * @param {...string} names The tag names on this page.
+ * @returns {object[]} One listing entry per name.
+ */
 function tagPage(...names) {
   return names.map((name) => ({ name, commit: { sha: 'abc123' } }))
 }
 
-/** Rules for a repository whose tags come back in one page, with no release behind the tag. */
+/**
+ * Rules for a repository whose tags come back in a single page.
+ *
+ * @param {string[]} names   Every tag name the repository has.
+ * @param {object}   release `{tag, prerelease}` for the release behind that tag. Left out, the
+ *                           release lookup answers 404, as it does for a tag with no release.
+ * @returns {object[]} Rules for recordingFetch.
+ */
 function repoWith(names, release) {
   return [
     release
@@ -30,7 +42,12 @@ function repoWith(names, release) {
   ]
 }
 
-/** Returns the resolution as `tags | skipped`, so a case reads as one line. */
+/**
+ * Runs the pure resolution and flattens it, so a case reads as one line.
+ *
+ * @param {object} options Passed to resolveFloatingTags.
+ * @returns {string} The resolved tags and the skipped ones, separated by ` | `.
+ */
 function resolve(options) {
   const { tags, skipped } = resolveFloatingTags(options)
 

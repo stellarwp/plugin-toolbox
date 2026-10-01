@@ -15,7 +15,16 @@ const REF = {
   create: '/repos/stellarwp/plugin-toolbox/git/refs',
 }
 
-/** Rules that answer the existence check for `existing` and accept every write. */
+/**
+ * Rules that answer the existence check for `existing` and accept every write.
+ *
+ * A tag not in `existing` falls through to the default 404, which is what the action reads as "not
+ * there yet".
+ *
+ * @param {string[]} existing Tag names that already have a ref.
+ * @param {string}   base     Repository path the requests go to.
+ * @returns {object[]} Rules for recordingFetch.
+ */
 function rulesFor(existing = [], base = '/repos/stellarwp/plugin-toolbox') {
   return [
     ...existing.map((tag) => ({
@@ -28,7 +37,12 @@ function rulesFor(existing = [], base = '/repos/stellarwp/plugin-toolbox') {
   ]
 }
 
-/** Each request as `METHOD path`, for asserting the order the action worked in. */
+/**
+ * Each request as `METHOD path`, for asserting the order the action worked in.
+ *
+ * @param {object[]} requests The requests recordingFetch recorded.
+ * @returns {string[]} One `METHOD path` per request, in the order they were sent.
+ */
 function sequence(requests) {
   return requests.map((request) => `${request.method} ${request.path}`)
 }

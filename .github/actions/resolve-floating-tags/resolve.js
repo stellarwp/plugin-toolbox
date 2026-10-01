@@ -18,11 +18,20 @@ const LEVEL_DEPTHS = { major: 1, minor: 2 }
  * Turns a tag name into the version it stands for: drops a leading `v` and any build metadata.
  * A prerelease suffix is left in place, so the result of a prerelease tag fails NUMERIC_VERSION
  * and is excluded from every comparison.
+ *
+ * @param {string} tagName A tag name, e.g. `v1.2.3`, `1.4.0+build.7` or `1.4.0-rc.1`.
+ * @returns {string} The version it stands for, e.g. `1.2.3`, `1.4.0` or `1.4.0-rc.1`.
  */
 function toVersion(tagName) {
   return tagName.replace(/^v/, '').replace(/\+.*$/, '')
 }
 
+/**
+ * Splits a version into its numbers, for comparing one part against another.
+ *
+ * @param {string} version A numeric version, e.g. `1.2.3`.
+ * @returns {number[]} Its parts, e.g. `[1, 2, 3]`.
+ */
 function toParts(version) {
   return version.split('.').map(Number)
 }
@@ -31,6 +40,10 @@ function toParts(version) {
  * Orders two versions by their numbers. 1.10.0 is above 1.9.0, and 1.2.3.1 above 1.2.3, neither of
  * which a string comparison gets right. Missing trailing parts count as zero, so 1.2.3 and 1.2.3.0
  * are the same version.
+ *
+ * @param {string} a A numeric version.
+ * @param {string} b The version to compare it against.
+ * @returns {number} -1 when `a` is lower, 1 when it is higher, 0 when they are the same version.
  */
 function compareVersions(a, b) {
   const left = toParts(a)
@@ -51,6 +64,10 @@ function compareVersions(a, b) {
  * parts, and a member has to carry at least one part beyond them: 1.2.3 and 1.2.3.1 are both in the
  * 1.2 line, 1.2 itself is not, and neither is 122.3.4. Comparing part by part is what keeps a
  * longer number out of a shorter line.
+ *
+ * @param {string}   version    A numeric version, e.g. `1.2.3`.
+ * @param {number[]} linePrefix The numbers naming the line, e.g. `[1, 2]` for the v1.2 tag.
+ * @returns {boolean} Whether the version is a release of that line.
  */
 function isInLine(version, linePrefix) {
   const parts = toParts(version)
@@ -197,7 +214,18 @@ function resolveFloatingTags({
   return { tags, skipped, version, notices }
 }
 
-/** Every tag name in the repository. An unreadable list resolves on the released tag alone. */
+/**
+ * Every tag name in the repository, over as many pages as it takes.
+ *
+ * A failure is reported as a warning rather than thrown, because resolving from the released tag
+ * alone is better than failing the release: see the action's README.
+ *
+ * @param {object} github An Octokit, as actions/github-script supplies it.
+ * @param {object} core   The @actions/core toolkit, for the warning.
+ * @param {string} owner  The repository owner.
+ * @param {string} repo   The repository name.
+ * @returns {Promise<string[]>} The tag names, or an empty list when they could not be read.
+ */
 async function readTagNames({ github, core, owner, repo }) {
   try {
     const tags = await github.paginate(github.rest.repos.listTags, { owner, repo, per_page: 100 })
@@ -214,8 +242,18 @@ async function readTagNames({ github, core, owner, repo }) {
 }
 
 /**
- * Whether GitHub marks this release as a prerelease. A tag with no release behind it answers
- * nothing, which counts as not a prerelease.
+ * Whether GitHub marks the release behind a tag as a prerelease.
+ *
+ * A tag with no release behind it answers 404, which counts as not a prerelease, so a repository
+ * that pushes tags without publishing Releases still resolves. Any other failure is warned about
+ * and also read as not a prerelease.
+ *
+ * @param {object} github An Octokit, as actions/github-script supplies it.
+ * @param {object} core   The @actions/core toolkit, for the warning.
+ * @param {string} owner  The repository owner.
+ * @param {string} repo   The repository name.
+ * @param {string} tag    The tag to look the release up by.
+ * @returns {Promise<boolean>} Whether that release is marked as a prerelease.
  */
 async function readPrereleaseFlag({ github, core, owner, repo, tag }) {
   try {
@@ -231,6 +269,14 @@ async function readPrereleaseFlag({ github, core, owner, repo, tag }) {
   }
 }
 
+/**
+ * Reads what the repository has, resolves the floating tags and writes the action's outputs.
+ *
+ * @param {object} github An Octokit, as actions/github-script supplies it.
+ * @param {object} core   The @actions/core toolkit, for the log and the outputs.
+ * @param {object} env    The environment the action manifest put its inputs in.
+ * @returns {Promise<void>} Resolves once the outputs are set.
+ */
 async function run({ github, core, env }) {
   const repository = env.INPUT_REPOSITORY || env.GITHUB_REPOSITORY
   const [owner, repo] = repository.split('/')
