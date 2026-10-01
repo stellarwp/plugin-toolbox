@@ -176,15 +176,15 @@ describe('resolve-floating-tags', () => {
     const tagNames = ['1.2.1', '1.3.0']
 
     it('resolves only the major when asked for it', () => {
-      assert.equal(resolve({ tag: '1.3.0', levels: 'major', tagNames }), 'v1 | ')
+      assert.equal(resolve({ tag: '1.3.0', tagNames, levels: 'major' }), 'v1 | ')
     })
 
     it('resolves only the minor when asked for it', () => {
-      assert.equal(resolve({ tag: '1.3.0', levels: 'minor', tagNames }), 'v1.3 | ')
+      assert.equal(resolve({ tag: '1.3.0', tagNames, levels: 'minor' }), 'v1.3 | ')
     })
 
     it('ignores the order they are written in, and a repeat', () => {
-      assert.equal(resolve({ tag: '1.3.0', levels: 'minor major minor', tagNames }), 'v1 v1.3 | ')
+      assert.equal(resolve({ tag: '1.3.0', tagNames, levels: 'minor major minor' }), 'v1 v1.3 | ')
     })
 
     it('fails on an unknown level rather than resolving a shorter set', () => {
@@ -213,7 +213,7 @@ describe('resolve-floating-tags', () => {
 
     it('resolves nothing for a plain version GitHub marks as a prerelease', () => {
       assert.equal(
-        resolve({ tag: '1.3.0', tagNames: ['1.2.1', '1.3.0'], flaggedPrerelease: true }),
+        resolve({ tag: '1.3.0', flaggedPrerelease: true, tagNames: ['1.2.1', '1.3.0'] }),
         ' | '
       )
     })
@@ -258,8 +258,8 @@ describe('resolve-floating-tags', () => {
         assert.equal(
           resolve({
             tag: '1.3.0',
-            tagNames: ['1.2.1', '1.3.0'],
             flaggedPrerelease: true,
+            tagNames: ['1.2.1', '1.3.0'],
             allowPrereleases,
           }),
           'v1.3 | v1'

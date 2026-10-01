@@ -82,11 +82,12 @@ function isInLine(version, linePrefix) {
 /**
  * Decides the floating tags for one release.
  *
- * @param {string}   tag                 The release tag, with or without a leading `v`.
- * @param {string}   levels              Space separated level names, e.g. `major minor`.
- * @param {boolean}  allowPrereleases    Let a prerelease own a tag whose line has had no release.
- * @param {string[]} tagNames            Every tag name in the repository.
- * @param {boolean}  flaggedPrerelease   Whether GitHub marks this release as a prerelease.
+ * @param {string}   tag               The release tag, with or without a leading `v`.
+ * @param {boolean}  flaggedPrerelease Whether GitHub marks that release as a prerelease.
+ * @param {string[]} tagNames          Every tag name in the repository, to compare the release
+ *                                     against.
+ * @param {string}   levels            Space separated level names, e.g. `major minor`.
+ * @param {boolean}  allowPrereleases  Let a prerelease own a tag whose line has had no release.
  *
  * @throws {Error} When levels names something other than a known level.
  *
@@ -96,10 +97,10 @@ function isInLine(version, linePrefix) {
  */
 function resolveFloatingTags({
   tag,
+  flaggedPrerelease = false,
+  tagNames = [],
   levels = 'major minor',
   allowPrereleases = false,
-  tagNames = [],
-  flaggedPrerelease = false,
 }) {
   const notices = []
   const nothingToDo = (reason) => {
@@ -298,10 +299,10 @@ async function run({ github, core, env }) {
 
   const resolved = resolveFloatingTags({
     tag,
+    flaggedPrerelease,
+    tagNames,
     levels: env.INPUT_LEVELS,
     allowPrereleases: env.INPUT_ALLOW_PRERELEASES === 'true',
-    tagNames,
-    flaggedPrerelease,
   })
 
   for (const notice of resolved.notices) {
