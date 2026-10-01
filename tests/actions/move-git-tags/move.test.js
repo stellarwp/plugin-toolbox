@@ -4,7 +4,7 @@ const { describe, it } = require('node:test')
 const assert = require('node:assert')
 
 const { moveTags, parseTagNames, run } = require('../../../.github/actions/move-git-tags/move.js')
-const { octokitFor, coreWithOutputs } = require('../../support/actions.js')
+const { actionsFor } = require('../../support/actions.js')
 
 const REPO = { owner: 'stellarwp', repo: 'plugin-toolbox' }
 
@@ -63,23 +63,23 @@ describe('move-git-tags', () => {
   })
 
   describe('moveTags', () => {
-    it('reads each ref from the single-ref endpoint, not the prefix one', async () => {
+    it('reads each ref from the single-ref endpoint, not the prefix one', async (t) => {
       // git/ref answers 404 for a missing ref. git/refs matches by prefix, so it would answer for
       // tags/v1 whenever a v1.0.0 tag exists, and no tag would ever look missing.
-      const { github, requests } = await octokitFor(rulesFor(['v1']))
+      const { github, requests, core } = await actionsFor(t, rulesFor(['v1']))
 
-      await moveTags({ github, core: await quietCore(), ...REPO, names: ['v1'], sha: 'abc123' })
+      await moveTags({ github, core, ...REPO, names: ['v1'], sha: 'abc123' })
 
       assert.equal(requests[0].method, 'GET')
       assert.equal(requests[0].path, '/repos/stellarwp/plugin-toolbox/git/ref/tags%2Fv1')
     })
 
-    it('repoints an existing tag with a forced update, and creates a missing one', async () => {
-      const { github, requests } = await octokitFor(rulesFor(['v1']))
+    it('repoints an existing tag with a forced update, and creates a missing one', async (t) => {
+      const { github, requests, core } = await actionsFor(t, rulesFor(['v1']))
 
       const result = await moveTags({
         github,
-        core: await quietCore(),
+        core,
         ...REPO,
         names: ['v1', 'v1.2'],
         sha: 'abc123',
@@ -94,12 +94,12 @@ describe('move-git-tags', () => {
       ])
     })
 
-    it('sends the sha and force on an update, and the full ref on a creation', async () => {
-      const { github, requests } = await octokitFor(rulesFor(['v1']))
+    it('sends the sha and force on an update, and the full ref on a creation', async (t) => {
+      const { github, requests, core } = await actionsFor(t, rulesFor(['v1']))
 
       await moveTags({
         github,
-        core: await quietCore(),
+        core,
         ...REPO,
         names: ['v1', 'v1.2'],
         sha: 'abc123',
@@ -111,12 +111,13 @@ describe('move-git-tags', () => {
       assert.deepEqual(create.body, { ref: 'refs/tags/v1.2', sha: 'abc123' })
     })
 
-    it('writes to the repository it was given', async () => {
-      const { github, requests } = await octokitFor(rulesFor([], '/repos/another-owner/another-repo'))
+    it('writes to the repository it was given', async (t) => {
+      const base = '/repos/another-owner/another-repo'
+      const { github, requests, core } = await actionsFor(t, rulesFor([], base))
 
       await moveTags({
         github,
-        core: await quietCore(),
+        core,
         owner: 'another-owner',
         repo: 'another-repo',
         names: ['v9'],
@@ -129,29 +130,29 @@ describe('move-git-tags', () => {
       )
     })
 
-    it('fails on a refused update rather than retrying it as a creation', async () => {
+    it('fails on a refused update rather than retrying it as a creation', async (t) => {
       // A 403 from a protected tag must not be read as "does not exist yet", which is what an
       // update-then-create-on-failure fallback would do.
-      const { github, requests } = await octokitFor([
+      const { github, requests, core } = await actionsFor(t, [
         { method: 'GET', path: REF.read('v1'), body: { ref: 'refs/tags/v1' } },
         { method: 'PATCH', path: /\/git\/refs\/tags%2F/, status: 403, body: { message: 'Forbidden' } },
       ])
 
       await assert.rejects(
-        moveTags({ github, core: await quietCore(), ...REPO, names: ['v1'], sha: 'abc123' }),
+        moveTags({ github, core, ...REPO, names: ['v1'], sha: 'abc123' }),
         /Forbidden/
       )
 
       assert.ok(!sequence(requests).some((call) => call.startsWith('POST')), 'nothing was created')
     })
 
-    it('does not treat a failure other than 404 as a missing tag', async () => {
-      const { github, requests } = await octokitFor([
+    it('does not treat a failure other than 404 as a missing tag', async (t) => {
+      const { github, requests, core } = await actionsFor(t, [
         { method: 'GET', path: /\/git\/ref\//, status: 401, body: { message: 'Bad credentials' } },
       ])
 
       await assert.rejects(
-        moveTags({ github, core: await quietCore(), ...REPO, names: ['v1'], sha: 'abc123' }),
+        moveTags({ github, core, ...REPO, names: ['v1'], sha: 'abc123' }),
         /Bad credentials/
       )
 
@@ -160,9 +161,8 @@ describe('move-git-tags', () => {
   })
 
   describe('run', () => {
-    it('succeeds on an empty tag list without sending a request', async () => {
-      const { github, requests } = await octokitFor()
-      const { core, outputs } = await coreWithOutputs()
+    it('succeeds on an empty tag list without sending a request', async (t) => {
+      const { github, requests, core, outputs } = await actionsFor(t)
 
       await run({
         github,
@@ -174,9 +174,8 @@ describe('move-git-tags', () => {
       assert.deepEqual(outputs(), { created: '', moved: '' })
     })
 
-    it('defaults the sha and repository to the workflow it is running in', async () => {
-      const { github, requests } = await octokitFor(rulesFor([]))
-      const { core, outputs } = await coreWithOutputs()
+    it('defaults the sha and repository to the workflow it is running in', async (t) => {
+      const { github, requests, core, outputs } = await actionsFor(t, rulesFor([]))
 
       await run({
         github,
@@ -193,9 +192,9 @@ describe('move-git-tags', () => {
       assert.deepEqual(outputs(), { created: 'v2', moved: '' })
     })
 
-    it('prefers the sha and repository it is given', async () => {
-      const { github, requests } = await octokitFor(rulesFor(['v2'], '/repos/stellarwp/other'))
-      const { core, outputs } = await coreWithOutputs()
+    it('prefers the sha and repository it is given', async (t) => {
+      const rules = rulesFor(['v2'], '/repos/stellarwp/other')
+      const { github, requests, core, outputs } = await actionsFor(t, rules)
 
       await run({
         github,
@@ -217,15 +216,14 @@ describe('move-git-tags', () => {
       assert.deepEqual(outputs(), { created: '', moved: 'v2' })
     })
 
-    it('moves a release tag alongside the floating tags, to a commit made later', async () => {
+    it('moves a release tag alongside the floating tags, to a commit made later', async (t) => {
       /**
        * The pattern a repo with a build step uses: resolve the floating tags from the released tag,
        * build and commit, then point the release tag and the floating tags at the build commit. The
        * release tag is just another name to this action, and the sha is an input rather than the
        * commit the workflow started on.
        */
-      const { github, requests } = await octokitFor(rulesFor(['v1.2.3', 'v1']))
-      const { core, outputs } = await coreWithOutputs()
+      const { github, requests, core, outputs } = await actionsFor(t, rulesFor(['v1.2.3', 'v1']))
 
       await run({
         github,
@@ -257,9 +255,3 @@ describe('move-git-tags', () => {
   })
 })
 
-/** The real @actions/core, for a test that asserts requests rather than outputs. */
-async function quietCore() {
-  const { core } = await coreWithOutputs()
-
-  return core
-}

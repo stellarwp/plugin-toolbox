@@ -10,7 +10,7 @@ const {
   isInLine,
   toVersion,
 } = require('../../../.github/actions/resolve-floating-tags/resolve.js')
-const { octokitFor, coreWithOutputs } = require('../../support/actions.js')
+const { actionsFor } = require('../../support/actions.js')
 
 const TAGS_PATH = /\/repos\/stellarwp\/plugin-toolbox\/tags(\?|$)/
 const RELEASE_PATH = (tag) => `/repos/stellarwp/plugin-toolbox/releases/tags/${tag}`
@@ -292,8 +292,8 @@ describe('resolve-floating-tags', () => {
   })
 
   describe('run', () => {
-    it('reads every tag, following pagination to the last page', async () => {
-      const { github, requests } = await octokitFor([
+    it('reads every tag, following pagination to the last page', async (t) => {
+      const { github, requests, core, outputs } = await actionsFor(t, [
         { method: 'GET', path: /\/releases\/tags\//, status: 404, body: { message: 'Not Found' } },
         {
           method: 'GET',
@@ -311,7 +311,6 @@ describe('resolve-floating-tags', () => {
           ],
         },
       ])
-      const { core, outputs } = await coreWithOutputs()
 
       await run({
         github,
@@ -327,11 +326,11 @@ describe('resolve-floating-tags', () => {
       assert.deepEqual(outputs(), { tags: 'v1.2', skipped: 'v1', version: '1.2.0' })
     })
 
-    it('asks the Releases API about the tag it was given', async () => {
-      const { github, requests } = await octokitFor(
+    it('asks the Releases API about the tag it was given', async (t) => {
+      const { github, requests, core, outputs } = await actionsFor(
+        t,
         repoWith(['1.2.1', '1.3.0'], { tag: 'v1.3.0', prerelease: false })
       )
-      const { core, outputs } = await coreWithOutputs()
 
       await run({
         github,
@@ -350,11 +349,11 @@ describe('resolve-floating-tags', () => {
       assert.deepEqual(outputs(), { tags: 'v1 v1.3', skipped: '', version: '1.3.0' })
     })
 
-    it('honours the prerelease flag the Releases API reports', async () => {
-      const { github } = await octokitFor(
+    it('honours the prerelease flag the Releases API reports', async (t) => {
+      const { github, core, outputs, logged } = await actionsFor(
+        t,
         repoWith(['1.2.1', '1.3.0'], { tag: '1.3.0', prerelease: true })
       )
-      const { core, outputs } = await coreWithOutputs()
 
       await run({
         github,
@@ -367,11 +366,11 @@ describe('resolve-floating-tags', () => {
       })
 
       assert.deepEqual(outputs(), { tags: '', skipped: '', version: '' })
+      assert.match(logged(), /::notice::Resolved no floating tags: 1\.3\.0 is a prerelease/)
     })
 
-    it('reads a tag with no release behind it as not a prerelease', async () => {
-      const { github } = await octokitFor(repoWith(['1.2.1', '1.3.0']))
-      const { core, outputs } = await coreWithOutputs()
+    it('reads a tag with no release behind it as not a prerelease', async (t) => {
+      const { github, core, outputs } = await actionsFor(t, repoWith(['1.2.1', '1.3.0']))
 
       await run({
         github,
@@ -386,12 +385,11 @@ describe('resolve-floating-tags', () => {
       assert.deepEqual(outputs(), { tags: 'v1 v1.3', skipped: '', version: '1.3.0' })
     })
 
-    it('resolves on the tag alone when the tags cannot be read', async () => {
-      const { github } = await octokitFor([
+    it('resolves on the tag alone when the tags cannot be read', async (t) => {
+      const { github, core, outputs, logged } = await actionsFor(t, [
         { method: 'GET', path: /\/releases\/tags\//, status: 404, body: { message: 'Not Found' } },
         { method: 'GET', path: TAGS_PATH, status: 403, body: { message: 'Forbidden' } },
       ])
-      const { core, outputs } = await coreWithOutputs()
 
       await run({
         github,
@@ -408,14 +406,14 @@ describe('resolve-floating-tags', () => {
         { tags: 'v1 v1.2', skipped: '', version: '1.2.5' },
         'nothing is held back, because nothing could be compared'
       )
+      assert.match(logged(), /::warning::Could not read stellarwp\/plugin-toolbox's tags/)
     })
 
-    it('reads the repository it was given', async () => {
-      const { github, requests } = await octokitFor([
+    it('reads the repository it was given', async (t) => {
+      const { github, requests, core } = await actionsFor(t, [
         { method: 'GET', path: /\/releases\/tags\//, status: 404, body: { message: 'Not Found' } },
         { method: 'GET', path: /\/repos\/stellarwp\/other\/tags(\?|$)/, body: tagPage('1.3.0') },
       ])
-      const { core } = await coreWithOutputs()
 
       await run({
         github,

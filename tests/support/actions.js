@@ -109,21 +109,61 @@ function readOutputs(file) {
 }
 
 /**
- * The real @actions/core, pointed at a fresh GITHUB_OUTPUT file.
+ * The real @actions/core, pointed at a fresh GITHUB_OUTPUT file, with its log captured.
  *
  * setOutput reads GITHUB_OUTPUT on every call, so pointing it at a new file per test keeps the
  * outputs of one test out of another even though the module itself is cached.
  *
- * @returns {Promise<{core: object, outputs: Function}>} The toolkit, and a reader for its outputs.
+ * info, notice and warning write to stdout, and notice and warning write the `::notice::` and
+ * `::warning::` commands the runner turns into annotations on the job. Left alone, a passing test
+ * run annotates its own workflow with the messages the actions logged. Collecting the writes instead
+ * keeps the run clean and lets a test assert what was logged. stdout is restored when the test ends,
+ * before the runner reports the result.
+ *
+ * @param {object} t The node:test context, used to restore stdout afterwards.
+ * @returns {Promise<{core: object, outputs: Function, logged: Function}>}
  */
-async function coreWithOutputs() {
+async function coreWithOutputs(t) {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-output-')), 'output')
   fs.writeFileSync(file, '')
   process.env.GITHUB_OUTPUT = file
 
   const core = await import('@actions/core')
 
-  return { core, outputs: () => readOutputs(file) }
+  const written = []
+  const realWrite = process.stdout.write.bind(process.stdout)
+
+  process.stdout.write = (chunk, encoding, callback) => {
+    written.push(String(chunk))
+
+    const done = typeof encoding === 'function' ? encoding : callback
+    if (typeof done === 'function') {
+      done()
+    }
+
+    return true
+  }
+
+  t.after(() => {
+    process.stdout.write = realWrite
+  })
+
+  return { core, outputs: () => readOutputs(file), logged: () => written.join('') }
 }
 
-module.exports = { octokitFor, coreWithOutputs, recordingFetch, readOutputs }
+/**
+ * Both arguments actions/github-script passes to a script, ready for one test.
+ *
+ * @param {object}   t     The node:test context.
+ * @param {object[]} rules Passed to recordingFetch.
+ * @returns {Promise<{github: object, requests: object[], core: object, outputs: Function,
+ *                    logged: Function}>}
+ */
+async function actionsFor(t, rules = []) {
+  const { github, requests } = await octokitFor(rules)
+  const { core, outputs, logged } = await coreWithOutputs(t)
+
+  return { github, requests, core, outputs, logged }
+}
+
+module.exports = { actionsFor, octokitFor, coreWithOutputs, recordingFetch, readOutputs }
