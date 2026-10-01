@@ -89,7 +89,7 @@ Composer is unavailable.
 |---|---|---|---|
 | `target` | yes | | The `slic use` target |
 | `php-version` | recommended | slic resolves it | PHP version to set in slic, e.g. `8.3`. See [PHP version](#php-version) |
-| `here-dir` | no | the workspace | Directory `slic here` runs in. Must be the parent of the target checkout |
+| `here-dir` | no | the workspace | Plugin-checkout parent, themes directory, or site root. See [Checkout layout](#checkout-layout) |
 | `ref` | no | `main` | slic branch, tag or commit |
 | `slic-repository` | no | `stellarwp/slic` | Repository to check slic out from |
 | `slic-path` | no | `slic` | Path in the workspace to check slic out into |
@@ -211,7 +211,8 @@ version and requires more complex arguments.
 
 Setup configures the cache directory before starting Slic, then restores downloads after verifying
 PHP and before dependency installation. It registers a post-job save using
-`actions/cache@v6`. Composer still installs dependencies on every run; `vendor/` is not cached.
+`actions/cache@v6`. Requested `composer-install` entries still run on cache hits; `vendor/` is not
+cached. If `composer-install` is empty, setup does not install dependencies.
 No extra cache step or directory input is needed for normal usage:
 
 ```yaml
@@ -287,9 +288,9 @@ or fixtures. Do that in a `run:` step between this action and
 
 - name: Set the site up for the suite
   run: |
-    ${SLIC_BIN} wp theme install twentytwenty --activate
-    ${SLIC_BIN} wp plugin install elementor --activate
-    ${SLIC_BIN} wp plugin install woocommerce --version=8.5.0
+    "${SLIC_BIN}" wp theme install twentytwenty --activate
+    "${SLIC_BIN}" wp plugin install elementor --activate
+    "${SLIC_BIN}" wp plugin install woocommerce --version=8.5.0
 ```
 
 ## Debug
@@ -361,8 +362,9 @@ jobs on a shared Docker daemon safe.
 
 ## Checkout layout
 
-`slic here` takes no path argument. It reads the current working directory and makes it slic's
-plugins directory, so the target checkout has to be a child of it. That drives `here-dir`.
+`here-dir` is where the action runs `slic here`. For plugins, use the parent of the checkout;
+for themes, use the `themes` directory; for a site, use the WordPress root containing
+`wp-config.php` and `wp-content` or `content`.
 
 ### Target checked out into a subdirectory
 
@@ -398,7 +400,6 @@ The workspace is the target, so `here-dir` has to be its parent.
     composer-install: |
       the-events-calendar/common --no-dev
       the-events-calendar
-    composer-cache-dir: /home/runner/.cache/composer
 ```
 
 On this layout slic itself is checked out into `slic/` inside the target. Set `slic-path` if that
@@ -422,3 +423,24 @@ leaves it pointing at slic's own themes directory, where the checkout is not.
     target: my-theme
     here-dir: ${{ github.workspace }}/themes
 ```
+
+### Site target
+
+Use `target: site` and point `here-dir` at the checked-out WordPress site root. Unlike plugin
+layouts, this is the site directory itself, not its parent. It must contain `wp-config.php` and a
+`wp-content` or `content` directory before setup runs.
+
+```yaml
+- uses: actions/checkout@v6
+  with:
+    path: my-site
+
+- uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1
+  with:
+    php-version: '8.3'
+    target: site
+    here-dir: ${{ github.workspace }}/my-site
+    composer-install: site
+```
+
+Omit `composer-install` if the site has no Composer dependencies to install.

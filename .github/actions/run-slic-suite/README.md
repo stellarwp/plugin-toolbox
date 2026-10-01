@@ -29,7 +29,7 @@ as a command.
 | `suite-args` | no | `''` | Extra arguments for `slic run`, e.g. `--ext DotReporter` |
 | `debug` | no | `'false'` | Append Codeception's `--debug` flag for this suite |
 | `upload-output-on-failure` | no | `'false'` | Upload the test output directory when the suite fails |
-| `output-path` | no | `<target>/tests/_output/` | Directory to upload |
+| `output-path` | no | Selected project's `tests/_output` directory | Override with an absolute path or a path relative to the workspace |
 | `output-artifact-name` | no | see [Artifact names](#artifact-names) | Name of the uploaded artifact |
 
 ## Debug output
@@ -57,32 +57,72 @@ filename expansion, but that does not change Slic's downstream command handling.
 
 ## Artifact names
 
-The default is `test-output-<target>-php<version>-<suite>`, where the version is read from
-`SLIC_PHP_VERSION`, which [setup-slic](../setup-slic/) exports as `major.minor` once it knows which
-PHP the stack is running. Characters an
-artifact name cannot hold are replaced with `-`, so a target such as `the-events-calendar/common`
-becomes `the-events-calendar-common`.
+The default name includes the target, PHP version, suite, job ID, matrix index, run attempt, and
+a unique step identifier. This keeps outputs separate across WordPress/PHP matrix entries,
+repeated suite invocations, and reruns. Unsupported characters in the generated name are replaced
+with `-`. Earlier attempts' artifacts remain available until their retention period expires.
 
-The name carries all three dimensions because the upload passes `overwrite: true`. That is what lets
-a re-run of a failed job replace the output from its earlier attempt, since artifacts belong to the
-workflow run rather than the attempt. The same setting means two jobs sharing a name would not
-collide loudly: the later upload would delete the earlier job's output. A job that varies on
-something beyond target, PHP version and suite therefore has to set `output-artifact-name`.
+Use `output-artifact-name` when you need a specific name. Explicit names are used as supplied,
+with `overwrite: true`; include the dimensions that distinguish your jobs if you do not want one
+upload to replace another.
 
 ## Output path
 
-`output-path` is relative to the workspace, not to the target. It defaults to
-`<target>/tests/_output/`, which is correct when the target is checked out into a subdirectory named
-after it. Set it explicitly on any other layout:
+With `upload-output-on-failure: 'true'`, the action asks Slic for the selected project's host path
+and uploads its `tests/_output` directory on failure. This handles root checkouts, subdirectories,
+themes, and sites without repeating the checkout layout in the suite step. If Slic omits the host
+path for a custom layout and it cannot be resolved as a built-in plugin target, the action asks
+for an explicit `output-path` rather than guessing.
+
+Set `output-path` only when your tests write elsewhere. An explicit relative path is relative to
+the workspace, not the project. Absolute paths are also supported:
 
 ```yaml
 - uses: stellarwp/plugin-toolbox/.github/actions/run-slic-suite@v1
   with:
-    suite: ${{ matrix.suite }}
-    suite-args: --ext DotReporter
-    output-path: tests/_output/
+    suite: wpunit
+    output-path: custom-test-output/
     upload-output-on-failure: 'true'
 ```
+
+## Multiple suites in one job
+
+Set up once, run each suite, then clean up once. This example assumes a persistent Linux runner
+with the required tools and a Docker daemon dedicated to the job:
+
+```yaml
+jobs:
+  tests:
+    runs-on: [self-hosted, linux]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: my-plugin
+
+      - uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1
+        with:
+          target: my-plugin
+          php-version: '8.3'
+          composer-install: my-plugin
+
+      - uses: stellarwp/plugin-toolbox/.github/actions/run-slic-suite@v1
+        with:
+          suite: wpunit
+          upload-output-on-failure: 'true'
+
+      - uses: stellarwp/plugin-toolbox/.github/actions/run-slic-suite@v1
+        with:
+          suite: integration
+          upload-output-on-failure: 'true'
+
+      - name: Clean up slic
+        if: always()
+        uses: stellarwp/plugin-toolbox/.github/actions/cleanup-slic@v1
+```
+
+Normal GitHub step conditions apply: if the first suite fails, the next suite is skipped and
+cleanup still runs. Both suites use the same stack; project-specific fixture resets belong in
+your tests or an intervening workflow step. On ephemeral runners, the final cleanup step is optional.
 
 ## Cleanup
 

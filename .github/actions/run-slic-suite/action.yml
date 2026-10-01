@@ -28,15 +28,14 @@ inputs:
     default: 'false'
   output-path:
     description: >-
-      Path from the workspace to the directory the suite writes output to. Defaults to
-      `<target>/tests/_output/`.
+      Custom test output directory, absolute or relative to the workspace. Defaults to
+      `tests/_output` inside the selected project's actual directory.
     required: false
     default: ''
   output-artifact-name:
     description: >-
-      Name of the uploaded artifact. Defaults to `test-output-<target>-php<version>-<suite>`, reading the
-      version setup-slic pinned the stack to, so a matrix over PHP versions names each leg without
-      repeating the value here.
+      Custom artifact name. The default includes target, PHP, suite, job, matrix index, run attempt,
+      and a unique step identifier so separate runs do not overwrite each other's output.
     required: false
     default: ''
 
@@ -57,6 +56,8 @@ runs:
         TARGET: ${{ inputs.target }}
         ARTIFACT_NAME: ${{ inputs.output-artifact-name }}
         OUTPUT_PATH: ${{ inputs.output-path }}
+        UPLOAD_OUTPUT: ${{ inputs.upload-output-on-failure }}
+        MATRIX_JOB_INDEX: ${{ strategy.job-index }}
       run: |
         if [ -z "${SLIC_BIN:-}" ]; then
           echo "::error::SLIC_BIN is not set. Run the setup-slic action earlier in this job."
@@ -72,39 +73,28 @@ runs:
           exit 1
         fi
 
-        # Resolve the artifact name and path before the suite runs: the upload step
-        # needs them on the run that fails, and a step's outputs survive its failure
-        # only for what it wrote before failing.
-        if [ -z "${OUTPUT_PATH}" ]; then
-          OUTPUT_PATH="${TARGET}/tests/_output/"
+        source "${GITHUB_ACTION_PATH}/../slic-target.sh"
+        select_slic_target "${TARGET}"
+
+        # Resolve the artifact location before testing, while the selected target is known.
+        if [ -z "${OUTPUT_PATH}" ] && [ "${UPLOAD_OUTPUT}" == "true" ]; then
+          project_path=$(slic_target_path "${TARGET}")
+          OUTPUT_PATH="${project_path}/tests/_output"
         fi
 
-        # The name carries every dimension a job can vary: the target, the PHP version
-        # setup-slic pinned the stack to, and the suite. The upload overwrites a
-        # matching name so re-running a failed job replaces its own output from the
-        # earlier attempt, which means a name shared with a different job would
-        # destroy that job's output instead.
         if [ -z "${ARTIFACT_NAME}" ]; then
-          # An artifact name cannot contain / : < > | * ? " or \, and a target can be
-          # a subdirectory such as the-events-calendar/common.
-          safe_target="$(printf '%s' "${TARGET}" | tr -c 'a-zA-Z0-9._-' '-')"
-
-          ARTIFACT_NAME="test-output-${safe_target}"
-
-          if [ -n "${SLIC_PHP_VERSION:-}" ]; then
-            ARTIFACT_NAME="${ARTIFACT_NAME}-php${SLIC_PHP_VERSION}"
-          fi
-
-          ARTIFACT_NAME="${ARTIFACT_NAME}-${SUITE}"
+          # GITHUB_OUTPUT is unique to each step, including repeated uses of this composite action.
+          invocation_id="${GITHUB_OUTPUT##*/}"
+          invocation_id="${invocation_id#set_output_}"
+          ARTIFACT_NAME="test-output-${TARGET}-php${SLIC_PHP_VERSION:-unknown}-${SUITE}"
+          ARTIFACT_NAME+="-${GITHUB_JOB:-job}-matrix${MATRIX_JOB_INDEX:-0}-attempt${GITHUB_RUN_ATTEMPT:-1}-${invocation_id}"
+          ARTIFACT_NAME="$(printf '%s' "${ARTIFACT_NAME}" | tr -c 'a-zA-Z0-9._-' '-')"
         fi
 
         {
           echo "artifact-name=${ARTIFACT_NAME}"
           echo "output-path=${OUTPUT_PATH}"
         } >> "$GITHUB_OUTPUT"
-
-        source "${GITHUB_ACTION_PATH}/../slic-target.sh"
-        select_slic_target "${TARGET}"
 
         debug_args=()
 
