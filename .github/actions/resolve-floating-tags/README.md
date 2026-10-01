@@ -107,10 +107,13 @@ A 0.x release resolves `v0` and `v0.1`. The lines are compared as any others are
 published while 0.2.0 is out moves `v0.1` and leaves `v0` on 0.2.0.
 
 Semver puts breaking changes in the minor below 1.0.0, so `v0` carries them where `v1` does not.
-This repo writes `v0` regardless: it tracks the newest 0.x, and a consumer pinning it receives every
-0.x release, breaking or not.
 
-`levels: minor` resolves `v0.1` and no `v0`, for a repo that does not want to publish a `v0`.
+Both tags are resolved for a 0.x release by default. `levels: minor` resolves `v0.1` and no `v0`,
+for a repo that wants the tags it publishes to stay inside one minor.
+
+A repo keeping the default offers a `v0` that crosses every 0.x minor. A
+`uses: <owner>/<repo>@v0` in someone else's workflow moves from 0.1.9 to 0.2.0 along with whatever
+that minor changed.
 
 ## Prereleases
 
