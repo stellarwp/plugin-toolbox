@@ -14,8 +14,10 @@ const PLAIN_TAG_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/
  * Splits the `tags` input and checks every name.
  *
  * @param {string} tags Tag names separated by spaces or newlines.
- * @returns {string[]} The names, in the order given.
+ *
  * @throws {Error} When a name is not a plain tag name.
+ *
+ * @returns {string[]} The names, in the order given.
  */
 function parseTagNames(tags) {
   const names = String(tags ?? '')
@@ -55,9 +57,11 @@ function parseTagNames(tags) {
  * @param {string}   repo   The repository name.
  * @param {string[]} names  The tag names to point at `sha`, already validated.
  * @param {string}   sha    The commit the tags should point at.
+ *
+ * @throws {Error} When a write fails, or a read fails with anything but a 404.
+ *
  * @returns {Promise<{created: string[], moved: string[]}>} Which names were created, and which
  *                                                          already existed and were repointed.
- * @throws {Error} When a write fails, or a read fails with anything but a 404.
  */
 async function moveTags({ github, core, owner, repo, names, sha }) {
   const created = []
@@ -97,8 +101,10 @@ async function moveTags({ github, core, owner, repo, names, sha }) {
  * @param {object} github An Octokit, as actions/github-script supplies it.
  * @param {object} core   The @actions/core toolkit, for the log and the outputs.
  * @param {object} env    The environment the action manifest put its inputs in.
- * @returns {Promise<void>} Resolves once every tag has been written and the outputs are set.
+ *
  * @throws {Error} When a tag name is not a plain tag name, or a write fails.
+ *
+ * @returns {Promise<void>} Resolves once every tag has been written and the outputs are set.
  */
 async function run({ github, core, env }) {
   const repository = env.INPUT_REPOSITORY || env.GITHUB_REPOSITORY

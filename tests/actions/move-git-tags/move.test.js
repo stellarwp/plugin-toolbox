@@ -23,6 +23,7 @@ const REF = {
  *
  * @param {string[]} existing Tag names that already have a ref.
  * @param {string}   base     Repository path the requests go to.
+ *
  * @returns {object[]} Rules for recordingFetch.
  */
 function rulesFor(existing = [], base = '/repos/stellarwp/plugin-toolbox') {
@@ -41,6 +42,7 @@ function rulesFor(existing = [], base = '/repos/stellarwp/plugin-toolbox') {
  * Each request as `METHOD path`, for asserting the order the action worked in.
  *
  * @param {object[]} requests The requests recordingFetch recorded.
+ *
  * @returns {string[]} One `METHOD path` per request, in the order they were sent.
  */
 function sequence(requests) {

@@ -20,6 +20,7 @@ const LEVEL_DEPTHS = { major: 1, minor: 2 }
  * and is excluded from every comparison.
  *
  * @param {string} tagName A tag name, e.g. `v1.2.3`, `1.4.0+build.7` or `1.4.0-rc.1`.
+ *
  * @returns {string} The version it stands for, e.g. `1.2.3`, `1.4.0` or `1.4.0-rc.1`.
  */
 function toVersion(tagName) {
@@ -30,6 +31,7 @@ function toVersion(tagName) {
  * Splits a version into its numbers, for comparing one part against another.
  *
  * @param {string} version A numeric version, e.g. `1.2.3`.
+ *
  * @returns {number[]} Its parts, e.g. `[1, 2, 3]`.
  */
 function toParts(version) {
@@ -43,6 +45,7 @@ function toParts(version) {
  *
  * @param {string} a A numeric version.
  * @param {string} b The version to compare it against.
+ *
  * @returns {number} -1 when `a` is lower, 1 when it is higher, 0 when they are the same version.
  */
 function compareVersions(a, b) {
@@ -67,6 +70,7 @@ function compareVersions(a, b) {
  *
  * @param {string}   version    A numeric version, e.g. `1.2.3`.
  * @param {number[]} linePrefix The numbers naming the line, e.g. `[1, 2]` for the v1.2 tag.
+ *
  * @returns {boolean} Whether the version is a release of that line.
  */
 function isInLine(version, linePrefix) {
@@ -83,8 +87,12 @@ function isInLine(version, linePrefix) {
  * @param {boolean}  allowPrereleases    Let a prerelease own a tag whose line has had no release.
  * @param {string[]} tagNames            Every tag name in the repository.
  * @param {boolean}  flaggedPrerelease   Whether GitHub marks this release as a prerelease.
- * @returns {{tags: string[], skipped: string[], version: string, notices: object[]}}
+ *
  * @throws {Error} When levels names something other than a known level.
+ *
+ * @returns {{tags: string[], skipped: string[], version: string, notices: object[]}} The tags
+ *          this version should own, the ones a newer release already owns, the version
+ *          itself, and the messages the caller should log.
  */
 function resolveFloatingTags({
   tag,
@@ -224,6 +232,7 @@ function resolveFloatingTags({
  * @param {object} core   The @actions/core toolkit, for the warning.
  * @param {string} owner  The repository owner.
  * @param {string} repo   The repository name.
+ *
  * @returns {Promise<string[]>} The tag names, or an empty list when they could not be read.
  */
 async function readTagNames({ github, core, owner, repo }) {
@@ -253,6 +262,7 @@ async function readTagNames({ github, core, owner, repo }) {
  * @param {string} owner  The repository owner.
  * @param {string} repo   The repository name.
  * @param {string} tag    The tag to look the release up by.
+ *
  * @returns {Promise<boolean>} Whether that release is marked as a prerelease.
  */
 async function readPrereleaseFlag({ github, core, owner, repo, tag }) {
@@ -275,6 +285,7 @@ async function readPrereleaseFlag({ github, core, owner, repo, tag }) {
  * @param {object} github An Octokit, as actions/github-script supplies it.
  * @param {object} core   The @actions/core toolkit, for the log and the outputs.
  * @param {object} env    The environment the action manifest put its inputs in.
+ *
  * @returns {Promise<void>} Resolves once the outputs are set.
  */
 async function run({ github, core, env }) {

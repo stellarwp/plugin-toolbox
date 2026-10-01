@@ -24,6 +24,7 @@ const path = require('node:path')
  * @param {number} status  HTTP status, defaulting to 200.
  * @param {object} body    Value to send as the JSON body.
  * @param {object} headers Extra headers, merged over the JSON content type.
+ *
  * @returns {Response} The response for the fetch to return.
  */
 function jsonResponse({ status = 200, body = {}, headers = {} }) {
@@ -47,6 +48,7 @@ function jsonResponse({ status = 200, body = {}, headers = {} }) {
  *
  * @param {object[]} rules `{method, path, status, body, headers}` or `{method, path, responses}`,
  *                         where `path` is an exact string or a RegExp.
+ *
  * @returns {{fetch: Function, requests: object[]}} The fetch, and the requests it recorded.
  */
 function recordingFetch(rules = []) {
@@ -92,6 +94,7 @@ function recordingFetch(rules = []) {
  * A real Octokit with the network replaced.
  *
  * @param {object[]} rules Passed to recordingFetch.
+ *
  * @returns {Promise<{github: object, requests: object[]}>} The client, and the requests it records.
  */
 async function octokitFor(rules = []) {
@@ -109,6 +112,7 @@ async function octokitFor(rules = []) {
  * assertion is what the step actually handed on.
  *
  * @param {string} file Path to the GITHUB_OUTPUT file.
+ *
  * @returns {object} Each output name mapped to its value.
  */
 function readOutputs(file) {
@@ -137,6 +141,7 @@ function readOutputs(file) {
  * before the runner reports the result.
  *
  * @param {object} t The node:test context, used to restore stdout afterwards.
+ *
  * @returns {Promise<{core: object, outputs: Function, logged: Function}>} The toolkit, a reader for
  *          its outputs, and a reader for everything it wrote to the log.
  */
@@ -173,6 +178,7 @@ async function coreWithOutputs(t) {
  *
  * @param {object}   t     The node:test context.
  * @param {object[]} rules Passed to recordingFetch.
+ *
  * @returns {Promise<{github: object, requests: object[], core: object, outputs: Function,
  *          logged: Function}>} Everything a test needs: the client, the requests it records, the
  *          toolkit, and readers for its outputs and its log.

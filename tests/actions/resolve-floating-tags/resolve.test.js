@@ -19,6 +19,7 @@ const RELEASE_PATH = (tag) => `/repos/stellarwp/plugin-toolbox/releases/tags/${t
  * A page of the tag listing, shaped the way repos.listTags returns it.
  *
  * @param {...string} names The tag names on this page.
+ *
  * @returns {object[]} One listing entry per name.
  */
 function tagPage(...names) {
@@ -31,6 +32,7 @@ function tagPage(...names) {
  * @param {string[]} names   Every tag name the repository has.
  * @param {object}   release `{tag, prerelease}` for the release behind that tag. Left out, the
  *                           release lookup answers 404, as it does for a tag with no release.
+ *
  * @returns {object[]} Rules for recordingFetch.
  */
 function repoWith(names, release) {
@@ -46,6 +48,7 @@ function repoWith(names, release) {
  * Runs the pure resolution and flattens it, so a case reads as one line.
  *
  * @param {object} options Passed to resolveFloatingTags.
+ *
  * @returns {string} The resolved tags and the skipped ones, separated by ` | `.
  */
 function resolve(options) {
