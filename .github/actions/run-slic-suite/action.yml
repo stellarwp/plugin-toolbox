@@ -1,0 +1,146 @@
+# Runs a Codeception suite through slic. Provisioning the stack is a separate action: see
+# .github/actions/setup-slic, which must run first in the same job.
+name: Run a slic suite
+description: Runs a Codeception suite through slic, uploads its output on failure and tears the stack down
+
+inputs:
+  suite:
+    description: 'The Codeception suite to run, e.g. integration or wpunit.'
+    required: true
+  target:
+    description: >-
+      The slic target the suite belongs to, e.g. sfwd-lms. Defaults to the one setup-slic selected,
+      so a job names its target once. Pass it only when a step between the two actions selected a
+      different target, since it is re-selected with `slic use` before the suite runs.
+    required: false
+    default: ''
+  suite-args:
+    description: 'Extra arguments appended to `slic run`, e.g. --ext DotReporter.'
+    required: false
+    default: ''
+  upload-output-on-failure:
+    description: 'Upload the target test output directory as an artifact when the suite fails.'
+    required: false
+    default: 'false'
+  output-path:
+    description: >-
+      Path from the workspace to the directory the suite writes output to. Defaults to
+      `<target>/tests/_output/`.
+    required: false
+    default: ''
+  output-artifact-name:
+    description: >-
+      Name of the uploaded artifact. Defaults to `test-output-php<version>-<suite>`, reading the
+      version setup-slic pinned the stack to, so a matrix over PHP versions names each leg without
+      repeating the value here.
+    required: false
+    default: ''
+  run-cleanup:
+    description: >-
+      Run `slic down` and kill the ssh-agent after the suite. Off by default because an ephemeral
+      runner is destroyed with the job, which takes the containers and the agent with it. Turn it on
+      for a runner that outlives the job, such as a self-hosted one, where they would otherwise
+      leak into the next job.
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    # ------------------------------------------------------------------------------
+    # setup-slic exports SLIC_BIN, SLIC_PHP_VERSION, SLIC_TOOLBOX_TARGET and
+    # SLIC_TOOLBOX_DEBUG_FLAG. Fail with a clear message rather than letting an empty
+    # ${SLIC_BIN} run the suite name as a command.
+    # ------------------------------------------------------------------------------
+    - name: Run suite ${{ inputs.suite }}
+      id: run
+      shell: bash
+      env:
+        SUITE: ${{ inputs.suite }}
+        SUITE_ARGS: ${{ inputs.suite-args }}
+        TARGET: ${{ inputs.target }}
+        ARTIFACT_NAME: ${{ inputs.output-artifact-name }}
+        OUTPUT_PATH: ${{ inputs.output-path }}
+      run: |
+        if [ -z "${SLIC_BIN:-}" ]; then
+          echo "::error::SLIC_BIN is not set. Run the setup-slic action earlier in this job."
+          exit 1
+        fi
+
+        if [ -z "${TARGET}" ]; then
+          TARGET="${SLIC_TOOLBOX_TARGET:-}"
+        fi
+
+        if [ -z "${TARGET}" ]; then
+          echo "::error::No slic target. Run the setup-slic action earlier in this job, or pass target."
+          exit 1
+        fi
+
+        # Resolve the artifact name and path before the suite runs: the upload step
+        # needs them on the run that fails, and a step's outputs survive its failure
+        # only for what it wrote before failing.
+        if [ -z "${OUTPUT_PATH}" ]; then
+          OUTPUT_PATH="${TARGET}/tests/_output/"
+        fi
+
+        # The name carries every dimension a job can vary: the target, the PHP version
+        # setup-slic pinned the stack to, and the suite. The upload overwrites a
+        # matching name so re-running a failed job replaces its own output from the
+        # earlier attempt, which means a name shared with a different job would
+        # destroy that job's output instead.
+        if [ -z "${ARTIFACT_NAME}" ]; then
+          # An artifact name cannot contain / : < > | * ? " or \, and a target can be
+          # a subdirectory such as the-events-calendar/common.
+          safe_target="$(printf '%s' "${TARGET}" | tr -c 'a-zA-Z0-9._-' '-')"
+
+          ARTIFACT_NAME="test-output-${safe_target}"
+
+          if [ -n "${SLIC_PHP_VERSION:-}" ]; then
+            ARTIFACT_NAME="${ARTIFACT_NAME}-php${SLIC_PHP_VERSION}"
+          fi
+
+          ARTIFACT_NAME="${ARTIFACT_NAME}-${SUITE}"
+        fi
+
+        {
+          echo "artifact-name=${ARTIFACT_NAME}"
+          echo "output-path=${OUTPUT_PATH}"
+        } >> "$GITHUB_OUTPUT"
+
+        "${SLIC_BIN}" use "${TARGET}"
+
+        # Word splitting is intended: both are argument lists, not single words.
+        # shellcheck disable=SC2086
+        "${SLIC_BIN}" run "${SUITE}" ${SUITE_ARGS} ${SLIC_TOOLBOX_DEBUG_FLAG:-}
+
+    - name: Upload failed test data as an artifact
+      if: failure() && inputs.upload-output-on-failure == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.run.outputs.artifact-name }}
+        path: ${{ steps.run.outputs.output-path }}
+        retention-days: 2
+        overwrite: true
+
+    # ------------------------------------------------------------------------------
+    # `shell: bash` runs with -e, so a failing teardown would skip everything after
+    # it. Each step records its status and the last one reports it, so the ssh-agent
+    # and its socket are cleaned up either way.
+    # ------------------------------------------------------------------------------
+    - name: Clean up the environment
+      if: always() && inputs.run-cleanup == 'true'
+      shell: bash
+      run: |
+        status=0
+
+        if [ -n "${SLIC_BIN:-}" ]; then
+          "${SLIC_BIN}" down || status=$?
+        fi
+
+        ssh-agent -k > /dev/null 2>&1 || true
+
+        if [ -n "${SSH_AUTH_SOCK:-}" ]; then
+          rm -f "${SSH_AUTH_SOCK}"
+        fi
+
+        exit "${status}"

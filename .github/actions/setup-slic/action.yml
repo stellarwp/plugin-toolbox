@@ -1,0 +1,360 @@
+# Checks out slic, configures it for CI and provisions the WordPress stack. Running a suite is a
+# separate action: see .github/actions/run-slic-suite.
+name: Set up slic
+description: Checks out slic, configures it for CI and provisions the WordPress stack
+
+inputs:
+  # Required.
+  target:
+    description: >-
+      The slic target to select with `slic use`, relative to the `here-dir`, e.g. sfwd-lms. slic
+      resolves a target to a plugin, a theme or a site.
+    required: true
+
+  # Optional, but recommended in CI.
+  php-version:
+    description: >-
+      The PHP version to set up in slic, e.g. 8.3. Recommended in CI, and needed in practice for a
+      matrix over PHP versions, since every leg otherwise resolves to the same version. Left empty,
+      slic picks the version itself from the target's slic.json `phpVersion`, or failing that from
+      its composer.json `config.platform.php`, and this action reports which it got.
+    required: false
+    default: ''
+
+  # Optional.
+  here-dir:
+    description: >-
+      The directory `slic here` runs in. It becomes slic's plugins directory, so it must be the
+      parent of the target checkout. Defaults to the workspace, which is correct when the target is
+      checked out into a subdirectory. A repo checked out at the workspace root passes the
+      workspace's parent instead. A theme target needs a directory named `themes` here: that name
+      is what makes `slic here` set SLIC_THEMES_DIR to the checkout rather than to slic's own
+      themes directory. See the action's README for each layout.
+    required: false
+    default: ''
+  ref:
+    description: 'The slic branch, tag or commit to check out.'
+    required: false
+    default: 'main'
+  slic-repository:
+    description: 'The repository to check slic out from.'
+    required: false
+    default: 'stellarwp/slic'
+  slic-path:
+    description: 'Path relative to the workspace to check slic out into.'
+    required: false
+    default: 'slic'
+  wp-version:
+    description: >-
+      The WordPress version to put in place. `latest` resolves the newest release from
+      api.wordpress.org, which is sometimes newer than the one baked into the slic image. An
+      explicit version such as 6.6 pins it. An empty value leaves the image's version alone.
+    required: false
+    default: 'latest'
+  services:
+    description: 'Space or newline separated slic services to start, e.g. chrome.'
+    required: false
+    default: ''
+  composer-install:
+    description: >-
+      Targets to run `slic composer install` for inside slic, one per line, as
+      `<slic target> [composer args]`. Each line selects that target with `slic use` first. Leave
+      empty when Composer already ran on the host, e.g. through ramsey/composer-install.
+    required: false
+    default: ''
+  composer-cache-dir:
+    description: 'Host directory to point `slic composer-cache set` at. Empty skips the command.'
+    required: false
+    default: ''
+  prune-docker-networks:
+    description: >-
+      Run `docker network prune -f` before each `slic use`. Docker runs out of address pools on
+      runners that bring several stacks up in one job.
+    required: false
+    default: 'false'
+  verify-php-version:
+    description: >-
+      Fail the job when the PHP version inside the WordPress container does not match php-version.
+    required: false
+    default: 'true'
+  debug-enabled:
+    description: >-
+      Turn slic debug output on and set the debug-flag output to --debug. Honored on any event. A
+      caller wiring this to a workflow_dispatch input gets 'false' on other events, because the
+      expression is empty there.
+    required: false
+    default: 'false'
+
+outputs:
+  slic-bin:
+    description: 'Absolute path to the slic binary. Also exported to the environment as SLIC_BIN.'
+    value: ${{ steps.env.outputs.slic-bin }}
+  debug-flag:
+    description: >-
+      `--debug` when debug is on for this run, empty otherwise. Also exported to the environment as
+      SLIC_TOOLBOX_DEBUG_FLAG, which run-slic-suite appends to `slic run`.
+    value: ${{ steps.debug-flag.outputs.debug-flag }}
+  target:
+    description: >-
+      The target this action selected. Also exported to the environment as SLIC_TOOLBOX_TARGET,
+      which run-slic-suite reads when it is given no target of its own.
+    value: ${{ steps.target.outputs.target }}
+  php-version:
+    description: >-
+      The PHP version the stack is running, whether it came from the php-version input or from
+      slic resolving it. Also exported to the environment as SLIC_PHP_VERSION.
+    value: ${{ steps.php-version.outputs.php-version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout slic
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ inputs.slic-repository }}
+        ref: ${{ inputs.ref }}
+        path: ${{ inputs.slic-path }}
+        fetch-depth: 1
+
+    # ------------------------------------------------------------------------------
+    # SLIC_PHP_VERSION is exported so that slic reads it as a command-line override.
+    # slic backs the variable up before it loads any env file, and a value that was
+    # already in the environment wins over the version a target's slic.json or
+    # composer.json asks for. Without it, `php-version set --skip-rebuild` only stages
+    # a version that the FIRST `slic use` consumes, and any later `slic use` switches
+    # the stack to the target's own PHP requirement instead.
+    # ------------------------------------------------------------------------------
+    - name: Set up slic env vars
+      id: env
+      shell: bash
+      env:
+        SLIC_PATH: ${{ inputs.slic-path }}
+        PHP_VERSION: ${{ inputs.php-version }}
+      run: |
+        # Add special env vars for the slic containers.
+        {
+          echo "SLIC_BIN=${GITHUB_WORKSPACE}/${SLIC_PATH}/slic"
+          echo "SLIC_WP_DIR=${GITHUB_WORKSPACE}/${SLIC_PATH}/_wordpress"
+          echo "SLIC_WORDPRESS_DOCKERFILE=Dockerfile.base"
+        } >> "$GITHUB_ENV"
+
+        # Only pin the version when the caller named one. Exporting it empty would
+        # still read as a command-line override and leave slic without a version.
+        if [ -n "${PHP_VERSION}" ]; then
+          echo "SLIC_PHP_VERSION=${PHP_VERSION}" >> "$GITHUB_ENV"
+        fi
+
+        echo "slic-bin=${GITHUB_WORKSPACE}/${SLIC_PATH}/slic" >> "$GITHUB_OUTPUT"
+
+    # ------------------------------------------------------------------------------
+    # slic's is_ci() checks CI, along with GITHUB_ACTION, which the runner already
+    # sets. Setting it explicitly keeps the action correct on a runner that does not.
+    # ------------------------------------------------------------------------------
+    - name: Set the CI run context
+      shell: bash
+      run: echo "CI=1" >> "$GITHUB_ENV"
+
+    - name: Start ssh-agent
+      shell: bash
+      run: |
+        export SSH_AUTH_SOCK=/tmp/ssh_agent_$GITHUB_RUN_ID.sock
+        eval "$(ssh-agent -a "$SSH_AUTH_SOCK")"
+        echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+        echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
+
+    # ------------------------------------------------------------------------------
+    # `slic here` has no path argument: it reads the current working directory and
+    # makes it slic's plugins directory. The target checkout has to be a child of it.
+    # ------------------------------------------------------------------------------
+    - name: Set up slic for CI
+      shell: bash
+      env:
+        HERE_DIR: ${{ inputs.here-dir }}
+        PHP_VERSION: ${{ inputs.php-version }}
+        COMPOSER_CACHE_DIR: ${{ inputs.composer-cache-dir }}
+      run: |
+        cd "${HERE_DIR:-$GITHUB_WORKSPACE}"
+
+        "${SLIC_BIN}" here
+        "${SLIC_BIN}" interactive off
+        "${SLIC_BIN}" build-prompt off
+        "${SLIC_BIN}" build-subdir off
+
+        if [ -n "${COMPOSER_CACHE_DIR}" ]; then
+          "${SLIC_BIN}" composer-cache set "${COMPOSER_CACHE_DIR}"
+        fi
+
+        # With no version named, `slic use` resolves one from the target instead.
+        if [ -n "${PHP_VERSION}" ]; then
+          "${SLIC_BIN}" php-version set "${PHP_VERSION}" --skip-rebuild
+        fi
+
+    - name: Define if we need the debug flag
+      id: debug-flag
+      shell: bash
+      env:
+        DEBUG_ENABLED: ${{ inputs.debug-enabled }}
+      run: |
+        if [ "${DEBUG_ENABLED}" == "true" ]; then
+          debug_flag="--debug"
+          "${SLIC_BIN}" debug on
+          "${SLIC_BIN}" config
+        else
+          debug_flag=""
+          "${SLIC_BIN}" xdebug off
+        fi
+
+        echo "SLIC_TOOLBOX_DEBUG_FLAG=${debug_flag}" >> "$GITHUB_ENV"
+        echo "debug-flag=${debug_flag}" >> "$GITHUB_OUTPUT"
+
+    # ------------------------------------------------------------------------------
+    # `slic up` takes one service per invocation: it reads a single positional
+    # argument and ignores the rest, so the list is started one at a time.
+    # ------------------------------------------------------------------------------
+    - name: Start extra slic services
+      if: inputs.services != ''
+      shell: bash
+      env:
+        SERVICES: ${{ inputs.services }}
+      run: |
+        # Word splitting is intended: SERVICES is a list.
+        # shellcheck disable=SC2086
+        set -- ${SERVICES}
+
+        for service in "$@"; do
+          "${SLIC_BIN}" up "${service}"
+        done
+
+    # ------------------------------------------------------------------------------
+    # Repos whose dependencies have to be installed with the container's PHP, rather
+    # than the runner's, install them here. Each line selects its target first, so a
+    # target and its shared library can be installed with different flags.
+    # ------------------------------------------------------------------------------
+    - name: Install Composer dependencies inside slic
+      if: inputs.composer-install != ''
+      shell: bash
+      env:
+        COMPOSER_INSTALL: ${{ inputs.composer-install }}
+        PRUNE_NETWORKS: ${{ inputs.prune-docker-networks }}
+      run: |
+        while IFS= read -r line; do
+          line="${line#"${line%%[![:space:]]*}"}"
+          line="${line%"${line##*[![:space:]]}"}"
+
+          if [ -z "${line}" ] || [ "${line:0:1}" == "#" ]; then
+            continue
+          fi
+
+          # Word splitting is intended: the target is followed by Composer arguments.
+          # shellcheck disable=SC2086
+          set -- ${line}
+          target="$1"
+          shift
+
+          if [ "${PRUNE_NETWORKS}" == "true" ]; then
+            docker network prune -f
+          fi
+
+          echo "::group::slic composer install for ${target}"
+          "${SLIC_BIN}" use "${target}"
+          "${SLIC_BIN}" composer install "$@"
+          echo "::endgroup::"
+        done <<< "${COMPOSER_INSTALL}"
+
+    - name: Select the target under test
+      id: target
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        PRUNE_NETWORKS: ${{ inputs.prune-docker-networks }}
+      run: |
+        if [ "${PRUNE_NETWORKS}" == "true" ]; then
+          docker network prune -f
+        fi
+
+        "${SLIC_BIN}" use "${TARGET}"
+
+        # run-slic-suite reads this when no target is passed to it, so a job names
+        # the target once. slic records the selection in its own run settings file
+        # rather than in the environment, so there is nothing else to read it from.
+        echo "SLIC_TOOLBOX_TARGET=${TARGET}" >> "$GITHUB_ENV"
+        echo "target=${TARGET}" >> "$GITHUB_OUTPUT"
+
+    # ------------------------------------------------------------------------------
+    # `wp core download --force` replaces the core files without touching the
+    # database, so it both upgrades and downgrades.
+    #
+    # Any `slic wp` command installs WordPress first if it is not installed yet, so
+    # this one creates the database at the version baked into the image and only then
+    # swaps the files. `wp core update-db` reconciles the schema with the files that
+    # are now on disk; it is a no-op when the two already agree.
+    # ------------------------------------------------------------------------------
+    - name: Put the requested WordPress version in place
+      if: inputs.wp-version != ''
+      shell: bash
+      env:
+        WP_VERSION: ${{ inputs.wp-version }}
+      run: |
+        if [ "${WP_VERSION}" == "latest" ]; then
+          # The version baked into the slic image is sometimes behind the latest release.
+          WP_VERSION=$(curl -sSf --retry 3 --connect-timeout 10 --max-time 30 \
+            "https://api.wordpress.org/core/version-check/1.7/" \
+            | jq -r '[.offers[]|select(.response=="upgrade")][0].version')
+        fi
+
+        if [ -z "${WP_VERSION}" ] || [ "${WP_VERSION}" == "null" ]; then
+          echo "::error::Could not resolve a WordPress version to install."
+          exit 1
+        fi
+
+        "${SLIC_BIN}" wp core download --version="${WP_VERSION}" --force
+        "${SLIC_BIN}" wp core update-db
+
+    - name: Show slic info
+      shell: bash
+      run: |
+        "${SLIC_BIN}" info
+        "${SLIC_BIN}" wp core version
+
+    # ------------------------------------------------------------------------------
+    # The container is the authority on which PHP is running, whether the caller
+    # named a version or slic resolved one from the target. Record it either way, so
+    # the rest of the job and the artifact name have a version to work from and a
+    # later `slic use` cannot move the stack off it.
+    # ------------------------------------------------------------------------------
+    - name: Resolve the PHP version slic is running
+      id: php-version
+      shell: bash
+      env:
+        PHP_VERSION: ${{ inputs.php-version }}
+        VERIFY: ${{ inputs.verify-php-version }}
+      run: |
+        FULL_VERSION=$("${SLIC_BIN}" dc exec wordpress php -v | grep -oP '^PHP \K[\d\.]+')
+
+        if [ -z "${FULL_VERSION}" ]; then
+          echo "::error::Could not read the PHP version from the WordPress container."
+          exit 1
+        fi
+
+        # slic names versions as major.minor, and so does the artifact. Recording the
+        # patch would move the artifact name on every PHP release.
+        ACTUAL_VERSION=$(printf '%s' "${FULL_VERSION}" | cut -d. -f1,2)
+
+        echo "The WordPress container is running PHP ${FULL_VERSION}."
+
+        if [ -z "${PHP_VERSION}" ]; then
+          echo "::warning::php-version was not set, so slic resolved PHP ${ACTUAL_VERSION} from the target's slic.json or composer.json. Set php-version to pin it, which a matrix over PHP versions has to do."
+        elif [ "${ACTUAL_VERSION}" == "${PHP_VERSION}" ]; then
+          echo "PHP ${ACTUAL_VERSION} matches the requested ${PHP_VERSION}."
+        elif [ "${VERIFY}" == "true" ]; then
+          echo "::error::Expected PHP ${PHP_VERSION}, but the container is running ${FULL_VERSION}."
+          exit 1
+        else
+          echo "::warning::Expected PHP ${PHP_VERSION}, but the container is running ${FULL_VERSION}. verify-php-version is off, so the job continues."
+        fi
+
+        # Record what is running rather than what was asked for. They match when the
+        # check above passed, and when the check is off the running one is the truth.
+        echo "SLIC_PHP_VERSION=${ACTUAL_VERSION}" >> "$GITHUB_ENV"
+        echo "php-version=${ACTUAL_VERSION}" >> "$GITHUB_OUTPUT"
+        echo "## slic is running PHP ${FULL_VERSION}" >> "$GITHUB_STEP_SUMMARY"
