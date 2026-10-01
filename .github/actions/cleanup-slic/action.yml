@@ -5,6 +5,7 @@ runs:
   using: composite
   steps:
     - name: Clean up slic resources
+      if: always()
       shell: bash
       run: |
         status=0
