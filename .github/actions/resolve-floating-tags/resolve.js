@@ -80,11 +80,23 @@ function isInLine(version, linePrefix) {
 }
 
 /**
- * Reads the three forms of a release tag that the rules below need.
+ * Reads a release tag into the three forms the rules need, and the numbers of the shortest.
  *
- * `version` is what the release is called, `releaseVersion` drops build metadata, and `core` drops
- * the prerelease suffix as well. Only the `-` suffix means prerelease: 1.4.0+build.7 is a released
- * 1.4.0.
+ * Each form drops a little more of the tag, and each exists for a different job. For the tag
+ * `v1.4.0-rc.1+build.7`:
+ *
+ * - `version` is `1.4.0-rc.1+build.7`: the whole tag without its `v`. This is what the release is
+ *   called, so it is the name the notices use and the version the action reports.
+ * - `releaseVersion` is `1.4.0-rc.1`: no build metadata. This is how the tag reads once toVersion
+ *   has normalised the repository's tag list, so it is the name that excludes the release from its
+ *   own comparison.
+ * - `core` is `1.4.0`: the numbers alone. Versions are compared by this, and floating tag names are
+ *   built from it.
+ *
+ * The two shorter forms therefore differ by the prerelease suffix and nothing else, which is what
+ * makes comparing them the prerelease test. `1.4.0+build.7` has a `releaseVersion` of `1.4.0`, equal
+ * to its `core`, so build metadata does not make a release a prerelease. `1.4.0-rc.1` keeps its
+ * `-rc.1`, so it does.
  *
  * @param {string} tag The release tag, with or without a leading `v`.
  *

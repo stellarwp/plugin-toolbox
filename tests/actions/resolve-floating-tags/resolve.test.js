@@ -144,6 +144,14 @@ describe('resolve-floating-tags', () => {
       assert.equal(release.core, '1.4.0')
     })
 
+    it('tells the three forms apart on a tag carrying both', () => {
+      const release = readReleaseTag('v1.4.0-rc.1+build.7')
+
+      assert.equal(release.version, '1.4.0-rc.1+build.7', 'what the release is called')
+      assert.equal(release.releaseVersion, '1.4.0-rc.1', 'how it reads in the tag list')
+      assert.equal(release.core, '1.4.0', 'what versions are compared by')
+    })
+
     it('reads a fourth part as part of the version', () => {
       assert.deepEqual(readReleaseTag('1.2.3.1').parts, [1, 2, 3, 1])
     })
