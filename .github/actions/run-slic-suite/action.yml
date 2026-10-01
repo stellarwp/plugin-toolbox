@@ -18,6 +18,10 @@ inputs:
     description: 'Extra arguments appended to `slic run`, e.g. --ext DotReporter.'
     required: false
     default: ''
+  debug:
+    description: 'Add Codeception --debug output for this suite. Does not enable Slic logging or Xdebug.'
+    required: false
+    default: 'false'
   upload-output-on-failure:
     description: 'Upload the target test output directory as an artifact when the suite fails.'
     required: false
@@ -40,8 +44,7 @@ runs:
   using: 'composite'
   steps:
     # ------------------------------------------------------------------------------
-    # setup-slic exports SLIC_BIN, SLIC_PHP_VERSION, SLIC_TOOLBOX_TARGET and
-    # SLIC_TOOLBOX_DEBUG_FLAG. Fail with a clear message rather than letting an empty
+    # setup-slic exports SLIC_BIN, SLIC_PHP_VERSION and SLIC_TOOLBOX_TARGET. Fail with a clear message rather than letting an empty
     # ${SLIC_BIN} run the suite name as a command.
     # ------------------------------------------------------------------------------
     - name: Run suite ${{ inputs.suite }}
@@ -50,6 +53,7 @@ runs:
       env:
         SUITE: ${{ inputs.suite }}
         SUITE_ARGS: ${{ inputs.suite-args }}
+        DEBUG: ${{ inputs.debug }}
         TARGET: ${{ inputs.target }}
         ARTIFACT_NAME: ${{ inputs.output-artifact-name }}
         OUTPUT_PATH: ${{ inputs.output-path }}
@@ -102,10 +106,16 @@ runs:
         source "${GITHUB_ACTION_PATH}/../slic-target.sh"
         select_slic_target "${TARGET}"
 
+        debug_args=()
+
+        if [ "${DEBUG}" == "true" ]; then
+          debug_args+=(--debug)
+        fi
+
         set -f
-        # Word splitting is intended: both are argument lists, not single words.
+        # Word splitting is intended for the whitespace-separated suite options.
         # shellcheck disable=SC2086
-        "${SLIC_BIN}" run "${SUITE}" ${SUITE_ARGS} ${SLIC_TOOLBOX_DEBUG_FLAG:-}
+        "${SLIC_BIN}" run "${SUITE}" ${SUITE_ARGS} "${debug_args[@]}"
 
     - name: Upload failed test data as an artifact
       if: failure() && steps.run.outcome == 'failure' && steps.run.outputs.output-path != '' && inputs.upload-output-on-failure == 'true'

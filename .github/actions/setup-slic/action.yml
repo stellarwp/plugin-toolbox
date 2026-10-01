@@ -62,11 +62,12 @@ inputs:
     description: 'Host directory to point `slic composer-cache set` at. Empty skips the command.'
     required: false
     default: ''
-  debug-enabled:
-    description: >-
-      Turn slic debug output on and set the debug-flag output to --debug. Honored on any event. A
-      caller wiring this to a workflow_dispatch input gets 'false' on other events, because the
-      expression is empty there.
+  slic-debug:
+    description: 'Enable Slic diagnostic logging. Independent of Xdebug and test-runner debug output.'
+    required: false
+    default: 'true'
+  xdebug:
+    description: 'Enable Xdebug in the PHP containers after setup. Disables PCOV when enabled.'
     required: false
     default: 'false'
 
@@ -74,11 +75,6 @@ outputs:
   slic-bin:
     description: 'Absolute path to the slic binary. Also exported to the environment as SLIC_BIN.'
     value: ${{ steps.env.outputs.slic-bin }}
-  debug-flag:
-    description: >-
-      `--debug` when debug is on for this run, empty otherwise. Also exported to the environment as
-      SLIC_TOOLBOX_DEBUG_FLAG, which run-slic-suite appends to `slic run`.
-    value: ${{ steps.debug-flag.outputs.debug-flag }}
   target:
     description: >-
       The target this action selected. Also exported to the environment as SLIC_TOOLBOX_TARGET,
@@ -192,26 +188,17 @@ runs:
           "${SLIC_BIN}" php-version set "${PHP_VERSION}" --skip-rebuild
         fi
 
-    - name: Define if we need the debug flag
-      id: debug-flag
+    - name: Configure Slic diagnostic logging
       shell: bash
       env:
-        DEBUG_ENABLED: ${{ inputs.debug-enabled }}
+        SLIC_DEBUG: ${{ inputs.slic-debug }}
       run: |
-        # Diagnostic logging and Codeception debug output do not need Xdebug.
-        "${SLIC_BIN}" xdebug off
-
-        if [ "${DEBUG_ENABLED}" == "true" ]; then
-          debug_flag="--debug"
+        if [ "${SLIC_DEBUG}" == "true" ]; then
           "${SLIC_BIN}" debug on
           "${SLIC_BIN}" config
         else
-          debug_flag=""
           "${SLIC_BIN}" debug off
         fi
-
-        echo "SLIC_TOOLBOX_DEBUG_FLAG=${debug_flag}" >> "$GITHUB_ENV"
-        echo "debug-flag=${debug_flag}" >> "$GITHUB_OUTPUT"
 
     - name: Select the target under test
       id: target
@@ -346,3 +333,15 @@ runs:
       run: |
         "${SLIC_BIN}" info
         "${SLIC_BIN}" wp core version
+
+    - name: Configure Xdebug for the test run
+      shell: bash
+      env:
+        XDEBUG_ENABLED: ${{ inputs.xdebug }}
+      run: |
+        # Apply this after target switches so it updates the containers tests will use.
+        if [ "${XDEBUG_ENABLED}" == "true" ]; then
+          "${SLIC_BIN}" xdebug on --yes
+        else
+          "${SLIC_BIN}" xdebug off
+        fi

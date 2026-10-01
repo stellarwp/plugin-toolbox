@@ -3,9 +3,9 @@
 Runs a Codeception suite through [slic](https://github.com/stellarwp/slic), uploads the suite's
 output as an artifact when it fails. Stack cleanup is a separate action.
 
-[setup-slic](../setup-slic/) has to run earlier in the same job. This action reads the four
+[setup-slic](../setup-slic/) has to run earlier in the same job. This action reads the three
 variables it exports: `SLIC_BIN` to call slic, `SLIC_TOOLBOX_TARGET` for the target,
-`SLIC_PHP_VERSION` for the artifact name, and `SLIC_TOOLBOX_DEBUG_FLAG` to pass on to `slic run`.
+and `SLIC_PHP_VERSION` for the artifact name.
 Without `SLIC_BIN` the action stops with a message saying so, rather than running the suite name
 as a command.
 
@@ -27,9 +27,16 @@ as a command.
 | `suite` | yes | | Codeception suite to run, e.g. `wpunit` |
 | `target` | no | what `setup-slic` selected | The target to select if it differs from Slic's current target. Also the default output path |
 | `suite-args` | no | `''` | Extra arguments for `slic run`, e.g. `--ext DotReporter` |
+| `debug` | no | `'false'` | Append Codeception's `--debug` flag for this suite |
 | `upload-output-on-failure` | no | `'false'` | Upload the test output directory when the suite fails |
 | `output-path` | no | `<target>/tests/_output/` | Directory to upload |
 | `output-artifact-name` | no | see [Artifact names](#artifact-names) | Name of the uploaded artifact |
+
+## Debug output
+
+Set `debug: 'true'` on this action for detailed Codeception output. It is independent of
+setup's `slic-debug` (Slic logging, on by default) and `xdebug` (PHP extension, off by default).
+There is no inherited debug flag from setup, so each suite can choose its own verbosity.
 
 ## When to pass target
 

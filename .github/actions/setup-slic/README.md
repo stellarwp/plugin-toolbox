@@ -38,6 +38,10 @@ Docker daemon are not supported.
 
 ## Updating from the initial action proposal
 
+- Replace `debug-enabled` with independent `slic-debug` and `xdebug` setup inputs and the suite
+  action's `debug` input. Slic logging now defaults to on. The `debug-flag` output and
+  `SLIC_TOOLBOX_DEBUG_FLAG` environment variable are removed.
+
 - Remove `prune-docker-networks` and `services`. Setup no longer prunes networks, and the standard
   stack already starts its dependencies.
 - Remove `verify-php-version`. An explicit PHP version is always verified.
@@ -59,18 +63,18 @@ Docker daemon are not supported.
 | `wp-version` | no | `''` | `latest`, an explicit version like `6.6`, or `''` to keep the image's version |
 | `composer-install` | no | `''` | Targets to run `slic composer install` for, one `<target> [args]` per line |
 | `composer-cache-dir` | no | `''` | Host directory for `slic composer-cache set` |
-| `debug-enabled` | no | `'false'` | Turn slic debug on and set the `debug-flag` output. See [Debug](#debug) |
+| `slic-debug` | no | `'true'` | Enable Slic diagnostic logging. See [Debug](#debug) |
+| `xdebug` | no | `'false'` | Enable the PHP Xdebug extension for tests; disables PCOV when enabled |
 
 ## Outputs
 
 | Output | What it is |
 |---|---|
 | `slic-bin` | Absolute path to the slic binary |
-| `debug-flag` | `--debug` when debug is on for this run, empty otherwise |
 | `target` | The target this action selected |
 | `php-version` | The PHP version the stack is running, as `major.minor` |
 
-All four are also exported to the environment, so later steps in the job can use them without
+All three are also exported to the environment, so later steps in the job can use them without
 wiring an output through.
 
 ## PHP version
@@ -119,7 +123,6 @@ is one any other action or tool could set as well.
 | Variable | What it is for |
 |---|---|
 | `SLIC_TOOLBOX_TARGET` | The target this action selected, so `run-slic-suite` needs no target of its own |
-| `SLIC_TOOLBOX_DEBUG_FLAG` | `--debug`, or empty, which `run-slic-suite` appends to `slic run` |
 
 One exception carries no prefix. `SLIC_BIN` holds the path to the slic binary. slic does not read
 it. It is how a job calls slic outside these actions, as the examples in this README do.
@@ -191,28 +194,41 @@ or fixtures. Do that in a `run:` step between this action and
 
 ## Debug
 
-`debug-enabled: 'true'` runs `slic debug on` and `slic config`, and sets both the `debug-flag`
-output and the `SLIC_TOOLBOX_DEBUG_FLAG` environment variable to `--debug`, which `run-slic-suite`
-appends to `slic run`. Otherwise it runs `slic debug off` and leaves the flag empty.
-The action requests Xdebug off in both cases: diagnostic logging does not require the PHP debugger.
-A project-local Slic environment file can override that setting.
+Three independent settings control different kinds of debugging:
 
-It is honored on every event, so a workflow can hardcode it on a branch or a scheduled run:
+| Setting | Action | Default | Effect |
+|---|---|---|---|
+| `slic-debug` | `setup-slic` | `'true'` | Slic diagnostic logging and configuration output |
+| `xdebug` | `setup-slic` | `'false'` | PHP Xdebug extension in the test containers |
+| `debug` | `run-slic-suite` | `'false'` | Codeception's `--debug` output for that suite |
+
+For example, enable Xdebug and detailed test output while turning Slic logging off:
 
 ```yaml
 - uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1
   with:
-    php-version: ${{ matrix.php-version }}
-    target: sfwd-lms
-    debug-enabled: 'true'
+    target: my-plugin
+    php-version: '8.3'
+    slic-debug: 'false'
+    xdebug: 'true'
+
+- uses: stellarwp/plugin-toolbox/.github/actions/run-slic-suite@v1
+  with:
+    suite: wpunit
+    debug: 'true'
 ```
 
-Wiring it to a `workflow_dispatch` input needs no event check. On any other event the expression is
-empty, which is not `'true'`:
+Omit `slic-debug` to keep Slic logging on. Omit `xdebug` and the suite's `debug` input to leave
+those features off. The suite action no longer inherits a debug flag from setup.
 
-```yaml
-    debug-enabled: ${{ inputs.debug_enabled }}
-```
+Setup applies `xdebug` after dependency installation and target restoration, to the containers
+that tests will use. Enabling it runs `slic xdebug on --yes`, which also disables PCOV if needed.
+Disabling it runs `slic xdebug off`. This input does not enable Xdebug for Composer installation,
+configure an IDE connection, or request a coverage report.
+
+Project `.env.slic.local` settings or later Slic commands can change these settings again. Keep
+project configuration consistent with the workflow, particularly when switching targets later.
+For Playwright or custom test commands, configure that runner's debug options in your own step.
 
 ## Playwright
 
