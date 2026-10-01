@@ -167,21 +167,23 @@ behind it is marked as a prerelease on GitHub. A suffixed tag never counts, what
 as. This affects only which version is treated as the newest of a line, and it errs toward holding a
 floating tag where it is.
 
-## When something cannot be read
+## A failed read stops the job
 
-A read that fails stops the job, and no tag is written.
+If the tag list or a release's prerelease flag cannot be read, the step fails and no tag is written.
 
-Answering with no tags instead would be read as nothing being newer, because that is also what a
-repository with no tags answers, and every requested tag would move. After a failed read that puts a
-floating tag on whatever was published last: a 1.2.5 backport would take `v1` off 1.5.0. The same
-goes for a release whose prerelease flag cannot be read, since treating the answer as "not a
-prerelease" would let one take the tags with `allow-prereleases` off.
+An empty tag list cannot stand in for a failed one. A repository with no tags returns the same empty
+list, and the comparison reads that as nothing being newer, so every requested tag would move. After
+a failed read the tags move to whatever was published most recently: publishing a 1.2.5 backport
+would move `v1` from 1.5.0 to 1.2.5.
 
-Nothing moves in either case, so re-running the workflow once the API answers is enough.
+An unreadable prerelease flag cannot stand in for `false` either. A release GitHub marks as a
+prerelease would take the tags with `allow-prereleases` off.
 
-A 404 from the release lookup is not a failure. It is what a tag with no release behind it answers,
-and it counts as not a prerelease, so a repository that pushes tags without publishing Releases keeps
-working.
+Re-run the workflow to retry. No tag moved, so there is nothing to undo.
+
+A 404 from the release lookup is not a failure. A tag with no release behind it returns one, and it
+counts as not a prerelease, so a repository that pushes tags without publishing Releases is
+unaffected.
 
 ## Building between the two steps
 

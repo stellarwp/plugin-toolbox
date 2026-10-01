@@ -314,11 +314,10 @@ function resolveFloatingTags({
 /**
  * Every tag name in the repository, over as many pages as it takes.
  *
- * A failed read throws rather than answering with no tags. No tags is also what a repository with
- * none answers, and the comparison reads that as nothing being newer, so every requested tag would
- * move. On a read that failed, that moves a floating tag onto whatever was published last: a 1.2.5
- * backport would take v1 off 1.5.0. Failing the job leaves every tag where it is, and the release
- * can be re-run.
+ * A failed read throws. An empty list cannot stand in for one, because a repository with no tags
+ * returns the same empty list, and the comparison reads that as nothing being newer: every requested
+ * tag would move to whatever was published most recently, so a 1.2.5 backport would take v1 off
+ * 1.5.0. Throwing leaves every tag where it is, and the workflow can be re-run.
  *
  * @param {object} github An Octokit, as actions/github-script supplies it.
  * @param {string} owner  The repository owner.
@@ -344,12 +343,11 @@ async function readTagNames({ github, owner, repo }) {
 /**
  * Whether GitHub marks the release behind a tag as a prerelease.
  *
- * A tag with no release behind it answers 404, which counts as not a prerelease, so a repository
+ * A tag with no release behind it returns 404, which counts as not a prerelease, so a repository
  * that pushes tags without publishing Releases still resolves.
  *
- * Any other failure throws. Reading it as not a prerelease would let a release GitHub has marked as
- * one take the floating tags while allow-prereleases is off, which is the opposite of what that
- * input promises.
+ * Any other failure throws. Reading it as not a prerelease would let a release GitHub marks as one
+ * take the floating tags with allow-prereleases off.
  *
  * @param {object} github An Octokit, as actions/github-script supplies it.
  * @param {string} owner  The repository owner.
