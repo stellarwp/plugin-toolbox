@@ -82,21 +82,25 @@ function isInLine(version, linePrefix) {
 /**
  * Reads a release tag into the three forms the rules need, and the numbers of the shortest.
  *
- * Each form drops a little more of the tag, and each exists for a different job. For the tag
- * `v1.4.0-rc.1+build.7`:
+ * Each exists for a different job. For `v1.4.0-rc.1`, the shape a tag usually takes:
  *
- * - `version` is `1.4.0-rc.1+build.7`: the whole tag without its `v`. This is what the release is
- *   called, so it is the name the notices use and the version the action reports.
- * - `releaseVersion` is `1.4.0-rc.1`: no build metadata. This is how the tag reads once toVersion
- *   has normalised the repository's tag list, so it is the name that excludes the release from its
- *   own comparison.
+ * - `version` is `1.4.0-rc.1`: the tag without its `v`. This is what the release is called, so it is
+ *   the name the notices use and the version the action reports.
+ * - `releaseVersion` is `1.4.0-rc.1` as well, there being no build metadata to drop. This is how the
+ *   tag reads once toVersion has normalised the repository's tag list, so it is the name that
+ *   excludes the release from its own comparison.
  * - `core` is `1.4.0`: the numbers alone. Versions are compared by this, and floating tag names are
  *   built from it.
  *
- * The two shorter forms therefore differ by the prerelease suffix and nothing else, which is what
- * makes comparing them the prerelease test. `1.4.0+build.7` has a `releaseVersion` of `1.4.0`, equal
- * to its `core`, so build metadata does not make a release a prerelease. `1.4.0-rc.1` keeps its
- * `-rc.1`, so it does.
+ * Comparing the two shorter forms is the prerelease test, because they differ by the prerelease
+ * suffix and nothing else.
+ *
+ * `releaseVersion` is a form of its own only to account for build metadata, which semver allows and
+ * says to ignore when ordering versions. Few tags carry any. One that did would otherwise read as a
+ * prerelease, its core differing from the whole tag, and would fail to exclude itself from its own
+ * comparison, since the tag list holds it with the metadata stripped. A tag carrying both is the
+ * only shape where all three forms differ: `v1.4.0-rc.1+build.7` reads as `1.4.0-rc.1+build.7`,
+ * `1.4.0-rc.1` and `1.4.0`.
  *
  * @param {string} tag The release tag, with or without a leading `v`.
  *
