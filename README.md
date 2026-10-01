@@ -6,6 +6,14 @@ It's a toolbox and not an actions repo because it holds more than actions. It ha
 
 This file is the README and the build plan. Until Phase 2 ships, anything under [The plan](#the-plan) is a proposal, not a description of what exists.
 
+## Slic actions
+
+Use [setup-slic](.github/actions/setup-slic/) to provision the stack and
+[run-slic-suite](.github/actions/run-slic-suite/) to run Codeception tests. Playwright jobs can call
+Slic directly after setup. Persistent runners should finish with
+[cleanup-slic](.github/actions/cleanup-slic/). The setup guide includes a complete workflow and
+examples for different checkout layouts.
+
 ## Why
 
 All the StellarWP brands have built their own solid CI, but it is time to merge them all into one place to reduce duplication and increase efficiency of managing these tools.
