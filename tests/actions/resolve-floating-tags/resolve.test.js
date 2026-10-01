@@ -6,9 +6,15 @@ const assert = require('node:assert')
 const {
   run,
   resolveFloatingTags,
+  readReleaseTag,
+  readLevels,
+  releasedVersions,
+  decideTag,
+  staysPut,
   compareVersions,
   isInLine,
   toVersion,
+  toParts,
 } = require('../../../.github/actions/resolve-floating-tags/resolve.js')
 const { actionsFor } = require('../../support/actions.js')
 
@@ -109,6 +115,172 @@ describe('resolve-floating-tags', () => {
 
     it('keeps a prerelease suffix, so the version fails the numeric test', () => {
       assert.equal(toVersion('1.4.0-rc.1'), '1.4.0-rc.1')
+    })
+  })
+
+  describe('toParts', () => {
+    it('reads each part as a number', () => {
+      assert.deepEqual(toParts('1.2.3'), [1, 2, 3])
+      assert.deepEqual(toParts('1.2.3.4'), [1, 2, 3, 4])
+    })
+  })
+
+  describe('readReleaseTag', () => {
+    it('reads the three forms of a plain version', () => {
+      assert.deepEqual(readReleaseTag('1.2.3'), {
+        version: '1.2.3',
+        releaseVersion: '1.2.3',
+        core: '1.2.3',
+        parts: [1, 2, 3],
+      })
+    })
+
+    it('drops a leading v from all three', () => {
+      const release = readReleaseTag('v1.2.3')
+
+      assert.equal(release.version, '1.2.3')
+      assert.equal(release.core, '1.2.3')
+    })
+
+    it('keeps build metadata out of the core but inside the version', () => {
+      const release = readReleaseTag('1.4.0+build.7')
+
+      assert.equal(release.version, '1.4.0+build.7')
+      assert.equal(release.releaseVersion, '1.4.0', 'metadata is not part of the release name')
+      assert.equal(release.core, '1.4.0')
+    })
+
+    it('keeps a prerelease suffix in the release name but out of the core', () => {
+      const release = readReleaseTag('1.4.0-rc.1')
+
+      assert.equal(release.releaseVersion, '1.4.0-rc.1', 'the suffix is what marks a prerelease')
+      assert.equal(release.core, '1.4.0')
+    })
+
+    it('reads a fourth part as part of the version', () => {
+      assert.deepEqual(readReleaseTag('1.2.3.1').parts, [1, 2, 3, 1])
+    })
+
+    it('gives a reason instead of forms when the tag is not a numeric version', () => {
+      assert.equal(readReleaseTag('nonsense').reason, 'nonsense is not a numeric version.')
+      assert.equal(readReleaseTag('v1').reason, 'v1 is not a numeric version.')
+    })
+
+    it('gives a reason naming the count when there are fewer than three parts', () => {
+      assert.equal(readReleaseTag('1.2').reason, '1.2 has 2 parts; at least three are needed.')
+    })
+  })
+
+  describe('readLevels', () => {
+    it('reads a level as the number of version parts its tag carries', () => {
+      assert.deepEqual(readLevels('major'), [1])
+      assert.deepEqual(readLevels('minor'), [2])
+    })
+
+    it('returns them shortest first, whatever order they were written in', () => {
+      assert.deepEqual(readLevels('minor major'), [1, 2])
+    })
+
+    it('reads a level named twice as one tag', () => {
+      assert.deepEqual(readLevels('major minor major'), [1, 2])
+    })
+
+    it('ignores surrounding and repeated whitespace', () => {
+      assert.deepEqual(readLevels('  major   minor  '), [1, 2])
+    })
+
+    it('throws on a name that is not a level, naming it', () => {
+      assert.throws(() => readLevels('major hotfix'), /Unknown level 'hotfix'/)
+    })
+
+    it('throws when no level is named', () => {
+      assert.throws(() => readLevels('   '), /named no floating tags/)
+      assert.throws(() => readLevels(''), /named no floating tags/)
+    })
+  })
+
+  describe('releasedVersions', () => {
+    it('reads each tag as the version it stands for', () => {
+      assert.deepEqual(releasedVersions(['v1.2.3', '1.4.0+build.7'], ''), ['1.2.3', '1.4.0'])
+    })
+
+    it('leaves out a tag that is not a version', () => {
+      assert.deepEqual(releasedVersions(['latest', 'v1', '1.2.3'], ''), ['1.2.3'])
+    })
+
+    it('leaves out a prerelease, which carries no released version', () => {
+      assert.deepEqual(releasedVersions(['1.4.0-rc.1', '1.3.0'], ''), ['1.3.0'])
+    })
+
+    it('leaves out the release being published, so it cannot block itself', () => {
+      assert.deepEqual(releasedVersions(['1.3.0', '1.2.1'], '1.3.0'), ['1.2.1'])
+    })
+
+    it('keeps a released version that shares a published prerelease core', () => {
+      // 1.4.0-rc.1 is published while 1.4.0 is already out. Excluding by core instead of by name
+      // would drop the 1.4.0 that has to block the rc.
+      assert.deepEqual(releasedVersions(['1.4.0', '1.3.0'], '1.4.0-rc.1'), ['1.4.0', '1.3.0'])
+    })
+  })
+
+  describe('staysPut', () => {
+    it('carries the tag, that it is not owned, and the reason to log', () => {
+      assert.deepEqual(staysPut('v1', 'v1 stays where it is: 1.3.0 is newer than 1.2.5.'), {
+        floating: 'v1',
+        owned: false,
+        notice: { level: 'notice', message: 'v1 stays where it is: 1.3.0 is newer than 1.2.5.' },
+      })
+    })
+  })
+
+  describe('decideTag', () => {
+    const release = { core: '1.2.5', version: '1.2.5', isPrerelease: false }
+
+    it('names the tag after the numbers of its line', () => {
+      assert.equal(decideTag([1], [], release).floating, 'v1')
+      assert.equal(decideTag([1, 2], [], release).floating, 'v1.2')
+    })
+
+    it('moves the tag when its line has nothing released in it', () => {
+      assert.deepEqual(decideTag([1, 2], ['2.0.0'], release), { floating: 'v1.2', owned: true })
+    })
+
+    it('moves the tag when this release is the newest of its line', () => {
+      assert.deepEqual(decideTag([1, 2], ['1.2.4'], release), { floating: 'v1.2', owned: true })
+    })
+
+    it('moves the tag when the newest release is the same version written longer', () => {
+      /**
+       * compareVersions reads 1.2.3 and 1.2.3.0 as one version, so neither holds the other back.
+       * Only a strictly newer release does, which a repo that writes a fourth part for its base
+       * releases depends on.
+       */
+      assert.deepEqual(decideTag([1, 2], ['1.2.3.0'], {
+        core: '1.2.3',
+        version: '1.2.3',
+        isPrerelease: false,
+      }), { floating: 'v1.2', owned: true })
+    })
+
+    it('leaves the tag when a newer release of the line exists, saying which', () => {
+      const decision = decideTag([1], ['1.3.0'], release)
+
+      assert.equal(decision.owned, false)
+      assert.equal(decision.notice.message, 'v1 stays where it is: 1.3.0 is newer than 1.2.5.')
+    })
+
+    it('leaves the tag to a released version when this release is a prerelease', () => {
+      const rc = { core: '1.4.0', version: '1.4.0-rc.1', isPrerelease: true }
+      const decision = decideTag([1], ['1.3.0'], rc)
+
+      assert.equal(decision.owned, false)
+      assert.equal(decision.notice.message, 'v1 stays on 1.3.0: 1.4.0-rc.1 is a prerelease.')
+    })
+
+    it('moves the tag for a prerelease when its line has nothing released', () => {
+      const rc = { core: '1.4.0', version: '1.4.0-rc.1', isPrerelease: true }
+
+      assert.deepEqual(decideTag([1, 4], ['1.3.0'], rc), { floating: 'v1.4', owned: true })
     })
   })
 

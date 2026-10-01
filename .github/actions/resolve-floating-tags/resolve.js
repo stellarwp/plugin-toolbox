@@ -381,8 +381,14 @@ async function run({ github, core, env }) {
 module.exports = {
   run,
   resolveFloatingTags,
+  readReleaseTag,
+  readLevels,
+  releasedVersions,
+  decideTag,
+  staysPut,
   compareVersions,
   isInLine,
   toVersion,
+  toParts,
   NUMERIC_VERSION,
 }
