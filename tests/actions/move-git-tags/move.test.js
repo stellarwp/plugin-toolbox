@@ -5,7 +5,19 @@ const assert = require('node:assert')
 
 const { moveTags, parseTagNames, run } = require('../../../.github/actions/move-git-tags/move.js')
 
-/** An Octokit stand-in. `existing` are the tag names that already have a ref. */
+/**
+ * A fake of the `github` argument that actions/github-script passes to the script: an Octokit
+ * client. Only the three `rest.git` methods move.js calls are implemented.
+ *
+ * Every call is recorded in `calls` in the order it was made, so a test asserts the requests the
+ * action would have sent rather than the value it returned. `getRef` throws a 404 for a tag that is
+ * not in `existing`, which is the signal move.js reads to choose between creating and repointing.
+ *
+ * @param {string[]} existing       Tag names that already have a ref, so `getRef` finds them.
+ * @param {number}   failUpdateWith HTTP status for `updateRef` to throw instead of succeeding, for
+ *                                  the protected-tag and missing-permission cases.
+ * @returns {{calls: string[], rest: {git: object}}} The client, plus the calls it recorded.
+ */
 function fakeGithub({ existing = [], failUpdateWith } = {}) {
   const calls = []
 
@@ -43,6 +55,18 @@ function fakeGithub({ existing = [], failUpdateWith } = {}) {
   }
 }
 
+/**
+ * A fake of the `core` argument that actions/github-script passes to the script: the @actions/core
+ * toolkit. Only the methods move.js calls are implemented.
+ *
+ * The real `setOutput` appends to the file named by GITHUB_OUTPUT, and the log methods write
+ * workflow commands to stdout. This collects both in memory instead, so a test reads `outputs` to
+ * assert what the step would have handed to later steps, and `messages` for what it would have
+ * logged.
+ *
+ * @returns {{outputs: object, messages: string[], info: Function, notice: Function,
+ *            warning: Function, setOutput: Function}}
+ */
 function fakeCore() {
   const outputs = {}
   const messages = []
