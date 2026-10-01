@@ -180,13 +180,13 @@ runs:
         "${SLIC_BIN}" build-prompt off
         "${SLIC_BIN}" build-subdir off
 
+        if [ -n "${COMPOSER_CACHE_DIR}" ]; then
+          "${SLIC_BIN}" composer-cache set "${COMPOSER_CACHE_DIR}"
+        fi
+
         # With no version named, `slic use` resolves one from the target instead.
         if [ -n "${PHP_VERSION}" ]; then
           "${SLIC_BIN}" php-version set "${PHP_VERSION}" --skip-rebuild
-        fi
-
-        if [ -n "${COMPOSER_CACHE_DIR}" ]; then
-          "${SLIC_BIN}" composer-cache set "${COMPOSER_CACHE_DIR}"
         fi
 
     - name: Define if we need the debug flag
