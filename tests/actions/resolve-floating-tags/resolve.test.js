@@ -50,19 +50,6 @@ function repoWith(names, release) {
   ]
 }
 
-/**
- * Runs the pure resolution and flattens it, so a case reads as one line.
- *
- * @param {object} options Passed to resolveFloatingTags.
- *
- * @returns {string} The resolved tags and the skipped ones, separated by ` | `.
- */
-function resolve(options) {
-  const { tags, skipped } = resolveFloatingTags(options)
-
-  return `${tags.join(' ')} | ${skipped.join(' ')}`
-}
-
 describe('resolve-floating-tags', () => {
   describe('compareVersions', () => {
     it('puts 1.10.0 above 1.9.0, which a string comparison does not', () => {
@@ -298,46 +285,85 @@ describe('resolve-floating-tags', () => {
 
   describe('resolveFloatingTags', () => {
     describe('each tag is decided on its own line', () => {
-      it('gives every requested tag to the newest release', () => {
-        const tagNames = ['1.0.0', '1.2.1', '1.3.0', '2.0.0']
+      const tagNames = ['1.0.0', '1.2.1', '1.3.0', '2.0.0']
 
-        assert.equal(resolve({ tag: '1.3.0', tagNames }), 'v1 v1.3 | ')
-        assert.equal(resolve({ tag: 'v1.3.0', tagNames }), 'v1 v1.3 | ', 'a v prefix reads the same')
+      it('gives every requested tag to the newest release', () => {
+        const { tags, skipped } = resolveFloatingTags({ tag: '1.3.0', tagNames })
+
+        assert.deepEqual(tags, ['v1', 'v1.3'])
+        assert.deepEqual(skipped, [])
+      })
+
+      it('reads a v-prefixed tag the same way', () => {
+        const { tags, skipped } = resolveFloatingTags({ tag: 'v1.3.0', tagNames })
+
+        assert.deepEqual(tags, ['v1', 'v1.3'])
+        assert.deepEqual(skipped, [])
       })
 
       it('gives a patch on an older line its minor tag and leaves the major alone', () => {
-        assert.equal(resolve({ tag: '1.2.5', tagNames: ['1.3.0', '1.2.5'] }), 'v1.2 | v1')
+        const { tags, skipped } = resolveFloatingTags({ tag: '1.2.5', tagNames: ['1.3.0', '1.2.5'] })
+
+        assert.deepEqual(tags, ['v1.2'])
+        assert.deepEqual(skipped, ['v1'])
       })
 
       it('does not move a tag backwards when a release is published out of order', () => {
-        assert.equal(resolve({ tag: '1.1.1', tagNames: ['1.2.0', '1.1.1'] }), 'v1.1 | v1')
+        const { tags, skipped } = resolveFloatingTags({ tag: '1.1.1', tagNames: ['1.2.0', '1.1.1'] })
+
+        assert.deepEqual(tags, ['v1.1'])
+        assert.deepEqual(skipped, ['v1'])
       })
 
       it('does not let a newer major hold a lower line back', () => {
-        assert.equal(resolve({ tag: '1.2.4', tagNames: ['2.1.0', '1.2.4'] }), 'v1 v1.2 | ')
+        const { tags, skipped } = resolveFloatingTags({ tag: '1.2.4', tagNames: ['2.1.0', '1.2.4'] })
+
+        assert.deepEqual(tags, ['v1', 'v1.2'])
+        assert.deepEqual(skipped, [])
       })
 
       it('still compares a version that would fall past a release-list cap', () => {
         // Reading releases rather than tags missed 1.5.0 here, because a release list is ordered by
         // publication date and capped, and moved v1 back onto 1.2.5.
-        assert.equal(
-          resolve({ tag: '1.2.5', tagNames: ['3.1.0', '3.0.0', '2.9.0', '1.5.0', '1.2.5'] }),
-          'v1.2 | v1'
-        )
+        const { tags, skipped } = resolveFloatingTags({
+          tag: '1.2.5',
+          tagNames: ['3.1.0', '3.0.0', '2.9.0', '1.5.0', '1.2.5'],
+        })
+
+        assert.deepEqual(tags, ['v1.2'])
+        assert.deepEqual(skipped, ['v1'])
       })
     })
 
     describe('a fourth version part is a hotfix in the same minor line', () => {
       it('gives the minor tag to the hotfix', () => {
-        assert.equal(resolve({ tag: '1.2.3.1', tagNames: ['1.2.2', '1.2.3', '1.2.3.1'] }), 'v1 v1.2 | ')
+        const { tags, skipped } = resolveFloatingTags({
+          tag: '1.2.3.1',
+          tagNames: ['1.2.2', '1.2.3', '1.2.3.1'],
+        })
+
+        assert.deepEqual(tags, ['v1', 'v1.2'])
+        assert.deepEqual(skipped, [])
       })
 
       it('moves nothing when the patch is republished after its hotfix', () => {
-        assert.equal(resolve({ tag: '1.2.3', tagNames: ['1.2.3', '1.2.3.1', '1.3.0'] }), ' | v1 v1.2')
+        const { tags, skipped } = resolveFloatingTags({
+          tag: '1.2.3',
+          tagNames: ['1.2.3', '1.2.3.1', '1.3.0'],
+        })
+
+        assert.deepEqual(tags, [])
+        assert.deepEqual(skipped, ['v1', 'v1.2'])
       })
 
       it('gives the tags to the next patch after a hotfix', () => {
-        assert.equal(resolve({ tag: '1.2.4', tagNames: ['1.2.3', '1.2.3.1', '1.2.4'] }), 'v1 v1.2 | ')
+        const { tags, skipped } = resolveFloatingTags({
+          tag: '1.2.4',
+          tagNames: ['1.2.3', '1.2.3.1', '1.2.4'],
+        })
+
+        assert.deepEqual(tags, ['v1', 'v1.2'])
+        assert.deepEqual(skipped, [])
       })
     })
 
@@ -345,13 +371,16 @@ describe('resolve-floating-tags', () => {
     // becoming an empty result with the reason logged.
     describe('a rejected tag', () => {
       it('resolves nothing and reports the reason readReleaseTag gave', () => {
-        const resolved = resolveFloatingTags({ tag: '1.2', tagNames: ['1.3.0'] })
+        const { tags, skipped, version, notices } = resolveFloatingTags({
+          tag: '1.2',
+          tagNames: ['1.3.0'],
+        })
 
-        assert.deepEqual(resolved.tags, [])
-        assert.deepEqual(resolved.skipped, [])
-        assert.equal(resolved.version, '', 'nothing is reported as the released version')
+        assert.deepEqual(tags, [])
+        assert.deepEqual(skipped, [])
+        assert.equal(version, '', 'nothing is reported as the released version')
         assert.equal(
-          resolved.notices[0].message,
+          notices[0].message,
           'Resolved no floating tags: 1.2 has 2 parts; at least three are needed.'
         )
       })
@@ -360,11 +389,18 @@ describe('resolve-floating-tags', () => {
     // readLevels owns which names are levels and what order they come back in. What is left here is
     // whether resolveFloatingTags acts on them.
     describe('levels', () => {
-      it('resolves only the tags the levels name', () => {
-        const tagNames = ['1.2.1', '1.3.0']
+      const tagNames = ['1.2.1', '1.3.0']
 
-        assert.equal(resolve({ tag: '1.3.0', tagNames, levels: 'major' }), 'v1 | ')
-        assert.equal(resolve({ tag: '1.3.0', tagNames, levels: 'minor' }), 'v1.3 | ')
+      it('resolves only the major when that is the only level named', () => {
+        const { tags } = resolveFloatingTags({ tag: '1.3.0', tagNames, levels: 'major' })
+
+        assert.deepEqual(tags, ['v1'])
+      })
+
+      it('resolves only the minor when that is the only level named', () => {
+        const { tags } = resolveFloatingTags({ tag: '1.3.0', tagNames, levels: 'minor' })
+
+        assert.deepEqual(tags, ['v1.3'])
       })
 
       it('lets a bad level fail the call instead of resolving a shorter set', () => {
@@ -377,102 +413,137 @@ describe('resolve-floating-tags', () => {
 
     describe('prereleases', () => {
       it('reads build metadata as a released version, not a prerelease', () => {
-        const tagNames = ['1.3.0', '1.4.0+build.7']
+        const { tags, skipped } = resolveFloatingTags({
+          tag: '1.4.0+build.7',
+          tagNames: ['1.3.0', '1.4.0+build.7'],
+        })
 
-        assert.equal(resolve({ tag: '1.4.0+build.7', tagNames }), 'v1 v1.4 | ')
+        assert.deepEqual(tags, ['v1', 'v1.4'])
+        assert.deepEqual(skipped, [])
       })
 
       it('resolves nothing for a suffixed tag', () => {
-        assert.equal(resolve({ tag: '1.4.0-rc.1', tagNames: ['1.3.0'] }), ' | ')
+        const { tags, skipped } = resolveFloatingTags({
+          tag: '1.4.0-rc.1',
+          tagNames: ['1.3.0'],
+        })
+
+        assert.deepEqual(tags, [])
+        assert.deepEqual(skipped, [], 'it stops before any tag is considered')
       })
 
       it('resolves nothing for a plain version GitHub marks as a prerelease', () => {
-        assert.equal(
-          resolve({ tag: '1.3.0', flaggedPrerelease: true, tagNames: ['1.2.1', '1.3.0'] }),
-          ' | '
-        )
+        const { tags, skipped } = resolveFloatingTags({
+          tag: '1.3.0',
+          flaggedPrerelease: true,
+          tagNames: ['1.2.1', '1.3.0'],
+        })
+
+        assert.deepEqual(tags, [])
+        assert.deepEqual(skipped, [])
+      })
+
+      it('never lets an outstanding prerelease block a released version', () => {
+        const { tags, skipped } = resolveFloatingTags({
+          tag: '1.3.1',
+          tagNames: ['1.3.0', '1.3.1', '1.9.0-rc.1'],
+        })
+
+        assert.deepEqual(tags, ['v1', 'v1.3'])
+        assert.deepEqual(skipped, [])
       })
 
       describe('with allow-prereleases on', () => {
         const allowPrereleases = true
 
         it('gives a tag to a line that has had no released version', () => {
-          assert.equal(
-            resolve({ tag: '1.4.0-rc.1', tagNames: ['1.3.0', '1.4.0-rc.1'], allowPrereleases }),
-            'v1.4 | v1',
-            'v1.4 has nothing released behind it; v1 stays on 1.3.0'
-          )
+          // v1.4 has nothing released behind it; v1 stays on 1.3.0.
+          const { tags, skipped } = resolveFloatingTags({
+            tag: '1.4.0-rc.1',
+            tagNames: ['1.3.0', '1.4.0-rc.1'],
+            allowPrereleases,
+          })
+
+          assert.deepEqual(tags, ['v1.4'])
+          assert.deepEqual(skipped, ['v1'])
         })
 
         it('lets one prerelease replace another', () => {
-          assert.equal(
-            resolve({
-              tag: '1.4.0-rc.2',
-              tagNames: ['1.3.0', '1.4.0-rc.1', '1.4.0-rc.2'],
-              allowPrereleases,
-            }),
-            'v1.4 | v1'
-          )
+          const { tags, skipped } = resolveFloatingTags({
+            tag: '1.4.0-rc.2',
+            tagNames: ['1.3.0', '1.4.0-rc.1', '1.4.0-rc.2'],
+            allowPrereleases,
+          })
+
+          assert.deepEqual(tags, ['v1.4'])
+          assert.deepEqual(skipped, ['v1'])
         })
 
         it('gives a brand new major line to its own prerelease', () => {
-          assert.equal(
-            resolve({ tag: '2.0.0-rc.1', tagNames: ['1.3.0', '2.0.0-rc.1'], allowPrereleases }),
-            'v2 v2.0 | '
-          )
+          const { tags, skipped } = resolveFloatingTags({
+            tag: '2.0.0-rc.1',
+            tagNames: ['1.3.0', '2.0.0-rc.1'],
+            allowPrereleases,
+          })
+
+          assert.deepEqual(tags, ['v2', 'v2.0'])
+          assert.deepEqual(skipped, [])
         })
 
         it('leaves the major alone when a higher line has shipped', () => {
-          assert.equal(
-            resolve({ tag: '1.4.0-rc.1', tagNames: ['1.5.0', '1.4.0-rc.1'], allowPrereleases }),
-            'v1.4 | v1'
-          )
+          const { tags, skipped } = resolveFloatingTags({
+            tag: '1.4.0-rc.1',
+            tagNames: ['1.5.0', '1.4.0-rc.1'],
+            allowPrereleases,
+          })
+
+          assert.deepEqual(tags, ['v1.4'])
+          assert.deepEqual(skipped, ['v1'])
         })
 
         it('is not the released version that blocks itself', () => {
-          assert.equal(
-            resolve({
-              tag: '1.3.0',
-              flaggedPrerelease: true,
-              tagNames: ['1.2.1', '1.3.0'],
-              allowPrereleases,
-            }),
-            'v1.3 | v1'
-          )
+          const { tags, skipped } = resolveFloatingTags({
+            tag: '1.3.0',
+            flaggedPrerelease: true,
+            tagNames: ['1.2.1', '1.3.0'],
+            allowPrereleases,
+          })
+
+          assert.deepEqual(tags, ['v1.3'])
+          assert.deepEqual(skipped, ['v1'])
         })
 
         it('never takes a tag from the released version of the same number', () => {
-          assert.equal(
-            resolve({
-              tag: '1.4.0-rc.1',
-              tagNames: ['1.3.0', '1.4.0', '1.4.0-rc.1'],
-              allowPrereleases,
-            }),
-            ' | v1 v1.4',
-            'a released 1.4.0 keeps v1.4 when its own rc is published afterwards'
-          )
+          // A released 1.4.0 keeps v1.4 when its own rc is published afterwards.
+          const { tags, skipped } = resolveFloatingTags({
+            tag: '1.4.0-rc.1',
+            tagNames: ['1.3.0', '1.4.0', '1.4.0-rc.1'],
+            allowPrereleases,
+          })
+
+          assert.deepEqual(tags, [])
+          assert.deepEqual(skipped, ['v1', 'v1.4'])
         })
 
         it('never takes a tag once its line has had a released version', () => {
-          assert.equal(
-            resolve({
-              tag: '1.4.1-rc.1',
-              tagNames: ['1.3.0', '1.4.0', '1.4.1-rc.1'],
-              allowPrereleases,
-            }),
-            ' | v1 v1.4'
-          )
-        })
-      })
+          const { tags, skipped } = resolveFloatingTags({
+            tag: '1.4.1-rc.1',
+            tagNames: ['1.3.0', '1.4.0', '1.4.1-rc.1'],
+            allowPrereleases,
+          })
 
-      it('never lets an outstanding prerelease block a released version', () => {
-        assert.equal(resolve({ tag: '1.3.1', tagNames: ['1.3.0', '1.3.1', '1.9.0-rc.1'] }), 'v1 v1.3 | ')
+          assert.deepEqual(tags, [])
+          assert.deepEqual(skipped, ['v1', 'v1.4'])
+        })
       })
     })
 
     describe('when the tags cannot be read', () => {
       it('resolves every requested tag on the released tag alone', () => {
-        assert.equal(resolve({ tag: '1.3.0', tagNames: [] }), 'v1 v1.3 | ')
+        const { tags, skipped } = resolveFloatingTags({ tag: '1.3.0', tagNames: [] })
+
+        assert.deepEqual(tags, ['v1', 'v1.3'])
+        assert.deepEqual(skipped, [], 'nothing can be newer, so nothing is held back')
       })
     })
 
