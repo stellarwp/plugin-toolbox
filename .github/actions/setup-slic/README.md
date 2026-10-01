@@ -243,6 +243,8 @@ The directory is chosen in this order:
 
 1. An explicit `composer-cache-dir`.
 2. Host Composer's `composer config cache-dir --absolute`, respecting `COMPOSER_CACHE_DIR`.
+   If the starting working directory has no manifest, detection adds `--global`. A local manifest,
+   including one selected with `COMPOSER`, keeps its project-specific cache configuration.
 3. `${RUNNER_TEMP}/slic-composer-cache` when host Composer is unavailable and managed caching is on.
 
 Relative paths are resolved from the action's starting working directory before changing to

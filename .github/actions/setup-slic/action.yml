@@ -106,7 +106,14 @@ runs:
         cache_dir="${CACHE_DIR_OVERRIDE}"
 
         if [ -z "${cache_dir}" ] && command -v composer > /dev/null 2>&1; then
-          if ! cache_dir=$(composer config cache-dir --absolute); then
+          composer_args=(config cache-dir --absolute)
+
+          # Subdirectory checkouts may leave the workspace without a Composer manifest.
+          if [ ! -f "${COMPOSER:-composer.json}" ]; then
+            composer_args+=(--global)
+          fi
+
+          if ! cache_dir=$(composer "${composer_args[@]}"); then
             echo "::error::Could not detect the host Composer cache directory. Fix Composer configuration or supply composer-cache-dir."
             exit 1
           fi
