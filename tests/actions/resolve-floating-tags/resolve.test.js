@@ -367,18 +367,17 @@ describe('resolve-floating-tags', () => {
       assert.equal(logged(), '', 'a repo that pushes tags without Releases is not a problem')
     })
 
-    it('warns when the lookup fails for any other reason', async (t) => {
-      /**
-       * A 403 or a 500 leaves it unknown whether the release is a prerelease, and it is read as not
-       * one. With allow-prereleases off that would move the floating tags onto a prerelease, so the
-       * warning is the only sign it happened.
-       */
-      const { github, core, logged } = await actionsFor(t, [
+    it('throws when the lookup fails for any other reason', async (t) => {
+      // Reading it as not a prerelease would let a release GitHub has marked as one take the tags
+      // while allow-prereleases is off.
+      const { github } = await actionsFor(t, [
         { method: 'GET', path: RELEASE_PATH('v1.3.0'), status: 403, body: { message: 'Forbidden' } },
       ])
 
-      assert.equal(await readPrereleaseFlag({ github, core, ...REPO, tag: 'v1.3.0' }), false)
-      assert.match(logged(), /::warning::Could not read the release for v1\.3\.0/)
+      await assert.rejects(
+        readPrereleaseFlag({ github, ...REPO, tag: 'v1.3.0' }),
+        /Could not tell whether v1\.3\.0 is a prerelease/
+      )
     })
   })
 

@@ -167,15 +167,21 @@ behind it is marked as a prerelease on GitHub. A suffixed tag never counts, what
 as. This affects only which version is treated as the newest of a line, and it errs toward holding a
 floating tag where it is.
 
-## When the tags cannot be read
+## When something cannot be read
 
 A read that fails stops the job, and no tag is written.
 
 Answering with no tags instead would be read as nothing being newer, because that is also what a
 repository with no tags answers, and every requested tag would move. After a failed read that puts a
-floating tag on whatever was published last: a 1.2.5 backport would take `v1` off 1.5.0.
+floating tag on whatever was published last: a 1.2.5 backport would take `v1` off 1.5.0. The same
+goes for a release whose prerelease flag cannot be read, since treating the answer as "not a
+prerelease" would let one take the tags with `allow-prereleases` off.
 
-Nothing moves, so re-running the workflow once the API answers is enough.
+Nothing moves in either case, so re-running the workflow once the API answers is enough.
+
+A 404 from the release lookup is not a failure. It is what a tag with no release behind it answers,
+and it counts as not a prerelease, so a repository that pushes tags without publishing Releases keeps
+working.
 
 ## Building between the two steps
 

@@ -345,25 +345,32 @@ async function readTagNames({ github, owner, repo }) {
  * Whether GitHub marks the release behind a tag as a prerelease.
  *
  * A tag with no release behind it answers 404, which counts as not a prerelease, so a repository
- * that pushes tags without publishing Releases still resolves. Any other failure is warned about
- * and also read as not a prerelease.
+ * that pushes tags without publishing Releases still resolves.
+ *
+ * Any other failure throws. Reading it as not a prerelease would let a release GitHub has marked as
+ * one take the floating tags while allow-prereleases is off, which is the opposite of what that
+ * input promises.
  *
  * @param {object} github An Octokit, as actions/github-script supplies it.
- * @param {object} core   The @actions/core toolkit, for the warning.
  * @param {string} owner  The repository owner.
  * @param {string} repo   The repository name.
  * @param {string} tag    The tag to look the release up by.
  *
+ * @throws {Error} When the release cannot be read for any reason but a 404.
+ *
  * @returns {Promise<boolean>} Whether that release is marked as a prerelease.
  */
-async function readPrereleaseFlag({ github, core, owner, repo, tag }) {
+async function readPrereleaseFlag({ github, owner, repo, tag }) {
   try {
     const release = await github.rest.repos.getReleaseByTag({ owner, repo, tag })
 
     return release.data.prerelease
   } catch (error) {
     if (error.status !== 404) {
-      core.warning(`Could not read the release for ${tag} (${error.message}).`)
+      throw new Error(
+        `Could not tell whether ${tag} is a prerelease, so no floating tag can be moved safely: ` +
+          error.message
+      )
     }
 
     return false
@@ -385,7 +392,7 @@ async function run({ github, core, env }) {
   const tag = env.INPUT_TAG
 
   const tagNames = await readTagNames({ github, owner, repo })
-  const flaggedPrerelease = await readPrereleaseFlag({ github, core, owner, repo, tag })
+  const flaggedPrerelease = await readPrereleaseFlag({ github, owner, repo, tag })
 
   const resolved = resolveFloatingTags({
     tag,
