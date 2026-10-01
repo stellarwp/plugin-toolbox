@@ -162,8 +162,20 @@ describe('resolve-floating-tags', () => {
     })
 
     it('gives a reason instead of forms when the tag is not a numeric version', () => {
-      assert.equal(readReleaseTag('nonsense').reason, 'nonsense is not a numeric version.')
-      assert.equal(readReleaseTag('v1').reason, 'v1 is not a numeric version.')
+      for (const tag of ['nonsense', 'v1', 'latest', 'v.1.2', '1']) {
+        assert.equal(readReleaseTag(tag).reason, `${tag} is not a numeric version.`, tag)
+      }
+    })
+
+    it('reads a trailing dash as a prerelease with nothing after it', () => {
+      // Not a version anyone writes, but the dash is what marks a prerelease, so 1.2.3- is read as
+      // one rather than rejected. It resolves nothing unless allow-prereleases is on, like any
+      // other.
+      const release = readReleaseTag('1.2.3-')
+
+      assert.equal(release.reason, undefined)
+      assert.equal(release.core, '1.2.3')
+      assert.equal(release.releaseVersion, '1.2.3-')
     })
 
     it('gives a reason naming the count when there are fewer than three parts', () => {
@@ -329,55 +341,45 @@ describe('resolve-floating-tags', () => {
       })
     })
 
-    describe('the versions it accepts', () => {
-      it('needs at least three parts, so a floating tag is never the release tag', () => {
-        assert.equal(resolve({ tag: '1.2', tagNames: [] }), ' | ')
+    // readReleaseTag owns which versions are rejected and why. What is left here is a rejection
+    // becoming an empty result with the reason logged.
+    describe('a rejected tag', () => {
+      it('resolves nothing and reports the reason readReleaseTag gave', () => {
+        const resolved = resolveFloatingTags({ tag: '1.2', tagNames: ['1.3.0'] })
+
+        assert.deepEqual(resolved.tags, [])
+        assert.deepEqual(resolved.skipped, [])
+        assert.equal(resolved.version, '', 'nothing is reported as the released version')
         assert.equal(
-          resolveFloatingTags({ tag: '1.2', tagNames: [] }).notices[0].message,
+          resolved.notices[0].message,
           'Resolved no floating tags: 1.2 has 2 parts; at least three are needed.'
         )
       })
-
-      it('resolves nothing for a tag that is not a numeric version', () => {
-        for (const tag of ['nonsense', 'v1', 'latest', '1.2.3-', 'v.1.2']) {
-          assert.equal(resolve({ tag, tagNames: ['1.3.0'] }), ' | ', `${tag} resolves nothing`)
-        }
-      })
     })
 
+    // readLevels owns which names are levels and what order they come back in. What is left here is
+    // whether resolveFloatingTags acts on them.
     describe('levels', () => {
-      const tagNames = ['1.2.1', '1.3.0']
+      it('resolves only the tags the levels name', () => {
+        const tagNames = ['1.2.1', '1.3.0']
 
-      it('resolves only the major when asked for it', () => {
         assert.equal(resolve({ tag: '1.3.0', tagNames, levels: 'major' }), 'v1 | ')
-      })
-
-      it('resolves only the minor when asked for it', () => {
         assert.equal(resolve({ tag: '1.3.0', tagNames, levels: 'minor' }), 'v1.3 | ')
       })
 
-      it('ignores the order they are written in, and a repeat', () => {
-        assert.equal(resolve({ tag: '1.3.0', tagNames, levels: 'minor major minor' }), 'v1 v1.3 | ')
-      })
-
-      it('fails on an unknown level rather than resolving a shorter set', () => {
+      it('lets a bad level fail the call instead of resolving a shorter set', () => {
         assert.throws(
           () => resolveFloatingTags({ tag: '1.3.0', levels: 'major hotfix' }),
           /Unknown level 'hotfix'/
-        )
-      })
-
-      it('fails when no level is named', () => {
-        assert.throws(
-          () => resolveFloatingTags({ tag: '1.3.0', levels: '   ' }),
-          /named no floating tags/
         )
       })
     })
 
     describe('prereleases', () => {
       it('reads build metadata as a released version, not a prerelease', () => {
-        assert.equal(resolve({ tag: '1.4.0+build.7', tagNames: ['1.3.0', '1.4.0+build.7'] }), 'v1 v1.4 | ')
+        const tagNames = ['1.3.0', '1.4.0+build.7']
+
+        assert.equal(resolve({ tag: '1.4.0+build.7', tagNames }), 'v1 v1.4 | ')
       })
 
       it('resolves nothing for a suffixed tag', () => {
