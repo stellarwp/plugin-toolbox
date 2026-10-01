@@ -36,6 +36,39 @@ Git, curl, jq and OpenSSH installed. Give each job its own Docker daemon. Slic u
 container names and `slic here` can tear down an existing stack, so concurrent jobs on a shared
 Docker daemon are not supported.
 
+## When host PHP setup is needed
+
+Slic's CLI needs PHP on the runner, even though Composer installation and tests execute inside
+its containers. GitHub's standard Ubuntu runners already include PHP and Composer; no separate
+PHP setup step is needed for the normal example above. See the
+[Ubuntu runner software inventory](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md#php-tools).
+
+**Only add a host PHP setup step if your runner does not have a PHP version compatible with the
+Slic release you selected**, for example on a minimal or custom self-hosted image. One option is
+[setup-php](https://github.com/shivammathur/setup-php), placed before `setup-slic`:
+
+```yaml
+# Optional: only needed when the runner lacks suitable PHP for the Slic CLI.
+- uses: shivammathur/setup-php@v2
+  with:
+    php-version: '8.3'
+    coverage: none
+
+- uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1
+  with:
+    target: my-plugin
+    php-version: '7.4'
+    composer-install: my-plugin
+```
+
+These versions serve different purposes: host PHP 8.3 runs the Slic CLI; container PHP 7.4 runs
+Composer and the tests. They do not need to match. `setup-php` does not provide Docker or the
+other runner prerequisites listed above.
+
+**Missing host Composer alone does not require this step.** Slic supplies Composer inside its
+container, and managed caching automatically uses a runner-temporary directory when host
+Composer is unavailable.
+
 ## Updating from the initial action proposal
 
 - Replace `debug-enabled` with independent `slic-debug` and `xdebug` setup inputs and the suite
