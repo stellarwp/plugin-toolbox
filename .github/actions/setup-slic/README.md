@@ -16,8 +16,8 @@ as Playwright, calls its own commands after this action instead.
 
 | Input | Required | Default | What it does |
 |---|---|---|---|
-| `php-version` | yes | | PHP version to set in slic, e.g. `8.3` |
 | `target` | yes | | The `slic use` target |
+| `php-version` | recommended | slic resolves it | PHP version to set in slic, e.g. `8.3`. See [PHP version](#php-version) |
 | `here-dir` | no | the workspace | Directory `slic here` runs in. Must be the parent of the target checkout |
 | `ref` | no | `main` | slic branch, tag or commit |
 | `slic-repository` | no | `stellarwp/slic` | Repository to check slic out from |
@@ -27,7 +27,7 @@ as Playwright, calls its own commands after this action instead.
 | `composer-install` | no | `''` | Targets to run `slic composer install` for, one `<target> [args]` per line |
 | `composer-cache-dir` | no | `''` | Host directory for `slic composer-cache set` |
 | `prune-docker-networks` | no | `'false'` | Run `docker network prune -f` before each `slic use` |
-| `verify-php-version` | no | `'true'` | Fail when the container's PHP does not match `php-version` |
+| `verify-php-version` | no | `'true'` | Fail when the container's PHP does not match `php-version`. No effect when `php-version` is empty |
 | `debug-enabled` | no | `'false'` | Turn slic debug on and set the `debug-flag` output. See [Debug](#debug) |
 
 ## Outputs
@@ -37,9 +37,28 @@ as Playwright, calls its own commands after this action instead.
 | `slic-bin` | Absolute path to the slic binary |
 | `debug-flag` | `--debug` when debug is on for this run, empty otherwise |
 | `target` | The target this action selected |
+| `php-version` | The PHP version the stack is running, as `major.minor` |
 
 All three are also exported to the environment, so later steps in the job can use them without
 wiring an output through.
+
+## PHP version
+
+Naming a `php-version` sets it and then checks it, failing the job when the container disagrees.
+A matrix over PHP versions has to name one, or every leg runs the same version.
+
+Leaving it empty hands the choice to slic, which resolves it from the target in this order:
+
+1. the target's `slic.json` `phpVersion`
+2. the target's `composer.json` `config.platform.php`
+
+Note the second is `config.platform.php`, not `require.php`. A target that declares
+`require: {"php": ">=7.4"}` and no `config.platform.php` gives slic nothing to go on.
+
+Either way the action reads the running version back out of the container and reports it, exports
+it as `SLIC_PHP_VERSION`, and returns it as the `php-version` output. A job therefore always ends
+up pinned to a known version, and the only question is who chose it. When slic chose, the action
+says so with a warning.
 
 ## Environment
 

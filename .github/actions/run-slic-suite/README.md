@@ -45,7 +45,8 @@ whatever target it resolves before running the suite.
 ## Artifact names
 
 The default is `test-output-<target>-php<version>-<suite>`, where the version is read from
-`SLIC_PHP_VERSION`, which [setup-slic](../setup-slic/) exports when it pins the stack. Characters an
+`SLIC_PHP_VERSION`, which [setup-slic](../setup-slic/) exports as `major.minor` once it knows which
+PHP the stack is running. Characters an
 artifact name cannot hold are replaced with `-`, so a target such as `the-events-calendar/common`
 becomes `the-events-calendar-common`.
 
