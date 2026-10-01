@@ -39,6 +39,14 @@ between them. See [Building between the two steps](#building-between-the-two-ste
 | `skipped` | `v1` | Tags a newer release of the same line already owns |
 | `version` | `1.2.3` | The version without its leading `v`. Empty when the tag was rejected |
 
+## Permissions
+
+Reading the tags and the release needs no more than `contents: read`, which is what a workflow has by
+default. A workflow that sets `permissions: {}` has to grant it.
+
+`github.token` is the token of the workflow that runs this action, scoped to that repository, so a
+repo calling this action reads its own tags with its own token and needs no secret.
+
 ## Each tag is resolved on its own
 
 A tag is resolved only when no stable release of **its own line** is newer than the version being

@@ -63,9 +63,16 @@ jobs:
       contents: write
 ```
 
-Pass a PAT or app token as `token` instead when a ruleset protects the tags in a way
-`github.token` cannot satisfy. A tag protection rule that blocks the default token makes the API
-call fail rather than silently skip.
+`github.token` is the token of the workflow that runs this action, scoped to that repository, so a
+repo calling this action writes its own tags with its own token and needs no secret.
+
+Pass a PAT or app token as `token` instead in either of two cases. One is a ruleset that protects the
+tags in a way `github.token` cannot satisfy; a tag protection rule that blocks the default token makes
+the API call fail rather than silently skip.
+
+The other is a repo whose own workflows have to react to the tag. GitHub creates no workflow run for
+an event made with `GITHUB_TOKEN`, apart from `workflow_dispatch` and `repository_dispatch`, so a
+workflow listening on `push:` for `tags:` will not see a tag this action moved.
 
 ## Why the API and not git push
 
