@@ -107,7 +107,8 @@ A 0.x release resolves `v0` and its own minor tag: 0.1.2 resolves `v0` and `v0.1
 `v0` and `v0.0`. The lines are compared as any others are: a 0.1.2 backport published while 0.2.0 is
 out moves `v0.1` and leaves `v0` on 0.2.0.
 
-Semver puts breaking changes in the minor below 1.0.0, so `v0` carries them where `v1` does not.
+Semver says of 0.y.z only that anything may change at any time, so a 0.x minor is free to break
+where a 1.x minor is not. `v0` therefore crosses breaking changes and `v1` does not.
 
 Both tags are resolved for a 0.x release by default. `levels: minor` resolves the minor tag and no
 `v0`, for a repo that wants the tags it publishes to stay inside one minor.
