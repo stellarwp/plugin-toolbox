@@ -3,7 +3,7 @@ name: Tests
 # This repo's own checks. A bug here reaches every repo that pins a tag from it, so the logic in the
 # actions is unit tested rather than only exercised by a real release.
 #
-# Run it locally: `node --test`
+# Run it locally: `bun install` once, then `node --test`.
 
 on:
   push:
@@ -19,8 +19,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # The tests drive the real @actions/github and @actions/core, so they need installing. The
+      # actions themselves still install nothing: actions/github-script supplies both at runtime.
+      #
+      # No lockfile is committed, because nothing built is versioned here. Each run takes the newest
+      # versions the ranges in package.json allow, so a broken release upstream shows up here.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install the test dependencies
+        run: bun install
+
       # The version actions/github-script@v9 runs the action scripts on, so the tests run on the
-      # same one. There is nothing to install: the scripts have no dependencies of their own.
+      # same one. Node runs them, not bun, because they are written against node:test.
       - uses: actions/setup-node@v6
         with:
           node-version: '24'

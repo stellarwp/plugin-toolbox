@@ -4,86 +4,34 @@ const { describe, it } = require('node:test')
 const assert = require('node:assert')
 
 const { moveTags, parseTagNames, run } = require('../../../.github/actions/move-git-tags/move.js')
-
-/**
- * A fake of the `github` argument that actions/github-script passes to the script: an Octokit
- * client. Only the three `rest.git` methods move.js calls are implemented.
- *
- * Every call is recorded in `calls` in the order it was made, so a test asserts the requests the
- * action would have sent rather than the value it returned. `getRef` throws a 404 for a tag that is
- * not in `existing`, which is the signal move.js reads to choose between creating and repointing.
- *
- * @param {string[]} existing       Tag names that already have a ref, so `getRef` finds them.
- * @param {number}   failUpdateWith HTTP status for `updateRef` to throw instead of succeeding, for
- *                                  the protected-tag and missing-permission cases.
- * @returns {{calls: string[], rest: {git: object}}} The client, plus the calls it recorded.
- */
-function fakeGithub({ existing = [], failUpdateWith } = {}) {
-  const calls = []
-
-  const notFound = () => {
-    const error = new Error('Not Found')
-    error.status = 404
-
-    throw error
-  }
-
-  return {
-    calls,
-    rest: {
-      git: {
-        async getRef({ ref }) {
-          calls.push(`getRef ${ref}`)
-
-          return existing.includes(ref.replace(/^tags\//, '')) ? { data: {} } : notFound()
-        },
-        async updateRef({ ref, sha, force }) {
-          calls.push(`updateRef ${ref} -> ${sha} force=${force}`)
-
-          if (failUpdateWith) {
-            const error = new Error('Forbidden')
-            error.status = failUpdateWith
-
-            throw error
-          }
-        },
-        async createRef({ ref, sha }) {
-          calls.push(`createRef ${ref} -> ${sha}`)
-        },
-      },
-    },
-  }
-}
-
-/**
- * A fake of the `core` argument that actions/github-script passes to the script: the @actions/core
- * toolkit. Only the methods move.js calls are implemented.
- *
- * The real `setOutput` appends to the file named by GITHUB_OUTPUT, and the log methods write
- * workflow commands to stdout. This collects both in memory instead, so a test reads `outputs` to
- * assert what the step would have handed to later steps, and `messages` for what it would have
- * logged.
- *
- * @returns {{outputs: object, messages: string[], info: Function, notice: Function,
- *            warning: Function, setOutput: Function}}
- */
-function fakeCore() {
-  const outputs = {}
-  const messages = []
-
-  return {
-    outputs,
-    messages,
-    info: (message) => messages.push(message),
-    notice: (message) => messages.push(message),
-    warning: (message) => messages.push(message),
-    setOutput: (name, value) => {
-      outputs[name] = value
-    },
-  }
-}
+const { octokitFor, coreWithOutputs } = require('../../support/actions.js')
 
 const REPO = { owner: 'stellarwp', repo: 'plugin-toolbox' }
+
+/** The repository paths this action writes, as a real Octokit spells them. */
+const REF = {
+  read: (tag) => `/repos/stellarwp/plugin-toolbox/git/ref/tags%2F${tag}`,
+  update: (tag) => `/repos/stellarwp/plugin-toolbox/git/refs/tags%2F${tag}`,
+  create: '/repos/stellarwp/plugin-toolbox/git/refs',
+}
+
+/** Rules that answer the existence check for `existing` and accept every write. */
+function rulesFor(existing = [], base = '/repos/stellarwp/plugin-toolbox') {
+  return [
+    ...existing.map((tag) => ({
+      method: 'GET',
+      path: `${base}/git/ref/tags%2F${tag}`,
+      body: { ref: `refs/tags/${tag}` },
+    })),
+    { method: 'PATCH', path: /\/git\/refs\/tags%2F/, body: {} },
+    { method: 'POST', path: `${base}/git/refs`, body: {} },
+  ]
+}
+
+/** Each request as `METHOD path`, for asserting the order the action worked in. */
+function sequence(requests) {
+  return requests.map((request) => `${request.method} ${request.path}`)
+}
 
 describe('move-git-tags', () => {
   describe('parseTagNames', () => {
@@ -115,59 +63,106 @@ describe('move-git-tags', () => {
   })
 
   describe('moveTags', () => {
-    it('creates a tag that does not exist and repoints one that does', async () => {
-      const github = fakeGithub({ existing: ['v1'] })
+    it('reads each ref from the single-ref endpoint, not the prefix one', async () => {
+      // git/ref answers 404 for a missing ref. git/refs matches by prefix, so it would answer for
+      // tags/v1 whenever a v1.0.0 tag exists, and no tag would ever look missing.
+      const { github, requests } = await octokitFor(rulesFor(['v1']))
+
+      await moveTags({ github, core: await quietCore(), ...REPO, names: ['v1'], sha: 'abc123' })
+
+      assert.equal(requests[0].method, 'GET')
+      assert.equal(requests[0].path, '/repos/stellarwp/plugin-toolbox/git/ref/tags%2Fv1')
+    })
+
+    it('repoints an existing tag with a forced update, and creates a missing one', async () => {
+      const { github, requests } = await octokitFor(rulesFor(['v1']))
 
       const result = await moveTags({
         github,
-        core: fakeCore(),
+        core: await quietCore(),
         ...REPO,
         names: ['v1', 'v1.2'],
         sha: 'abc123',
       })
 
       assert.deepEqual(result, { created: ['v1.2'], moved: ['v1'] })
-      assert.deepEqual(github.calls, [
-        'getRef tags/v1',
-        'updateRef tags/v1 -> abc123 force=true',
-        'getRef tags/v1.2',
-        'createRef refs/tags/v1.2 -> abc123',
+      assert.deepEqual(sequence(requests), [
+        `GET ${REF.read('v1')}`,
+        `PATCH ${REF.update('v1')}`,
+        `GET ${REF.read('v1.2')}`,
+        `POST ${REF.create}`,
       ])
+    })
+
+    it('sends the sha and force on an update, and the full ref on a creation', async () => {
+      const { github, requests } = await octokitFor(rulesFor(['v1']))
+
+      await moveTags({
+        github,
+        core: await quietCore(),
+        ...REPO,
+        names: ['v1', 'v1.2'],
+        sha: 'abc123',
+      })
+
+      const [, update, , create] = requests
+
+      assert.deepEqual(update.body, { sha: 'abc123', force: true })
+      assert.deepEqual(create.body, { ref: 'refs/tags/v1.2', sha: 'abc123' })
+    })
+
+    it('writes to the repository it was given', async () => {
+      const { github, requests } = await octokitFor(rulesFor([], '/repos/another-owner/another-repo'))
+
+      await moveTags({
+        github,
+        core: await quietCore(),
+        owner: 'another-owner',
+        repo: 'another-repo',
+        names: ['v9'],
+        sha: 'abc123',
+      })
+
+      assert.ok(
+        requests.every((request) => request.path.startsWith('/repos/another-owner/another-repo/')),
+        `every request went to the given repository, got ${JSON.stringify(sequence(requests))}`
+      )
     })
 
     it('fails on a refused update rather than retrying it as a creation', async () => {
       // A 403 from a protected tag must not be read as "does not exist yet", which is what an
       // update-then-create-on-failure fallback would do.
-      const github = fakeGithub({ existing: ['v1'], failUpdateWith: 403 })
+      const { github, requests } = await octokitFor([
+        { method: 'GET', path: REF.read('v1'), body: { ref: 'refs/tags/v1' } },
+        { method: 'PATCH', path: /\/git\/refs\/tags%2F/, status: 403, body: { message: 'Forbidden' } },
+      ])
 
       await assert.rejects(
-        moveTags({ github, core: fakeCore(), ...REPO, names: ['v1'], sha: 'abc123' }),
+        moveTags({ github, core: await quietCore(), ...REPO, names: ['v1'], sha: 'abc123' }),
         /Forbidden/
       )
 
-      assert.ok(!github.calls.some((call) => call.startsWith('createRef')), 'nothing was created')
+      assert.ok(!sequence(requests).some((call) => call.startsWith('POST')), 'nothing was created')
     })
 
-    it('does not treat an error other than 404 as a missing tag', async () => {
-      const github = fakeGithub()
-      github.rest.git.getRef = async () => {
-        const error = new Error('Bad credentials')
-        error.status = 401
-
-        throw error
-      }
+    it('does not treat a failure other than 404 as a missing tag', async () => {
+      const { github, requests } = await octokitFor([
+        { method: 'GET', path: /\/git\/ref\//, status: 401, body: { message: 'Bad credentials' } },
+      ])
 
       await assert.rejects(
-        moveTags({ github, core: fakeCore(), ...REPO, names: ['v1'], sha: 'abc123' }),
+        moveTags({ github, core: await quietCore(), ...REPO, names: ['v1'], sha: 'abc123' }),
         /Bad credentials/
       )
+
+      assert.equal(requests.length, 1, 'it stopped at the failed read')
     })
   })
 
   describe('run', () => {
-    it('succeeds on an empty tag list without calling the API', async () => {
-      const github = fakeGithub()
-      const core = fakeCore()
+    it('succeeds on an empty tag list without sending a request', async () => {
+      const { github, requests } = await octokitFor()
+      const { core, outputs } = await coreWithOutputs()
 
       await run({
         github,
@@ -175,13 +170,13 @@ describe('move-git-tags', () => {
         env: { INPUT_TAGS: '', GITHUB_REPOSITORY: 'stellarwp/plugin-toolbox', GITHUB_SHA: 'abc123' },
       })
 
-      assert.deepEqual(github.calls, [])
-      assert.deepEqual(core.outputs, { created: '', moved: '' })
+      assert.deepEqual(requests, [])
+      assert.deepEqual(outputs(), { created: '', moved: '' })
     })
 
     it('defaults the sha and repository to the workflow it is running in', async () => {
-      const github = fakeGithub({ existing: [] })
-      const core = fakeCore()
+      const { github, requests } = await octokitFor(rulesFor([]))
+      const { core, outputs } = await coreWithOutputs()
 
       await run({
         github,
@@ -193,13 +188,14 @@ describe('move-git-tags', () => {
         },
       })
 
-      assert.deepEqual(github.calls, ['getRef tags/v2', 'createRef refs/tags/v2 -> feed456'])
-      assert.deepEqual(core.outputs, { created: 'v2', moved: '' })
+      assert.deepEqual(sequence(requests), [`GET ${REF.read('v2')}`, `POST ${REF.create}`])
+      assert.equal(requests[1].body.sha, 'feed456')
+      assert.deepEqual(outputs(), { created: 'v2', moved: '' })
     })
 
     it('prefers the sha and repository it is given', async () => {
-      const github = fakeGithub({ existing: ['v2'] })
-      const core = fakeCore()
+      const { github, requests } = await octokitFor(rulesFor(['v2'], '/repos/stellarwp/other'))
+      const { core, outputs } = await coreWithOutputs()
 
       await run({
         github,
@@ -213,8 +209,12 @@ describe('move-git-tags', () => {
         },
       })
 
-      assert.deepEqual(github.calls, ['getRef tags/v2', 'updateRef tags/v2 -> chosen1 force=true'])
-      assert.deepEqual(core.outputs, { created: '', moved: 'v2' })
+      assert.deepEqual(sequence(requests), [
+        '/repos/stellarwp/other/git/ref/tags%2Fv2',
+        '/repos/stellarwp/other/git/refs/tags%2Fv2',
+      ].map((path, i) => `${['GET', 'PATCH'][i]} ${path}`))
+      assert.equal(requests[1].body.sha, 'chosen1')
+      assert.deepEqual(outputs(), { created: '', moved: 'v2' })
     })
 
     it('moves a release tag alongside the floating tags, to a commit made later', async () => {
@@ -224,8 +224,8 @@ describe('move-git-tags', () => {
        * release tag is just another name to this action, and the sha is an input rather than the
        * commit the workflow started on.
        */
-      const github = fakeGithub({ existing: ['v1.2.3', 'v1'] })
-      const core = fakeCore()
+      const { github, requests } = await octokitFor(rulesFor(['v1.2.3', 'v1']))
+      const { core, outputs } = await coreWithOutputs()
 
       await run({
         github,
@@ -238,15 +238,28 @@ describe('move-git-tags', () => {
         },
       })
 
-      assert.deepEqual(github.calls, [
-        'getRef tags/v1.2.3',
-        'updateRef tags/v1.2.3 -> bui1dc0mmit force=true',
-        'getRef tags/v1',
-        'updateRef tags/v1 -> bui1dc0mmit force=true',
-        'getRef tags/v1.2',
-        'createRef refs/tags/v1.2 -> bui1dc0mmit',
+      assert.deepEqual(sequence(requests), [
+        `GET ${REF.read('v1.2.3')}`,
+        `PATCH ${REF.update('v1.2.3')}`,
+        `GET ${REF.read('v1')}`,
+        `PATCH ${REF.update('v1')}`,
+        `GET ${REF.read('v1.2')}`,
+        `POST ${REF.create}`,
       ])
-      assert.deepEqual(core.outputs, { created: 'v1.2', moved: 'v1.2.3 v1' })
+      const writes = requests.filter((request) => request.body)
+
+      assert.ok(
+        writes.every((request) => request.body.sha === 'bui1dc0mmit'),
+        'every write used the build commit, not the released one'
+      )
+      assert.deepEqual(outputs(), { created: 'v1.2', moved: 'v1.2.3 v1' })
     })
   })
 })
+
+/** The real @actions/core, for a test that asserts requests rather than outputs. */
+async function quietCore() {
+  const { core } = await coreWithOutputs()
+
+  return core
+}

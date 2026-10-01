@@ -1,0 +1,6 @@
+node_modules/
+
+# No lockfile: nothing built is versioned here, so each run installs the newest versions the
+# ranges in package.json allow.
+bun.lock
+bun.lockb

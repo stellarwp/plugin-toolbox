@@ -4,11 +4,31 @@ const { describe, it } = require('node:test')
 const assert = require('node:assert')
 
 const {
+  run,
   resolveFloatingTags,
   compareVersions,
   isInLine,
   toVersion,
 } = require('../../../.github/actions/resolve-floating-tags/resolve.js')
+const { octokitFor, coreWithOutputs } = require('../../support/actions.js')
+
+const TAGS_PATH = /\/repos\/stellarwp\/plugin-toolbox\/tags(\?|$)/
+const RELEASE_PATH = (tag) => `/repos/stellarwp/plugin-toolbox/releases/tags/${tag}`
+
+/** A tag listing, as repos.listTags returns it. */
+function tagPage(...names) {
+  return names.map((name) => ({ name, commit: { sha: 'abc123' } }))
+}
+
+/** Rules for a repository whose tags come back in one page, with no release behind the tag. */
+function repoWith(names, release) {
+  return [
+    release
+      ? { method: 'GET', path: RELEASE_PATH(release.tag), body: { prerelease: release.prerelease } }
+      : { method: 'GET', path: /\/releases\/tags\//, status: 404, body: { message: 'Not Found' } },
+    { method: 'GET', path: TAGS_PATH, body: tagPage(...names) },
+  ]
+}
 
 /** Returns the resolution as `tags | skipped`, so a case reads as one line. */
 function resolve(options) {
@@ -268,6 +288,150 @@ describe('resolve-floating-tags', () => {
 
     it('is empty when the tag was rejected', () => {
       assert.equal(resolveFloatingTags({ tag: 'nonsense', tagNames: [] }).version, '')
+    })
+  })
+
+  describe('run', () => {
+    it('reads every tag, following pagination to the last page', async () => {
+      const { github, requests } = await octokitFor([
+        { method: 'GET', path: /\/releases\/tags\//, status: 404, body: { message: 'Not Found' } },
+        {
+          method: 'GET',
+          path: TAGS_PATH,
+          responses: [
+            {
+              body: tagPage('1.2.0'),
+              headers: {
+                link: '<https://api.github.com/repos/stellarwp/plugin-toolbox/tags?page=2>; rel="next"',
+              },
+            },
+            // Only reachable by following the Link header. It holds the version that has to win,
+            // so a resolver that stopped at the first page would resolve v1 to 1.2.0 instead.
+            { body: tagPage('1.9.0') },
+          ],
+        },
+      ])
+      const { core, outputs } = await coreWithOutputs()
+
+      await run({
+        github,
+        core,
+        env: {
+          INPUT_TAG: '1.2.0',
+          INPUT_LEVELS: 'major minor',
+          GITHUB_REPOSITORY: 'stellarwp/plugin-toolbox',
+        },
+      })
+
+      assert.equal(requests.filter((request) => TAGS_PATH.test(request.path)).length, 2)
+      assert.deepEqual(outputs(), { tags: 'v1.2', skipped: 'v1', version: '1.2.0' })
+    })
+
+    it('asks the Releases API about the tag it was given', async () => {
+      const { github, requests } = await octokitFor(
+        repoWith(['1.2.1', '1.3.0'], { tag: 'v1.3.0', prerelease: false })
+      )
+      const { core, outputs } = await coreWithOutputs()
+
+      await run({
+        github,
+        core,
+        env: {
+          INPUT_TAG: 'v1.3.0',
+          INPUT_LEVELS: 'major minor',
+          GITHUB_REPOSITORY: 'stellarwp/plugin-toolbox',
+        },
+      })
+
+      assert.ok(
+        requests.some((request) => request.path === RELEASE_PATH('v1.3.0')),
+        `the release was looked up by its tag, got ${JSON.stringify(requests.map((r) => r.path))}`
+      )
+      assert.deepEqual(outputs(), { tags: 'v1 v1.3', skipped: '', version: '1.3.0' })
+    })
+
+    it('honours the prerelease flag the Releases API reports', async () => {
+      const { github } = await octokitFor(
+        repoWith(['1.2.1', '1.3.0'], { tag: '1.3.0', prerelease: true })
+      )
+      const { core, outputs } = await coreWithOutputs()
+
+      await run({
+        github,
+        core,
+        env: {
+          INPUT_TAG: '1.3.0',
+          INPUT_LEVELS: 'major minor',
+          GITHUB_REPOSITORY: 'stellarwp/plugin-toolbox',
+        },
+      })
+
+      assert.deepEqual(outputs(), { tags: '', skipped: '', version: '' })
+    })
+
+    it('reads a tag with no release behind it as not a prerelease', async () => {
+      const { github } = await octokitFor(repoWith(['1.2.1', '1.3.0']))
+      const { core, outputs } = await coreWithOutputs()
+
+      await run({
+        github,
+        core,
+        env: {
+          INPUT_TAG: '1.3.0',
+          INPUT_LEVELS: 'major minor',
+          GITHUB_REPOSITORY: 'stellarwp/plugin-toolbox',
+        },
+      })
+
+      assert.deepEqual(outputs(), { tags: 'v1 v1.3', skipped: '', version: '1.3.0' })
+    })
+
+    it('resolves on the tag alone when the tags cannot be read', async () => {
+      const { github } = await octokitFor([
+        { method: 'GET', path: /\/releases\/tags\//, status: 404, body: { message: 'Not Found' } },
+        { method: 'GET', path: TAGS_PATH, status: 403, body: { message: 'Forbidden' } },
+      ])
+      const { core, outputs } = await coreWithOutputs()
+
+      await run({
+        github,
+        core,
+        env: {
+          INPUT_TAG: '1.2.5',
+          INPUT_LEVELS: 'major minor',
+          GITHUB_REPOSITORY: 'stellarwp/plugin-toolbox',
+        },
+      })
+
+      assert.deepEqual(
+        outputs(),
+        { tags: 'v1 v1.2', skipped: '', version: '1.2.5' },
+        'nothing is held back, because nothing could be compared'
+      )
+    })
+
+    it('reads the repository it was given', async () => {
+      const { github, requests } = await octokitFor([
+        { method: 'GET', path: /\/releases\/tags\//, status: 404, body: { message: 'Not Found' } },
+        { method: 'GET', path: /\/repos\/stellarwp\/other\/tags(\?|$)/, body: tagPage('1.3.0') },
+      ])
+      const { core } = await coreWithOutputs()
+
+      await run({
+        github,
+        core,
+        env: {
+          INPUT_TAG: '1.3.0',
+          INPUT_LEVELS: 'major',
+          INPUT_REPOSITORY: 'stellarwp/other',
+          GITHUB_REPOSITORY: 'stellarwp/plugin-toolbox',
+        },
+      })
+
+      assert.ok(
+        requests.every((request) => request.path.startsWith('/repos/stellarwp/other/')),
+        `every request went to the given repository, got ${JSON.stringify(requests.map((r) => r.path))}`
+      )
     })
   })
 })
