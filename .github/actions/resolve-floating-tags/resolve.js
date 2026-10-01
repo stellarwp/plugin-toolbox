@@ -80,6 +80,149 @@ function isInLine(version, linePrefix) {
 }
 
 /**
+ * Reads the three forms of a release tag that the rules below need.
+ *
+ * `version` is what the release is called, `releaseVersion` drops build metadata, and `core` drops
+ * the prerelease suffix as well. Only the `-` suffix means prerelease: 1.4.0+build.7 is a released
+ * 1.4.0.
+ *
+ * @param {string} tag The release tag, with or without a leading `v`.
+ *
+ * @returns {{version: string, releaseVersion: string, core: string, parts: number[],
+ *          reason: string}} The three forms and the core's numbers, or a `reason` naming why the tag
+ *          owns no floating tags at all.
+ */
+function readReleaseTag(tag) {
+  const version = String(tag).replace(/^v/, '')
+  const releaseVersion = version.replace(/\+.*$/, '')
+  const core = releaseVersion.replace(/-.*$/, '')
+
+  if (!NUMERIC_VERSION.test(core)) {
+    return { reason: `${tag} is not a numeric version.` }
+  }
+
+  const parts = toParts(core)
+
+  /**
+   * Three parts is the floor so that the deepest floating tag, v<major>.<minor>, is always a
+   * shorter name than the release tag. A release tagged 1.2 would collide with v1.2. There is no
+   * upper limit: a fourth part is a hotfix, and isInLine reads it as another release of the same
+   * minor line rather than a line of its own.
+   */
+  if (parts.length < 3) {
+    return { reason: `${tag} has ${parts.length} parts; at least three are needed.` }
+  }
+
+  return { version, releaseVersion, core, parts }
+}
+
+/**
+ * Turns the `levels` input into the lengths of the floating tags to resolve.
+ *
+ * Every name is checked before any tag is decided, so a typo fails the job rather than quietly
+ * writing a shorter set of tags than the caller asked for.
+ *
+ * @param {string} levels Space separated level names, e.g. `major minor`.
+ *
+ * @throws {Error} When a name is not a known level, or when none are named.
+ *
+ * @returns {number[]} How many leading version parts each requested tag carries, shortest first.
+ */
+function readLevels(levels) {
+  const depths = new Set()
+
+  for (const level of String(levels).trim().split(/\s+/).filter(Boolean)) {
+    const depth = LEVEL_DEPTHS[level]
+
+    if (!depth) {
+      throw new Error(`Unknown level '${level}' in levels. Use 'major', 'minor' or both.`)
+    }
+
+    depths.add(depth)
+  }
+
+  if (depths.size === 0) {
+    throw new Error('levels named no floating tags to resolve.')
+  }
+
+  return [...depths].sort((a, b) => a - b)
+}
+
+/**
+ * The released versions a floating tag can be held back by.
+ *
+ * A tag name carries no prerelease flag, so a tag that is a plain version counts as a released
+ * version even when GitHub marks its release as a prerelease; a suffixed tag never counts, because
+ * it fails NUMERIC_VERSION.
+ *
+ * The release being published is dropped by its own name rather than by its core version. A release
+ * marked as a prerelease while tagged a plain 1.3.0 would otherwise be the released version that
+ * blocks itself. Matching on the core instead would drop a released 1.4.0 when 1.4.0-rc.1 is
+ * published, and that 1.4.0 is exactly what has to block it.
+ *
+ * @param {string[]} tagNames  Every tag name in the repository.
+ * @param {string}   excluding The name of the release being published, without build metadata.
+ *
+ * @returns {string[]} The versions to compare against.
+ */
+function releasedVersions(tagNames, excluding) {
+  return tagNames
+    .map(toVersion)
+    .filter((candidate) => NUMERIC_VERSION.test(candidate) && candidate !== excluding)
+}
+
+/**
+ * A decision that a floating tag keeps pointing where it already does.
+ *
+ * @param {string} floating The tag's name.
+ * @param {string} message  Why it is not moving, for the log.
+ *
+ * @returns {{floating: string, owned: boolean, notice: object}} The decision decideTag returns.
+ */
+function staysPut(floating, message) {
+  return { floating, owned: false, notice: { level: 'notice', message } }
+}
+
+/**
+ * Decides whether one floating tag moves to the release being published.
+ *
+ * @param {number[]} linePrefix The numbers naming the line, e.g. `[1, 2]` for the v1.2 tag.
+ * @param {string[]} released   The released versions to compare against.
+ * @param {object}   release    `{core, version, isPrerelease}` for the release being published.
+ *
+ * @returns {{floating: string, owned: boolean, notice: object}} The tag's name, whether this release
+ *          owns it, and the notice explaining why when it does not.
+ */
+function decideTag(linePrefix, released, { core, version, isPrerelease }) {
+  const floating = `v${linePrefix.join('.')}`
+  const line = released.filter((candidate) => isInLine(candidate, linePrefix))
+
+  // Nothing released in this line: the first release of a new line, or a repository whose tags
+  // could not be read. Nothing can be newer, so the tag moves either way.
+  if (line.length === 0) {
+    return { floating, owned: true }
+  }
+
+  const newest = line.reduce((a, b) => (compareVersions(a, b) >= 0 ? a : b))
+
+  /**
+   * A prerelease never takes a tag away from a released version. Anyone pinned to a line that has
+   * already had one expects a released version from it, so only a line that has never had one may
+   * point at a prerelease. A 1.4.0-rc.1 therefore takes v1.4, which has nothing released behind it,
+   * and leaves v1 on 1.3.0.
+   */
+  if (isPrerelease) {
+    return staysPut(floating, `${floating} stays on ${newest}: ${version} is a prerelease.`)
+  }
+
+  if (compareVersions(newest, core) > 0) {
+    return staysPut(floating, `${floating} stays where it is: ${newest} is newer than ${version}.`)
+  }
+
+  return { floating, owned: true }
+}
+
+/**
  * Decides the floating tags for one release.
  *
  * @param {string}   tag               The release tag, with or without a leading `v`.
@@ -91,9 +234,9 @@ function isInLine(version, linePrefix) {
  *
  * @throws {Error} When levels names something other than a known level.
  *
- * @returns {{tags: string[], skipped: string[], version: string, notices: object[]}} The tags
- *          this version should own, the ones a newer release already owns, the version
- *          itself, and the messages the caller should log.
+ * @returns {{tags: string[], skipped: string[], version: string, notices: object[]}} The tags this
+ *          version should own, the ones a newer release already owns, the version itself, and the
+ *          messages the caller should log.
  */
 function resolveFloatingTags({
   tag,
@@ -109,118 +252,37 @@ function resolveFloatingTags({
     return { tags: [], skipped: [], version: '', notices }
   }
 
-  /**
-   * Three forms of the same tag. `version` is what the release is called, `releaseVersion` drops
-   * build metadata, and `core` drops the prerelease suffix as well. Only the `-` suffix means
-   * prerelease: 1.4.0+build.7 is a released 1.4.0.
-   */
-  const version = String(tag).replace(/^v/, '')
-  const releaseVersion = version.replace(/\+.*$/, '')
-  const core = releaseVersion.replace(/-.*$/, '')
+  const release = readReleaseTag(tag)
 
-  if (!NUMERIC_VERSION.test(core)) {
-    return nothingToDo(`${tag} is not a numeric version.`)
+  if (release.reason) {
+    return nothingToDo(release.reason)
   }
 
-  const coreParts = toParts(core)
-
-  /**
-   * Three parts is the floor so that the deepest floating tag, v<major>.<minor>, is always a
-   * shorter name than the release tag. A release tagged 1.2 would collide with v1.2. There is no
-   * upper limit: a fourth part is a hotfix, and isInLine reads it as another release of the same
-   * minor line rather than a line of its own.
-   */
-  if (coreParts.length < 3) {
-    return nothingToDo(`${tag} has ${coreParts.length} parts; at least three are needed.`)
-  }
-
-  // Validate every requested level before resolving any, so a typo fails the job rather than
-  // quietly writing a shorter set of tags than the caller asked for.
-  const depths = new Set()
-  for (const level of String(levels).trim().split(/\s+/).filter(Boolean)) {
-    const depth = LEVEL_DEPTHS[level]
-
-    if (!depth) {
-      throw new Error(`Unknown level '${level}' in levels. Use 'major', 'minor' or both.`)
-    }
-
-    depths.add(depth)
-  }
-
-  if (depths.size === 0) {
-    throw new Error('levels named no floating tags to resolve.')
-  }
-
-  const isPrerelease = core !== releaseVersion || flaggedPrerelease
+  const depths = readLevels(levels)
+  const isPrerelease = release.core !== release.releaseVersion || flaggedPrerelease
 
   if (isPrerelease && !allowPrereleases) {
     return nothingToDo(`${tag} is a prerelease. Set allow-prereleases to change that.`)
   }
 
-  /**
-   * The released versions to compare against. A tag name carries no prerelease flag, so a tag that
-   * is a plain version counts as a released version even when GitHub marks its release as a
-   * prerelease; a suffixed tag never counts, because it fails NUMERIC_VERSION.
-   *
-   * The tag being released is dropped by its own name rather than by its core version. A release
-   * marked as a prerelease while tagged a plain 1.3.0 would otherwise be the released version that
-   * blocks itself. Matching on the core instead would drop a released 1.4.0 when 1.4.0-rc.1 is
-   * published, and that 1.4.0 is exactly what has to block it.
-   */
-  const releasedVersions = tagNames
-    .map(toVersion)
-    .filter((candidate) => NUMERIC_VERSION.test(candidate) && candidate !== releaseVersion)
-
+  const released = releasedVersions(tagNames, release.releaseVersion)
   const tags = []
   const skipped = []
 
-  // Shortest first, whatever order the levels were written in.
-  for (const depth of [1, 2]) {
-    if (!depths.has(depth)) {
+  for (const depth of depths) {
+    const linePrefix = release.parts.slice(0, depth)
+    const decision = decideTag(linePrefix, released, { ...release, isPrerelease })
+
+    if (decision.owned) {
+      tags.push(decision.floating)
       continue
     }
 
-    const linePrefix = coreParts.slice(0, depth)
-    const floating = `v${linePrefix.join('.')}`
-    const line = releasedVersions.filter((candidate) => isInLine(candidate, linePrefix))
-
-    // Nothing released in this line: the first release of a new line, or a repository whose tags
-    // could not be read. Nothing can be newer, so the tag resolves either way.
-    if (line.length === 0) {
-      tags.push(floating)
-      continue
-    }
-
-    const newest = line.reduce((a, b) => (compareVersions(a, b) >= 0 ? a : b))
-
-    /**
-     * A prerelease never takes a tag away from a released version. Anyone pinned to a line that has
-     * already had one expects a released version from it, so only a line that has never had one may
-     * point at a prerelease. A 1.4.0-rc.1 therefore takes v1.4, which has nothing released behind
-     * it, and leaves v1 on 1.3.0.
-     */
-    if (isPrerelease) {
-      notices.push({
-        level: 'notice',
-        message: `${floating} stays on ${newest}: ${version} is a prerelease.`,
-      })
-      skipped.push(floating)
-      continue
-    }
-
-    if (compareVersions(newest, core) > 0) {
-      notices.push({
-        level: 'notice',
-        message: `${floating} stays where it is: ${newest} is newer than ${version}.`,
-      })
-      skipped.push(floating)
-      continue
-    }
-
-    tags.push(floating)
+    skipped.push(decision.floating)
+    notices.push(decision.notice)
   }
 
-  return { tags, skipped, version, notices }
+  return { tags, skipped, version: release.version, notices }
 }
 
 /**
