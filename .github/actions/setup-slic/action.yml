@@ -59,7 +59,9 @@ inputs:
     required: false
     default: ''
   composer-cache-dir:
-    description: 'Host directory to point `slic composer-cache set` at. Empty skips the command.'
+    description: >-
+      Host Composer cache directory to mount in Slic. When omitted, detect it with host Composer
+      if available; otherwise preserve Slic's existing cache configuration.
     required: false
     default: ''
   slic-debug:
@@ -168,8 +170,23 @@ runs:
       env:
         HERE_DIR: ${{ inputs.here-dir }}
         PHP_VERSION: ${{ inputs.php-version }}
-        COMPOSER_CACHE_DIR: ${{ inputs.composer-cache-dir }}
+        CACHE_DIR_OVERRIDE: ${{ inputs.composer-cache-dir }}
       run: |
+        # Do not shadow COMPOSER_CACHE_DIR: host Composer may already use that override.
+        cache_dir="${CACHE_DIR_OVERRIDE}"
+
+        if [ -z "${cache_dir}" ] && command -v composer > /dev/null 2>&1; then
+          if ! cache_dir=$(composer config cache-dir --absolute); then
+            echo "::error::Could not detect the host Composer cache directory. Fix Composer configuration or supply composer-cache-dir."
+            exit 1
+          fi
+
+          if [ -z "${cache_dir}" ]; then
+            echo "::error::Host Composer returned an empty cache directory. Supply composer-cache-dir."
+            exit 1
+          fi
+        fi
+
         cd "${HERE_DIR:-$GITHUB_WORKSPACE}"
 
         # Allow an always() cleanup step to handle partial setup failures too.
@@ -179,8 +196,10 @@ runs:
         "${SLIC_BIN}" build-prompt off
         "${SLIC_BIN}" build-subdir off
 
-        if [ -n "${COMPOSER_CACHE_DIR}" ]; then
-          "${SLIC_BIN}" composer-cache set "${COMPOSER_CACHE_DIR}"
+        if [ -n "${cache_dir}" ]; then
+          "${SLIC_BIN}" composer-cache set "${cache_dir}"
+        else
+          echo "Host Composer is unavailable; keeping Slic's existing cache configuration."
         fi
 
         # With no version named, `slic use` resolves one from the target instead.

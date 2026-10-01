@@ -62,7 +62,7 @@ Docker daemon are not supported.
 | `slic-path` | no | `slic` | Path in the workspace to check slic out into |
 | `wp-version` | no | `''` | `latest`, an explicit version like `6.6`, or `''` to keep the image's version |
 | `composer-install` | no | `''` | Targets to run `slic composer install` for, one `<target> [args]` per line |
-| `composer-cache-dir` | no | `''` | Host directory for `slic composer-cache set` |
+| `composer-cache-dir` | no | auto-detect when host Composer is available | Override the host cache directory mounted in Slic. See [Composer cache](#composer-cache) |
 | `slic-debug` | no | `'true'` | Enable Slic diagnostic logging. See [Debug](#debug) |
 | `xdebug` | no | `'false'` | Enable the PHP Xdebug extension for tests; disables PCOV when enabled |
 
@@ -172,6 +172,35 @@ contract: Slic's legacy Composer runner also reconstructs command strings. Relia
 those cases needs an argument-preserving interface in Slic, not another layer of shell escaping
 in this action. Host-side Composer installation is an option when it matches the intended PHP
 version and requires more complex arguments.
+
+## Composer cache
+
+You normally do not need to pass `composer-cache-dir`. Setup chooses the directory as follows:
+
+1. Use an explicit `composer-cache-dir` when supplied.
+2. Otherwise, if Composer is installed on the runner, run `composer config cache-dir --absolute`
+   in the action's starting working directory, before changing to `here-dir`. This respects the
+   host's `COMPOSER_CACHE_DIR` environment variable.
+3. If host Composer is unavailable, leave Slic's existing cache configuration alone.
+
+The selected directory is passed to `slic composer-cache set` before project selection. With
+Slic 2.5.1 or newer, this does not start a stopped stack. If host Composer is present but cannot
+resolve its cache directory, setup fails with an error rather than silently choosing another path.
+An explicit input bypasses detection.
+
+This shares the host cache with Slic; it does not restore or save the cache between workflow runs.
+Keep your existing cache action, such as `actions/cache` or host Composer setup that manages its
+cache, before `setup-slic`. Its restored directory must match the directory mounted in Slic.
+
+Pass an override when restoring to a custom location or using a persistent runner cache:
+
+```yaml
+- uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1
+  with:
+    target: my-plugin
+    composer-install: my-plugin
+    composer-cache-dir: /mnt/ci-cache/composer
+```
 
 ## Setting the site up
 
