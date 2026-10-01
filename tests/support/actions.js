@@ -129,6 +129,60 @@ function readOutputs(file) {
 }
 
 /**
+ * The real stdout write, replaced once and kept, and the buffer currently collecting writes. While
+ * nothing is collecting, writes go straight through, so the test runner's own output is untouched.
+ */
+let realStdoutWrite = null
+let collecting = null
+
+/**
+ * Collects what is written to stdout for the length of one test.
+ *
+ * @actions/core writes its log there, including the `::notice::` and `::warning::` commands the
+ * runner turns into annotations, so a test that let them through would annotate its own workflow.
+ *
+ * The write is replaced once for the process rather than per call. Replacing it per call meant a
+ * second call in the same test captured the already-replaced write as the original, and restoring
+ * put that back, leaving stdout collecting into a dead buffer and swallowing the runner's output for
+ * every test after it.
+ *
+ * @param {object} t The node:test context, used to stop collecting when the test ends.
+ *
+ * @returns {Function} Reads back everything written while this test ran.
+ */
+function captureStdout(t) {
+  const written = []
+
+  if (!realStdoutWrite) {
+    realStdoutWrite = process.stdout.write.bind(process.stdout)
+
+    process.stdout.write = (chunk, encoding, callback) => {
+      if (!collecting) {
+        return realStdoutWrite(chunk, encoding, callback)
+      }
+
+      collecting.push(String(chunk))
+
+      const done = typeof encoding === 'function' ? encoding : callback
+      if (typeof done === 'function') {
+        done()
+      }
+
+      return true
+    }
+  }
+
+  collecting = written
+
+  // Nothing collects between tests, so this is right however many times a test called it.
+  t.after(() => {
+    collecting = null
+  })
+
+  return () => written.join('')
+}
+
+/**
  * The real @actions/core, pointed at a fresh GITHUB_OUTPUT file, with its log captured.
  *
  * setOutput reads GITHUB_OUTPUT on every call, so pointing it at a new file per test keeps the
@@ -152,25 +206,7 @@ async function coreWithOutputs(t) {
 
   const core = await import('@actions/core')
 
-  const written = []
-  const realWrite = process.stdout.write.bind(process.stdout)
-
-  process.stdout.write = (chunk, encoding, callback) => {
-    written.push(String(chunk))
-
-    const done = typeof encoding === 'function' ? encoding : callback
-    if (typeof done === 'function') {
-      done()
-    }
-
-    return true
-  }
-
-  t.after(() => {
-    process.stdout.write = realWrite
-  })
-
-  return { core, outputs: () => readOutputs(file), logged: () => written.join('') }
+  return { core, outputs: () => readOutputs(file), logged: captureStdout(t) }
 }
 
 /**

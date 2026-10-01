@@ -406,6 +406,8 @@ async function run({ github, core, env }) {
 
 module.exports = {
   run,
+  readTagNames,
+  readPrereleaseFlag,
   resolveFloatingTags,
   readReleaseTag,
   readLevels,

@@ -5,6 +5,8 @@ const assert = require('node:assert')
 
 const {
   run,
+  readTagNames,
+  readPrereleaseFlag,
   resolveFloatingTags,
   readReleaseTag,
   readLevels,
@@ -18,6 +20,7 @@ const {
 } = require('../../../.github/actions/resolve-floating-tags/resolve.js')
 const { actionsFor } = require('../../support/actions.js')
 
+const REPO = { owner: 'stellarwp', repo: 'plugin-toolbox' }
 const TAGS_PATH = /\/repos\/stellarwp\/plugin-toolbox\/tags(\?|$)/
 const RELEASE_PATH = (tag) => `/repos/stellarwp/plugin-toolbox/releases/tags/${tag}`
 
@@ -288,6 +291,83 @@ describe('resolve-floating-tags', () => {
       const rc = { core: '1.4.0', version: '1.4.0-rc.1', isPrerelease: true }
 
       assert.deepEqual(decideTag([1, 4], ['1.3.0'], rc), { floating: 'v1.4', owned: true })
+    })
+  })
+
+  describe('readTagNames', () => {
+    it('returns every tag name, over as many pages as it takes', async (t) => {
+      const { github, core, requests } = await actionsFor(t, [
+        {
+          method: 'GET',
+          path: TAGS_PATH,
+          responses: [
+            {
+              body: tagPage('1.2.0'),
+              headers: {
+                link: '<https://api.github.com/repos/stellarwp/plugin-toolbox/tags?page=2>; rel="next"',
+              },
+            },
+            { body: tagPage('1.9.0') },
+          ],
+        },
+      ])
+
+      const names = await readTagNames({ github, core, ...REPO })
+
+      assert.deepEqual(names, ['1.2.0', '1.9.0'])
+      assert.equal(requests.length, 2, 'it followed the Link header')
+    })
+
+    it('warns and returns nothing when the tags cannot be read', async (t) => {
+      const { github, core, logged } = await actionsFor(t, [
+        { method: 'GET', path: TAGS_PATH, status: 403, body: { message: 'Forbidden' } },
+      ])
+
+      const names = await readTagNames({ github, core, ...REPO })
+
+      assert.deepEqual(names, [], 'resolving from the tag alone beats failing the release')
+      assert.match(logged(), /::warning::Could not read stellarwp\/plugin-toolbox's tags/)
+    })
+  })
+
+  describe('readPrereleaseFlag', () => {
+    it('reports a release marked as a prerelease', async (t) => {
+      const { github, core } = await actionsFor(t, [
+        { method: 'GET', path: RELEASE_PATH('v1.3.0'), body: { prerelease: true } },
+      ])
+
+      assert.equal(await readPrereleaseFlag({ github, core, ...REPO, tag: 'v1.3.0' }), true)
+    })
+
+    it('reports a release that is not marked as one', async (t) => {
+      const { github, core } = await actionsFor(t, [
+        { method: 'GET', path: RELEASE_PATH('v1.3.0'), body: { prerelease: false } },
+      ])
+
+      assert.equal(await readPrereleaseFlag({ github, core, ...REPO, tag: 'v1.3.0' }), false)
+    })
+
+    it('reports a tag with no release behind it as not a prerelease, without warning', async (t) => {
+      const { github, core, logged } = await actionsFor(t, [
+        { method: 'GET', path: RELEASE_PATH('v1.3.0'), status: 404, body: { message: 'Not Found' } },
+      ])
+
+      assert.equal(await readPrereleaseFlag({ github, core, ...REPO, tag: 'v1.3.0' }), false)
+      assert.equal(logged(), '', 'a repo that pushes tags without Releases is not a problem')
+    })
+
+    it('warns when the lookup fails for any other reason', async (t) => {
+      /**
+       * A 403 or a 500 leaves it unknown whether the release is a prerelease, and it is read as not
+       * one. With allow-prereleases off that would move the floating tags onto a prerelease, so the
+       * warning is the only sign it happened.
+       */
+      const { github, core, logged } = await actionsFor(t, [
+        { method: 'GET', path: RELEASE_PATH('v1.3.0'), status: 403, body: { message: 'Forbidden' } },
+      ])
+
+      assert.equal(await readPrereleaseFlag({ github, core, ...REPO, tag: 'v1.3.0' }), false)
+      assert.match(logged(), /::warning::Could not read the release for v1\.3\.0/)
     })
   })
 
