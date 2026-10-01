@@ -167,9 +167,15 @@ behind it is marked as a prerelease on GitHub. A suffixed tag never counts, what
 as. This affects only which version is treated as the newest of a line, and it errs toward holding a
 floating tag where it is.
 
-If the tags cannot be read at all, the job warns rather than failing and every requested tag
-resolves on the `tag` input alone. Nothing is then held back, so the tags follow whatever was
-published most recently rather than whatever is newest.
+## When the tags cannot be read
+
+A read that fails stops the job, and no tag is written.
+
+Answering with no tags instead would be read as nothing being newer, because that is also what a
+repository with no tags answers, and every requested tag would move. After a failed read that puts a
+floating tag on whatever was published last: a 1.2.5 backport would take `v1` off 1.5.0.
+
+Nothing moves, so re-running the workflow once the API answers is enough.
 
 ## Building between the two steps
 

@@ -318,15 +318,26 @@ describe('resolve-floating-tags', () => {
       assert.equal(requests.length, 2, 'it followed the Link header')
     })
 
-    it('warns and returns nothing when the tags cannot be read', async (t) => {
-      const { github, core, logged } = await actionsFor(t, [
+    it('throws when the tags cannot be read, rather than answering with none', async (t) => {
+      /**
+       * No tags is also what a repository with none answers, and the comparison reads that as
+       * nothing being newer, so every requested tag would move. After a failed read that takes v1
+       * off the newest release and puts it on whatever was published last.
+       */
+      const { github } = await actionsFor(t, [
         { method: 'GET', path: TAGS_PATH, status: 403, body: { message: 'Forbidden' } },
       ])
 
-      const names = await readTagNames({ github, core, ...REPO })
+      await assert.rejects(
+        readTagNames({ github, ...REPO }),
+        /Could not read stellarwp\/plugin-toolbox's tags, so no floating tag can be moved safely/
+      )
+    })
 
-      assert.deepEqual(names, [], 'resolving from the tag alone beats failing the release')
-      assert.match(logged(), /::warning::Could not read stellarwp\/plugin-toolbox's tags/)
+    it('returns no tags for a repository that has none', async (t) => {
+      const { github } = await actionsFor(t, [{ method: 'GET', path: TAGS_PATH, body: [] }])
+
+      assert.deepEqual(await readTagNames({ github, ...REPO }), [])
     })
   })
 
@@ -626,12 +637,14 @@ describe('resolve-floating-tags', () => {
       })
     })
 
-    describe('when the tags cannot be read', () => {
-      it('resolves every requested tag on the released tag alone', () => {
+    describe('when the repository has no tags', () => {
+      it('resolves every requested tag, since nothing can be newer', () => {
+        // Only a repository that genuinely has none reaches this: readTagNames throws rather than
+        // answering with an empty list when it could not read them.
         const { tags, skipped } = resolveFloatingTags({ tag: '1.3.0', tagNames: [] })
 
         assert.deepEqual(tags, ['v1', 'v1.3'])
-        assert.deepEqual(skipped, [], 'nothing can be newer, so nothing is held back')
+        assert.deepEqual(skipped, [])
       })
     })
 
@@ -740,28 +753,26 @@ describe('resolve-floating-tags', () => {
       assert.deepEqual(outputs(), { tags: 'v1 v1.3', skipped: '', version: '1.3.0' })
     })
 
-    it('resolves on the tag alone when the tags cannot be read', async (t) => {
-      const { github, core, outputs, logged } = await actionsFor(t, [
+    it('fails without writing an output when the tags cannot be read', async (t) => {
+      const { github, core, outputs } = await actionsFor(t, [
         { method: 'GET', path: /\/releases\/tags\//, status: 404, body: { message: 'Not Found' } },
         { method: 'GET', path: TAGS_PATH, status: 403, body: { message: 'Forbidden' } },
       ])
 
-      await run({
-        github,
-        core,
-        env: {
-          INPUT_TAG: '1.2.5',
-          INPUT_LEVELS: 'major minor',
-          GITHUB_REPOSITORY: 'stellarwp/plugin-toolbox',
-        },
-      })
-
-      assert.deepEqual(
-        outputs(),
-        { tags: 'v1 v1.2', skipped: '', version: '1.2.5' },
-        'nothing is held back, because nothing could be compared'
+      await assert.rejects(
+        run({
+          github,
+          core,
+          env: {
+            INPUT_TAG: '1.2.5',
+            INPUT_LEVELS: 'major minor',
+            GITHUB_REPOSITORY: 'stellarwp/plugin-toolbox',
+          },
+        }),
+        /no floating tag can be moved safely/
       )
-      assert.match(logged(), /::warning::Could not read stellarwp\/plugin-toolbox's tags/)
+
+      assert.deepEqual(outputs(), {}, 'move-git-tags is given nothing')
     })
 
     it('reads the repository it was given', async (t) => {

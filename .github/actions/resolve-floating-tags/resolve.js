@@ -314,28 +314,30 @@ function resolveFloatingTags({
 /**
  * Every tag name in the repository, over as many pages as it takes.
  *
- * A failure is reported as a warning rather than thrown, because resolving from the released tag
- * alone is better than failing the release: see the action's README.
+ * A failed read throws rather than answering with no tags. No tags is also what a repository with
+ * none answers, and the comparison reads that as nothing being newer, so every requested tag would
+ * move. On a read that failed, that moves a floating tag onto whatever was published last: a 1.2.5
+ * backport would take v1 off 1.5.0. Failing the job leaves every tag where it is, and the release
+ * can be re-run.
  *
  * @param {object} github An Octokit, as actions/github-script supplies it.
- * @param {object} core   The @actions/core toolkit, for the warning.
  * @param {string} owner  The repository owner.
  * @param {string} repo   The repository name.
  *
- * @returns {Promise<string[]>} The tag names, or an empty list when they could not be read.
+ * @throws {Error} When the tags cannot be read.
+ *
+ * @returns {Promise<string[]>} The tag names. Empty only when the repository has none.
  */
-async function readTagNames({ github, core, owner, repo }) {
+async function readTagNames({ github, owner, repo }) {
   try {
     const tags = await github.paginate(github.rest.repos.listTags, { owner, repo, per_page: 100 })
 
     return tags.map((tag) => tag.name)
   } catch (error) {
-    core.warning(
-      `Could not read ${owner}/${repo}'s tags (${error.message}). ` +
-        'Resolving from the tag name alone.'
+    throw new Error(
+      `Could not read ${owner}/${repo}'s tags, so no floating tag can be moved safely: ` +
+        error.message
     )
-
-    return []
   }
 }
 
@@ -382,7 +384,7 @@ async function run({ github, core, env }) {
   const [owner, repo] = repository.split('/')
   const tag = env.INPUT_TAG
 
-  const tagNames = await readTagNames({ github, core, owner, repo })
+  const tagNames = await readTagNames({ github, owner, repo })
   const flaggedPrerelease = await readPrereleaseFlag({ github, core, owner, repo, tag })
 
   const resolved = resolveFloatingTags({
