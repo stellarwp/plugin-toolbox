@@ -58,10 +58,14 @@ inputs:
       empty when Composer already ran on the host, e.g. through ramsey/composer-install.
     required: false
     default: ''
+  composer-cache:
+    description: 'Restore and save Composer downloads with actions/cache. Disable if the caller manages caching.'
+    required: false
+    default: 'true'
   composer-cache-dir:
     description: >-
       Host Composer cache directory to mount in Slic. When omitted, detect it with host Composer
-      if available; otherwise preserve Slic's existing cache configuration.
+      if available. Managed caching otherwise uses a directory under the runner's temporary directory.
     required: false
     default: ''
   slic-debug:
@@ -91,6 +95,41 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Resolve the Composer cache directory
+      id: composer-cache-dir
+      shell: bash
+      env:
+        CACHE_DIR_OVERRIDE: ${{ inputs.composer-cache-dir }}
+        MANAGE_CACHE: ${{ inputs.composer-cache }}
+      run: |
+        # Do not shadow COMPOSER_CACHE_DIR: host Composer may already use that override.
+        cache_dir="${CACHE_DIR_OVERRIDE}"
+
+        if [ -z "${cache_dir}" ] && command -v composer > /dev/null 2>&1; then
+          if ! cache_dir=$(composer config cache-dir --absolute); then
+            echo "::error::Could not detect the host Composer cache directory. Fix Composer configuration or supply composer-cache-dir."
+            exit 1
+          fi
+
+          if [ -z "${cache_dir}" ]; then
+            echo "::error::Host Composer returned an empty cache directory. Supply composer-cache-dir."
+            exit 1
+          fi
+        fi
+
+        if [ -z "${cache_dir}" ] && [ "${MANAGE_CACHE}" == "true" ]; then
+          cache_dir="${RUNNER_TEMP}/slic-composer-cache"
+        fi
+
+        if [ -n "${cache_dir}" ]; then
+          # Resolve relative overrides once so caching and the Docker mount use the same path.
+          cache_dir=$(realpath -m -- "${cache_dir}")
+          # Docker would create a missing bind-mount directory as root on a cold cache.
+          mkdir -p -- "${cache_dir}"
+        fi
+
+        echo "path=${cache_dir}" >> "$GITHUB_OUTPUT"
+
     - name: Checkout slic
       uses: actions/checkout@v6
       with:
@@ -170,23 +209,8 @@ runs:
       env:
         HERE_DIR: ${{ inputs.here-dir }}
         PHP_VERSION: ${{ inputs.php-version }}
-        CACHE_DIR_OVERRIDE: ${{ inputs.composer-cache-dir }}
+        CACHE_DIR: ${{ steps.composer-cache-dir.outputs.path }}
       run: |
-        # Do not shadow COMPOSER_CACHE_DIR: host Composer may already use that override.
-        cache_dir="${CACHE_DIR_OVERRIDE}"
-
-        if [ -z "${cache_dir}" ] && command -v composer > /dev/null 2>&1; then
-          if ! cache_dir=$(composer config cache-dir --absolute); then
-            echo "::error::Could not detect the host Composer cache directory. Fix Composer configuration or supply composer-cache-dir."
-            exit 1
-          fi
-
-          if [ -z "${cache_dir}" ]; then
-            echo "::error::Host Composer returned an empty cache directory. Supply composer-cache-dir."
-            exit 1
-          fi
-        fi
-
         cd "${HERE_DIR:-$GITHUB_WORKSPACE}"
 
         # Allow an always() cleanup step to handle partial setup failures too.
@@ -196,8 +220,8 @@ runs:
         "${SLIC_BIN}" build-prompt off
         "${SLIC_BIN}" build-subdir off
 
-        if [ -n "${cache_dir}" ]; then
-          "${SLIC_BIN}" composer-cache set "${cache_dir}"
+        if [ -n "${CACHE_DIR}" ]; then
+          "${SLIC_BIN}" composer-cache set "${CACHE_DIR}"
         else
           echo "Host Composer is unavailable; keeping Slic's existing cache configuration."
         fi
@@ -273,6 +297,27 @@ runs:
         echo "SLIC_PHP_VERSION=${ACTUAL_VERSION}" >> "$GITHUB_ENV"
         echo "php-version=${ACTUAL_VERSION}" >> "$GITHUB_OUTPUT"
         echo "## slic is running PHP ${FULL_VERSION}" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Build the Composer cache key
+      id: composer-cache-key
+      if: inputs.composer-cache == 'true'
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        COMPOSER_INSTALL: ${{ inputs.composer-install }}
+        HERE_DIR: ${{ inputs.here-dir }}
+        PHP_VERSION: ${{ steps.php-version.outputs.php-version }}
+      run: bash "${GITHUB_ACTION_PATH}/../composer-cache-key.sh"
+
+    # Restore after resolving PHP, but before any requested Composer installation.
+    # Broader prefixes share downloads without making different installs compete to save one key.
+    - name: Restore Composer downloads
+      if: inputs.composer-cache == 'true'
+      uses: actions/cache@v6
+      with:
+        path: ${{ steps.composer-cache-dir.outputs.path }}
+        key: ${{ steps.composer-cache-key.outputs.key }}
+        restore-keys: ${{ steps.composer-cache-key.outputs.restore-keys }}
 
     # ------------------------------------------------------------------------------
     # Repos whose dependencies have to be installed with the container's PHP, rather
