@@ -101,6 +101,18 @@ convention before this works. Both resolve to `v1` and `v1.2`: the floating tags
 `v`, because that is what a `uses:` line resolves. Mixed conventions across a repo's history are
 fine, since every version is compared with the `v` stripped.
 
+## Versions below 1.0.0
+
+A 0.x release resolves `v0` and `v0.1`, and the lines are compared the same way as any other: a 0.1.2
+backport published while 0.2.0 is out moves `v0.1` and leaves `v0` on 0.2.0.
+
+Semver puts breaking changes in the minor below 1.0.0, so `v0` can break where `v1` cannot. This
+repo offers it anyway. `v0` tracks the newest 0.x, and pinning it accepts that a minor release can
+break you.
+
+A repo that would rather not offer that sets `levels: minor`, which resolves `v0.1` and no `v0`,
+leaving consumers to pin a line that does not move across minors.
+
 ## Prereleases
 
 A prerelease is skipped by default, and it is detected without the caller passing anything.
