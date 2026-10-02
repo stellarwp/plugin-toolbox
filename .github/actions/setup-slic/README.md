@@ -31,43 +31,38 @@ dependencies inside Slic using the selected PHP version. On persistent runners, 
 [cleanup step](#cleanup) at the end of the job. These examples use the planned `v1` release;
 while testing this PR, use its branch or commit for each toolbox action.
 
-Use Slic 2.5.1 or newer. These actions support Linux runners with Bash, Docker Compose, PHP,
+Use Slic 2.5.1 or newer. These actions support Linux runners with Bash, Docker Compose,
 Git, curl, jq and OpenSSH installed. Give each job its own Docker daemon. Slic uses shared
 container names and `slic here` can tear down an existing stack, so concurrent jobs on a shared
 Docker daemon are not supported.
 
-## When host PHP setup is needed
+## Host PHP and Composer
 
-Slic's CLI needs PHP on the runner, even though Composer installation and tests execute inside
-its containers. GitHub's standard Ubuntu runners already include PHP and Composer; no separate
-PHP setup step is needed for the normal example above. See the
-[Ubuntu runner software inventory](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md#php-tools).
-
-**Only add a host PHP setup step if your runner does not have a PHP version compatible with the
-Slic release you selected**, for example on a minimal or custom self-hosted image. One option is
-[setup-php](https://github.com/shivammathur/setup-php), placed before `setup-slic`:
+Setup installs current compatible Composer 2 before reading its cache configuration. This avoids relying on
+an outdated Composer bundled with the runner. It preserves the active host PHP major/minor, or
+uses PHP 8.3 if PHP is absent. Set `host-php-version` to choose another host version.
 
 ```yaml
-# Optional: only needed when the runner lacks suitable PHP for the Slic CLI.
-- uses: shivammathur/setup-php@v2
-  with:
-    php-version: '8.3'
-    coverage: none
-
 - uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1
   with:
     target: my-plugin
+    host-php-version: '8.3'
     php-version: '7.4'
     composer-install: my-plugin
 ```
 
-These versions serve different purposes: host PHP 8.3 runs the Slic CLI; container PHP 7.4 runs
-Composer and the tests. They do not need to match. `setup-php` does not provide Docker or the
-other runner prerequisites listed above.
+Host PHP runs Slic's CLI and any host Composer commands. Container PHP runs the requested
+Composer installs and tests inside Slic. The versions do not need to match. Host setup uses
+[setup-php](https://github.com/shivammathur/setup-php), disables host Xdebug/PCOV, and does not
+install Docker or the other runner prerequisites. The `xdebug` input controls container Xdebug
+separately. Updating host Composer does not update Composer bundled in Slic's images.
 
-**Missing host Composer alone does not require this step.** Slic supplies Composer inside its
-container, and managed caching automatically uses a runner-temporary directory when host
-Composer is unavailable.
+Custom runners must also meet setup-php's [supported operating systems](https://github.com/shivammathur/setup-php#self-hosted-runners)
+and [self-hosted runner requirements](https://github.com/shivammathur/setup-php/wiki/Requirements-for-self-hosted-runners#linuxwsl),
+including passwordless `sudo`. Check these before using this action on a minimal runner image.
+
+If Composer runs before this action, update it before that earlier step too. See the
+[Ramsey example](#using-ramseycomposer-install-on-the-host).
 
 ## Updating from the initial action proposal
 
@@ -89,6 +84,7 @@ Composer is unavailable.
 |---|---|---|---|
 | `target` | yes | | The `slic use` target |
 | `php-version` | recommended | slic resolves it | PHP version to set in slic, e.g. `8.3`. See [PHP version](#php-version) |
+| `host-php-version` | no | active host PHP, otherwise `8.3` | Host PHP version used by Slic's CLI. Setup also installs current compatible Composer 2 and disables host coverage drivers. |
 | `here-dir` | no | the workspace | Plugin-checkout parent, themes directory, or site root. See [Checkout layout](#checkout-layout) |
 | `ref` | no | `main` | slic branch, tag or commit |
 | `slic-repository` | no | `stellarwp/slic` | Repository to check slic out from |
@@ -246,7 +242,6 @@ The directory is chosen in this order:
 2. Host Composer's `composer config cache-dir --absolute`, respecting `COMPOSER_CACHE_DIR`.
    If the starting working directory has no manifest, detection adds `--global`. A local manifest,
    including one selected with `COMPOSER`, keeps its project-specific cache configuration.
-3. `${RUNNER_TEMP}/slic-composer-cache` when host Composer is unavailable and managed caching is on.
 
 Relative paths are resolved from the action's starting working directory before changing to
 `here-dir`, so the cache action and Docker mount use the same absolute path. Failed or empty host
@@ -266,13 +261,62 @@ this action's cache management to avoid doing it twice:
 ```
 
 `composer-cache: 'false'` disables GitHub cache restore/save, not Composer's own cache. The directory
-is still detected or taken from the explicit input and shared with Slic. If neither is available,
-Slic's existing cache configuration is retained. Use this option too when your workflow needs a
+is still detected or taken from the explicit input and shared with Slic. Use this option too when your workflow needs a
 custom key strategy, for example with custom target-directory overrides or when later steps
 install additional projects not listed in
 `composer-install` or vary dependency resolution in ways other than the selected PHP version.
 
 `actions/cache@v6` uses Node 24 and requires Actions Runner 2.327.1 or newer on self-hosted runners.
+
+## Using ramsey/composer-install on the host
+
+When Ramsey installs dependencies first, update host Composer before Ramsey runs. Let Ramsey
+restore/save the downloads and disable toolbox's duplicate cache management. Toolbox still
+mounts the same directory into Slic. Defining `COMPOSER_CACHE_DIR` for the job makes sharing
+explicit even when projects have different cache settings or working directories.
+
+```yaml
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    env:
+      COMPOSER_CACHE_DIR: ${{ github.workspace }}/.composer-cache
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: my-plugin
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: composer:v2
+
+      - uses: ramsey/composer-install@v4
+        with:
+          working-directory: my-plugin
+
+      - uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1
+        with:
+          target: my-plugin
+          php-version: '8.3'
+          composer-cache: 'false'
+          # composer-install is omitted because Ramsey already installed dependencies.
+
+      - uses: stellarwp/plugin-toolbox/.github/actions/run-slic-suite@v1
+        with:
+          suite: wpunit
+          upload-output-on-failure: 'true'
+```
+
+Choose host PHP and extensions suitable for the dependencies Ramsey installs. This example uses
+the same PHP version on the host and in Slic. Toolbox still refreshes host Composer during setup;
+it cannot protect Composer commands run earlier in the job.
+
+An existing cache directory does not tell us whether another action manages GitHub cache
+restore/save, so this setting is explicit. Leaving both enabled causes redundant cache work.
+For toolbox-only installs, keep the default `composer-cache: 'true'`. On persistent runners,
+add the [final cleanup step](#cleanup).
 
 ## Setting the site up
 

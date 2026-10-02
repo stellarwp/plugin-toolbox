@@ -22,6 +22,13 @@ inputs:
     default: ''
 
   # Optional.
+  host-php-version:
+    description: >-
+      PHP version for the runner, independent of php-version inside Slic. Defaults to the active
+      host PHP major/minor, or 8.3 when PHP is absent. Host setup also installs current compatible Composer 2
+      and disables host coverage drivers.
+    required: false
+    default: ''
   here-dir:
     description: >-
       The directory `slic here` runs in: the parent of plugin checkouts, a directory named
@@ -63,7 +70,7 @@ inputs:
   composer-cache-dir:
     description: >-
       Host Composer cache directory to mount in Slic. When omitted, detect it with host Composer
-      if available. Managed caching otherwise uses a directory under the runner's temporary directory.
+      after updating it to current compatible Composer 2.
     required: false
     default: ''
   slic-debug:
@@ -93,17 +100,42 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Resolve host PHP version
+      id: host-php
+      shell: bash
+      env:
+        HOST_PHP_VERSION: ${{ inputs.host-php-version }}
+      run: |
+        version="${HOST_PHP_VERSION}"
+
+        if [ -z "${version}" ]; then
+          if command -v php > /dev/null 2>&1; then
+            version=$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')
+          else
+            version='8.3'
+          fi
+        fi
+
+        echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+    # Update Composer before any command loads host authentication or project configuration.
+    - name: Set up host PHP and Composer
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ steps.host-php.outputs.version }}
+        coverage: none
+        tools: composer:v2
+
     - name: Resolve the Composer cache directory
       id: composer-cache-dir
       shell: bash
       env:
         CACHE_DIR_OVERRIDE: ${{ inputs.composer-cache-dir }}
-        MANAGE_CACHE: ${{ inputs.composer-cache }}
       run: |
         # Do not shadow COMPOSER_CACHE_DIR: host Composer may already use that override.
         cache_dir="${CACHE_DIR_OVERRIDE}"
 
-        if [ -z "${cache_dir}" ] && command -v composer > /dev/null 2>&1; then
+        if [ -z "${cache_dir}" ]; then
           composer_args=(config cache-dir --absolute)
 
           # Subdirectory checkouts may leave the workspace without a Composer manifest.
@@ -120,10 +152,6 @@ runs:
             echo "::error::Host Composer returned an empty cache directory. Supply composer-cache-dir."
             exit 1
           fi
-        fi
-
-        if [ -z "${cache_dir}" ] && [ "${MANAGE_CACHE}" == "true" ]; then
-          cache_dir="${RUNNER_TEMP}/slic-composer-cache"
         fi
 
         if [ -n "${cache_dir}" ]; then
@@ -225,11 +253,7 @@ runs:
         "${SLIC_BIN}" build-prompt off
         "${SLIC_BIN}" build-subdir off
 
-        if [ -n "${CACHE_DIR}" ]; then
-          "${SLIC_BIN}" composer-cache set "${CACHE_DIR}"
-        else
-          echo "Host Composer is unavailable; keeping Slic's existing cache configuration."
-        fi
+        "${SLIC_BIN}" composer-cache set "${CACHE_DIR}"
 
         # With no version named, `slic use` resolves one from the target instead.
         if [ -n "${PHP_VERSION}" ]; then
