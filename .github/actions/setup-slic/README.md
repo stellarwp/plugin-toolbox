@@ -6,11 +6,77 @@ WordPress stack. It stops there. Running a Codeception suite is
 as Playwright, calls its own commands after this action instead.
 
 ```yaml
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: my-plugin
+
+      - uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1
+        with:
+          php-version: '8.3'
+          target: my-plugin
+          composer-install: my-plugin --no-interaction --prefer-dist
+
+      - uses: stellarwp/plugin-toolbox/.github/actions/run-slic-suite@v1
+        with:
+          suite: wpunit
+          upload-output-on-failure: 'true'
+```
+
+Replace the target and suite names with your project's values. This example installs Composer
+dependencies inside Slic using the selected PHP version. On persistent runners, add the
+[cleanup step](#cleanup) at the end of the job. These examples use the planned `v1` release;
+while testing this PR, use its branch or commit for each toolbox action.
+
+Use Slic 2.5.1 or newer. These actions support Linux runners with Bash, Docker Compose,
+Git, curl, jq and OpenSSH installed. Give each job its own Docker daemon. Slic uses shared
+container names and `slic here` can tear down an existing stack, so concurrent jobs on a shared
+Docker daemon are not supported.
+
+## Host PHP and Composer
+
+Setup installs current compatible Composer 2 before reading its cache configuration. This avoids relying on
+an outdated Composer bundled with the runner. It preserves the active host PHP major/minor, or
+uses PHP 8.3 if PHP is absent. Set `host-php-version` to choose another host version.
+
+```yaml
 - uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1
   with:
-    php-version: ${{ matrix.php-version }}
-    target: sfwd-lms
+    target: my-plugin
+    host-php-version: '8.3'
+    php-version: '7.4'
+    composer-install: my-plugin
 ```
+
+Host PHP runs Slic's CLI and any host Composer commands. Container PHP runs the requested
+Composer installs and tests inside Slic. The versions do not need to match. Host setup uses
+[setup-php](https://github.com/shivammathur/setup-php), disables host Xdebug/PCOV, and does not
+install Docker or the other runner prerequisites. The `xdebug` input controls container Xdebug
+separately. Updating host Composer does not update Composer bundled in Slic's images.
+
+Custom runners must also meet setup-php's [supported operating systems](https://github.com/shivammathur/setup-php#self-hosted-runners)
+and [self-hosted runner requirements](https://github.com/shivammathur/setup-php/wiki/Requirements-for-self-hosted-runners#linuxwsl),
+including passwordless `sudo`. Check these before using this action on a minimal runner image.
+
+If Composer runs before this action, update it before that earlier step too. See the
+[Ramsey example](#using-ramseycomposer-install-on-the-host).
+
+## Updating from the initial action proposal
+
+- Replace `debug-enabled` with independent `slic-debug` and `xdebug` setup inputs and the suite
+  action's `debug` input. Slic logging now defaults to on. The `debug-flag` output and
+  `SLIC_TOOLBOX_DEBUG_FLAG` environment variable are removed.
+
+- Remove `prune-docker-networks` and `services`. Setup no longer prunes networks, and the standard
+  stack already starts its dependencies.
+- Remove `verify-php-version`. An explicit PHP version is always verified.
+- Move `run-cleanup` out of the suite action and add [cleanup-slic](../cleanup-slic/) as a final
+  step with `if: always()` when the runner needs cleanup.
+- Set `wp-version: latest` explicitly if you want the newest WordPress release. The default now
+  preserves the version in the image.
 
 ## Inputs
 
@@ -18,24 +84,23 @@ as Playwright, calls its own commands after this action instead.
 |---|---|---|---|
 | `target` | yes | | The `slic use` target |
 | `php-version` | recommended | slic resolves it | PHP version to set in slic, e.g. `8.3`. See [PHP version](#php-version) |
-| `here-dir` | no | the workspace | Directory `slic here` runs in. Must be the parent of the target checkout |
+| `host-php-version` | no | active host PHP, otherwise `8.3` | Host PHP version used by Slic's CLI. Setup also installs current compatible Composer 2 and disables host coverage drivers. |
+| `here-dir` | no | the workspace | Plugin-checkout parent, themes directory, or site root. See [Checkout layout](#checkout-layout) |
 | `ref` | no | `main` | slic branch, tag or commit |
 | `slic-repository` | no | `stellarwp/slic` | Repository to check slic out from |
 | `slic-path` | no | `slic` | Path in the workspace to check slic out into |
-| `wp-version` | no | `latest` | `latest`, an explicit version like `6.6`, or `''` to keep the image's version |
-| `services` | no | `''` | Extra slic services to start, e.g. `chrome`. See [Services](#services) |
+| `wp-version` | no | `''` | `latest`, an explicit version like `6.6`, or `''` to keep the image's version |
 | `composer-install` | no | `''` | Targets to run `slic composer install` for, one `<target> [args]` per line |
-| `composer-cache-dir` | no | `''` | Host directory for `slic composer-cache set` |
-| `prune-docker-networks` | no | `'false'` | Run `docker network prune -f` before each `slic use` |
-| `verify-php-version` | no | `'true'` | Fail when the container's PHP does not match `php-version`. No effect when `php-version` is empty |
-| `debug-enabled` | no | `'false'` | Turn slic debug on and set the `debug-flag` output. See [Debug](#debug) |
+| `composer-cache` | no | `'true'` | Restore and save Composer downloads with `actions/cache@v6` |
+| `composer-cache-dir` | no | auto-detect | Override the host cache directory mounted in Slic. See [Composer cache](#composer-cache) |
+| `slic-debug` | no | `'true'` | Enable Slic diagnostic logging. See [Debug](#debug) |
+| `xdebug` | no | `'false'` | Enable the PHP Xdebug extension for tests; disables PCOV when enabled |
 
 ## Outputs
 
 | Output | What it is |
 |---|---|
 | `slic-bin` | Absolute path to the slic binary |
-| `debug-flag` | `--debug` when debug is on for this run, empty otherwise |
 | `target` | The target this action selected |
 | `php-version` | The PHP version the stack is running, as `major.minor` |
 
@@ -44,15 +109,23 @@ wiring an output through.
 
 ## PHP version
 
+Use `major.minor` for `php-version`, for example `'8.3'`, or leave it empty for Slic to select.
+Values such as `8`, `8.3.1`, and `latest` fail before host setup or stack changes. This format
+check does not guarantee that Slic publishes an image for the requested version.
+`host-php-version` is separate and accepts setup-php's version selectors.
+
 Naming a `php-version` sets it and then checks it, failing the job when the container disagrees.
 A matrix over PHP versions has to name one, or every leg runs the same version.
 
 Leaving it empty hands the choice to slic, which resolves it from the target in this order:
 
-1. the target's `slic.json` `phpVersion`
-2. the target's `composer.json` `config.platform.php`
+1. an existing environment override or staged PHP version
+2. the target's `.env.slic.local` PHP override
+3. the target's `slic.json` `phpVersion`
+4. the target's `composer.json` `config.platform.php`
+5. Slic's configured default
 
-Note the second is `config.platform.php`, not `require.php`. A target that declares
+The Composer setting is `config.platform.php`, not `require.php`. A target that declares
 `require: {"php": ">=7.4"}` and no `config.platform.php` gives slic nothing to go on.
 
 Either way the action reads the running version back out of the container and reports it, exports
@@ -72,7 +145,6 @@ choose.
 | Variable | What slic does with it |
 |---|---|
 | `SLIC_WP_DIR` | Where slic keeps the WordPress install |
-| `SLIC_WORDPRESS_DOCKERFILE` | Which Dockerfile the WordPress container builds from |
 | `SLIC_PHP_VERSION` | Pins the PHP version for the job. See below |
 | `SSH_AUTH_SOCK` | Forwarded into the containers |
 | `CI` | slic's `is_ci()` checks it, alongside `GITHUB_ACTION` |
@@ -86,12 +158,13 @@ is one any other action or tool could set as well.
 | Variable | What it is for |
 |---|---|
 | `SLIC_TOOLBOX_TARGET` | The target this action selected, so `run-slic-suite` needs no target of its own |
-| `SLIC_TOOLBOX_DEBUG_FLAG` | `--debug`, or empty, which `run-slic-suite` appends to `slic run` |
 
 One exception carries no prefix. `SLIC_BIN` holds the path to the slic binary. slic does not read
 it. It is how a job calls slic outside these actions, as the examples in this README do.
 
-`SSH_AGENT_PID` is set by `ssh-agent` itself, so the cleanup step can kill the agent it started.
+An existing usable SSH agent is reused. Otherwise setup starts an agent on a unique socket and
+records its ownership for [cleanup-slic](../cleanup-slic/). It does not load private keys; provide
+your own agent before setup if your dependencies need them.
 
 ### Why SLIC_PHP_VERSION pins the job
 
@@ -104,7 +177,155 @@ requirement.
 ### Why SLIC_TOOLBOX_TARGET exists
 
 slic records the current target in its own run settings file rather than in the environment, so
-there is nothing else for [run-slic-suite](../run-slic-suite/) to read it from.
+the exported value tells [run-slic-suite](../run-slic-suite/) which target to restore. The action
+uses `slic using` to check whether that target is already selected.
+
+## Startup order
+
+The action does not prune Docker networks. Older TEC workflows do this before target switches,
+but pruning removes all unused networks on the Docker daemon, not just Slic's. If a runner has
+address-pool exhaustion, diagnose it and manage cleanup separately from project selection.
+
+The action selects the main target and resolves its PHP version before
+installing Composer dependencies. That version is pinned for the rest of the job, so a shared
+library's configuration cannot select a different PHP version during dependency installation.
+
+Composer entries only call `slic use` when the target differs from Slic's current selection. After
+installation, the main target is restored if needed. `run-slic-suite` performs the same check, so
+running a suite for the already-selected target does not recreate the PHP containers. Switching
+to a different target can still recreate containers in Slic.
+
+Use Slic 2.5.1 or newer with `composer-cache-dir` to configure the cache without starting a stopped
+stack. Older versions can start containers during that command, before target selection.
+
+By default, the action keeps the WordPress version supplied by the image. Set `wp-version: latest`
+explicitly when desired, or choose a version compatible with the job's PHP version.
+
+`composer-install` accepts simple whitespace-separated arguments such as `--no-dev`. It is not a
+shell script. Quoted values, shell expressions, and repeated arguments are not a supported
+contract: Slic's legacy Composer runner also reconstructs command strings. Reliable support for
+those cases needs an argument-preserving interface in Slic, not another layer of shell escaping
+in this action. Host-side Composer installation is an option when it matches the intended PHP
+version and requires more complex arguments.
+
+## Composer cache
+
+Setup configures the cache directory before starting Slic, then restores downloads after verifying
+PHP and before dependency installation. It registers a post-job save using
+`actions/cache@v6`. Requested `composer-install` entries still run on cache hits; `vendor/` is not
+cached. If `composer-install` is empty, setup does not install dependencies.
+No extra cache step or directory input is needed for normal usage:
+
+```yaml
+- uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1
+  with:
+    target: my-plugin
+    composer-install: my-plugin
+```
+
+Exact cache keys include the runner OS, the main target and `composer-install` entries/options,
+the verified PHP version, and the selected projects' Composer manifests and lockfiles. Fully
+locked projects keep a stable key. If any selected project has a `composer.json` without a
+`composer.lock`, the key also includes the UTC week. Projects are located relative to `here-dir`,
+just as in the checkout examples. This covers Common subdirectories, TEC-style sibling checkouts
+outside the workspace, themes with sibling plugin dependencies, and site projects using
+`wp-content` or `content`. Check out all projects and submodules before setup; unrelated projects
+and installed dependencies are not hashed.
+
+PHP versions and different installation lists get separate exact keys so the first matrix job to
+save does not prevent other jobs from saving their additional downloads. Restore prefixes first
+try the same dependencies (including earlier weeks for unlocked projects), then the same PHP/install
+combination, then other PHP versions for that install list, and finally any available toolbox
+Composer cache for that OS.
+Sharing downloaded packages is safe because Composer still installs for each environment.
+
+Weekly rotation only applies when a selected project has a manifest without a lockfile. It lets
+those projects save newly downloaded package versions even when their manifests have not changed.
+An exact hit is not saved again; a new key is saved when the job succeeds. This trades some cache
+storage and a periodic upload for avoiding repeated downloads.
+It does not pin dependency versions. Lockfiles remain the way to make installs reproducible.
+
+The directory is chosen in this order:
+
+1. An explicit `composer-cache-dir`.
+2. Host Composer's `composer config cache-dir --absolute`, respecting `COMPOSER_CACHE_DIR`.
+   If the starting working directory has no manifest, detection adds `--global`. A local manifest,
+   including one selected with `COMPOSER`, keeps its project-specific cache configuration.
+
+Relative paths are resolved from the action's starting working directory before changing to
+`here-dir`, so the cache action and Docker mount use the same absolute path. Failed or empty host
+Composer detection reports an error; an explicit input bypasses detection. Slic 2.5.1 or newer
+is required to configure the cache without starting a stopped stack. The directory is created as
+the runner user before Docker mounts it, including on the first run with no saved cache.
+
+If your workflow already restores and saves the Composer cache through another action, disable
+this action's cache management to avoid doing it twice:
+
+```yaml
+- uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1
+  with:
+    target: my-plugin
+    composer-cache: 'false'
+    composer-cache-dir: /path/restored/by/your/cache/action
+```
+
+`composer-cache: 'false'` disables GitHub cache restore/save, not Composer's own cache. The directory
+is still detected or taken from the explicit input and shared with Slic. Use this option too when your workflow needs a
+custom key strategy, for example with custom target-directory overrides or when later steps
+install additional projects not listed in
+`composer-install` or vary dependency resolution in ways other than the selected PHP version.
+
+`actions/cache@v6` uses Node 24 and requires Actions Runner 2.327.1 or newer on self-hosted runners.
+
+## Using ramsey/composer-install on the host
+
+When Ramsey installs dependencies first, update host Composer before Ramsey runs. Let Ramsey
+restore/save the downloads and disable toolbox's duplicate cache management. Toolbox still
+mounts the same directory into Slic. Defining `COMPOSER_CACHE_DIR` for the job makes sharing
+explicit even when projects have different cache settings or working directories.
+
+```yaml
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    env:
+      COMPOSER_CACHE_DIR: ${{ github.workspace }}/.composer-cache
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: my-plugin
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: composer:v2
+
+      - uses: ramsey/composer-install@v4
+        with:
+          working-directory: my-plugin
+
+      - uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1
+        with:
+          target: my-plugin
+          php-version: '8.3'
+          composer-cache: 'false'
+          # composer-install is omitted because Ramsey already installed dependencies.
+
+      - uses: stellarwp/plugin-toolbox/.github/actions/run-slic-suite@v1
+        with:
+          suite: wpunit
+          upload-output-on-failure: 'true'
+```
+
+Choose host PHP and extensions suitable for the dependencies Ramsey installs. This example uses
+the same PHP version on the host and in Slic. Toolbox still refreshes host Composer during setup;
+it cannot protect Composer commands run earlier in the job.
+
+An existing cache directory does not tell us whether another action manages GitHub cache
+restore/save, so this setting is explicit. Leaving both enabled causes redundant cache work.
+For toolbox-only installs, keep the default `composer-cache: 'true'`. On persistent runners,
+add the [final cleanup step](#cleanup).
 
 ## Setting the site up
 
@@ -120,49 +341,83 @@ or fixtures. Do that in a `run:` step between this action and
 
 - name: Set the site up for the suite
   run: |
-    ${SLIC_BIN} wp theme install twentytwenty --activate
-    ${SLIC_BIN} wp plugin install elementor --activate
-    ${SLIC_BIN} wp plugin install woocommerce --version=8.5.0
+    "${SLIC_BIN}" wp theme install twentytwenty --activate
+    "${SLIC_BIN}" wp plugin install elementor --activate
+    "${SLIC_BIN}" wp plugin install woocommerce --version=8.5.0
 ```
 
 ## Debug
 
-`debug-enabled: 'true'` runs `slic debug on` and `slic config`, and sets both the `debug-flag`
-output and the `SLIC_TOOLBOX_DEBUG_FLAG` environment variable to `--debug`, which `run-slic-suite`
-appends to `slic run`. Anything else runs `slic xdebug off` and leaves the flag empty.
+Three independent settings control different kinds of debugging:
 
-It is honored on every event, so a workflow can hardcode it on a branch or a scheduled run:
+| Setting | Action | Default | Effect |
+|---|---|---|---|
+| `slic-debug` | `setup-slic` | `'true'` | Slic diagnostic logging and configuration output |
+| `xdebug` | `setup-slic` | `'false'` | PHP Xdebug extension in the test containers |
+| `debug` | `run-slic-suite` | `'false'` | Codeception's `--debug` output for that suite |
+
+For example, enable Xdebug and detailed test output while turning Slic logging off:
 
 ```yaml
 - uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1
   with:
-    php-version: ${{ matrix.php-version }}
-    target: sfwd-lms
-    debug-enabled: 'true'
+    target: my-plugin
+    php-version: '8.3'
+    slic-debug: 'false'
+    xdebug: 'true'
+
+- uses: stellarwp/plugin-toolbox/.github/actions/run-slic-suite@v1
+  with:
+    suite: wpunit
+    debug: 'true'
 ```
 
-Wiring it to a `workflow_dispatch` input needs no event check. On any other event the expression is
-empty, which is not `'true'`:
+Omit `slic-debug` to keep Slic logging on. Omit `xdebug` and the suite's `debug` input to leave
+those features off. The suite action no longer inherits a debug flag from setup.
+
+Setup applies `xdebug` after dependency installation and target restoration, to the containers
+that tests will use. Enabling it runs `slic xdebug on --yes`, which also disables PCOV if needed.
+Disabling it runs `slic xdebug off`. This input does not enable Xdebug for Composer installation,
+configure an IDE connection, or request a coverage report.
+
+Project `.env.slic.local` settings or later Slic commands can change these settings again. Keep
+project configuration consistent with the workflow, particularly when switching targets later.
+For Playwright or custom test commands, configure that runner's debug options in your own step.
+
+## Playwright
+
+The standard stack starts its dependencies, including Selenium, automatically. Extra `slic up`
+commands are unnecessary. Playwright starts its own browser service when you run:
 
 ```yaml
-    debug-enabled: ${{ inputs.debug_enabled }}
+- name: Run browser tests
+  run: '"${SLIC_BIN}" playwright test'
 ```
 
-## Services
+Install your project's Node dependencies before that step. See
+[Slic's Playwright guide](https://github.com/stellarwp/slic/blob/main/docs/playwright.md)
+for browser fixtures and authentication setup.
 
-`slic up` reads one positional argument and ignores the rest, so the action runs it once per entry
-in `services`.
+## Cleanup
 
-Pass `services: chrome` to start the Selenium container the WebDriver acceptance suites connect to.
+On a persistent runner, finish the job with the separate cleanup action. It works for Codeception,
+Playwright and setup failures, and only stops an SSH agent created by setup:
 
-Playwright does not belong in `services`. As of slic 2.5.0 it runs on the Microsoft image in its own
-`playwright` service behind a Compose profile, and `slic playwright` starts that browser server
-itself. Call `slic playwright test` in a step after this action.
+```yaml
+- name: Clean up slic
+  if: always()
+  uses: stellarwp/plugin-toolbox/.github/actions/cleanup-slic@v1
+```
+
+Place it after every step that needs Slic or its test artifacts. Ephemeral runners can omit it
+because destroying the VM removes the containers and agent. Cleanup does not make concurrent
+jobs on a shared Docker daemon safe.
 
 ## Checkout layout
 
-`slic here` takes no path argument. It reads the current working directory and makes it slic's
-plugins directory, so the target checkout has to be a child of it. That drives `here-dir`.
+`here-dir` is where the action runs `slic here`. For plugins, use the parent of the checkout;
+for themes, use the `themes` directory; for a site, use the WordPress root containing
+`wp-config.php` and `wp-content` or `content`.
 
 ### Target checked out into a subdirectory
 
@@ -195,13 +450,9 @@ The workspace is the target, so `here-dir` has to be its parent.
     target: the-events-calendar
     here-dir: ${{ github.workspace }}/..
     wp-version: '6.6'
-    services: chrome
     composer-install: |
       the-events-calendar/common --no-dev
       the-events-calendar
-    composer-cache-dir: /home/runner/.cache/composer
-    prune-docker-networks: 'true'
-    verify-php-version: 'false'
 ```
 
 On this layout slic itself is checked out into `slic/` inside the target. Set `slic-path` if that
@@ -225,3 +476,24 @@ leaves it pointing at slic's own themes directory, where the checkout is not.
     target: my-theme
     here-dir: ${{ github.workspace }}/themes
 ```
+
+### Site target
+
+Use `target: site` and point `here-dir` at the checked-out WordPress site root. Unlike plugin
+layouts, this is the site directory itself, not its parent. It must contain `wp-config.php` and a
+`wp-content` or `content` directory before setup runs.
+
+```yaml
+- uses: actions/checkout@v6
+  with:
+    path: my-site
+
+- uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1
+  with:
+    php-version: '8.3'
+    target: site
+    here-dir: ${{ github.workspace }}/my-site
+    composer-install: site
+```
+
+Omit `composer-install` if the site has no Composer dependencies to install.
