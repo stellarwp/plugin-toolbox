@@ -224,21 +224,25 @@ No extra cache step or directory input is needed for normal usage:
 ```
 
 Exact cache keys include the runner OS, the main target and `composer-install` entries/options,
-the verified PHP version, the selected projects' Composer manifests and lockfiles, and the UTC
-week. Projects are located relative to `here-dir`, just as in the checkout examples. This covers
-Common subdirectories, TEC-style sibling checkouts outside the workspace, themes with sibling
-plugin dependencies, and site projects using `wp-content` or `content`. Check out all
-projects and submodules before setup; unrelated projects and installed dependencies are not hashed.
+the verified PHP version, and the selected projects' Composer manifests and lockfiles. Fully
+locked projects keep a stable key. If any selected project has a `composer.json` without a
+`composer.lock`, the key also includes the UTC week. Projects are located relative to `here-dir`,
+just as in the checkout examples. This covers Common subdirectories, TEC-style sibling checkouts
+outside the workspace, themes with sibling plugin dependencies, and site projects using
+`wp-content` or `content`. Check out all projects and submodules before setup; unrelated projects
+and installed dependencies are not hashed.
 
 PHP versions and different installation lists get separate exact keys so the first matrix job to
 save does not prevent other jobs from saving their additional downloads. Restore prefixes first
-try the same dependencies from an earlier week, then the same PHP/install combination, then other
-PHP versions for that install list, and finally any available toolbox Composer cache for that OS.
+try the same dependencies (including earlier weeks for unlocked projects), then the same PHP/install
+combination, then other PHP versions for that install list, and finally any available toolbox
+Composer cache for that OS.
 Sharing downloaded packages is safe because Composer still installs for each environment.
 
-Weekly rotation lets projects without lockfiles save newly downloaded package versions even when
-their manifests have not changed. An exact hit is not saved again; a new key is saved when the job
-succeeds. This trades some cache storage and a periodic upload for avoiding repeated downloads.
+Weekly rotation only applies when a selected project has a manifest without a lockfile. It lets
+those projects save newly downloaded package versions even when their manifests have not changed.
+An exact hit is not saved again; a new key is saved when the job succeeds. This trades some cache
+storage and a periodic upload for avoiding repeated downloads.
 It does not pin dependency versions. Lockfiles remain the way to make installs reproducible.
 
 The directory is chosen in this order:
