@@ -100,6 +100,16 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Validate container PHP version
+      shell: bash
+      env:
+        PHP_VERSION: ${{ inputs.php-version }}
+      run: |
+        if [ -n "${PHP_VERSION}" ] && [[ ! "${PHP_VERSION}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+          echo '::error::php-version must be major.minor, for example 8.3, or empty to let Slic select it. Major-only versions, patch versions, and aliases are not supported.'
+          exit 1
+        fi
+
     - name: Resolve host PHP version
       id: host-php
       shell: bash

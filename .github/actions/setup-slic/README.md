@@ -109,6 +109,11 @@ wiring an output through.
 
 ## PHP version
 
+Use `major.minor` for `php-version`, for example `'8.3'`, or leave it empty for Slic to select.
+Values such as `8`, `8.3.1`, and `latest` fail before host setup or stack changes. This format
+check does not guarantee that Slic publishes an image for the requested version.
+`host-php-version` is separate and accepts setup-php's version selectors.
+
 Naming a `php-version` sets it and then checks it, failing the job when the container disagrees.
 A matrix over PHP versions has to name one, or every leg runs the same version.
 
