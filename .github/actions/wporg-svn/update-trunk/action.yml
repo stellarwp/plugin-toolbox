@@ -1,0 +1,40 @@
+name: "WordPress.org SVN: update trunk"
+description: >-
+  Post-release housekeeping: replace trunk with tags/<version> in one atomic server-side commit. This also
+  replaces trunk/readme.txt, so run it after set-stable, never instead of it.
+inputs:
+  plugin-slug:
+    description: The plugin's wordpress.org slug.
+    required: true
+  version:
+    description: The released tag to copy into trunk.
+    required: true
+  wporg-username:
+    description: WordPress.org account with commit access to the plugin.
+    required: true
+  wporg-password:
+    description: That account's SVN password, not its login password.
+    required: true
+outputs:
+  version:
+    description: The version trunk now matches.
+    value: ${{ steps.release.outputs.version }}
+  revision:
+    description: The revision that replaced trunk, or the observed revision for a verified no-op.
+    value: ${{ steps.release.outputs.revision }}
+runs:
+  using: composite
+  steps:
+    - name: Mask the password
+      shell: bash
+      env:
+        PASSWORD: ${{ inputs.wporg-password }}
+      run: printf '%s\n' "$PASSWORD" | while IFS= read -r line; do [ -z "$line" ] || echo "::add-mask::$line"; done
+    - id: release
+      shell: bash
+      env:
+        WPORG_SLUG: ${{ inputs.plugin-slug }}
+        WPORG_VERSION: ${{ inputs.version }}
+        WPORG_USERNAME: ${{ inputs.wporg-username }}
+        WPORG_PASSWORD: ${{ inputs.wporg-password }}
+      run: bash "$GITHUB_ACTION_PATH/update-trunk.sh"
