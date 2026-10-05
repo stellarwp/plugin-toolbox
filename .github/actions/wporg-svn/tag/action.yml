@@ -1,0 +1,47 @@
+name: "WordPress.org SVN: tag"
+description: >-
+  Prepare a release: copy the current stable tag to tags/<version> on the server, then make that new tag
+  match a plugin ZIP exactly. Does not touch trunk or move the stable pointer.
+inputs:
+  plugin-slug:
+    description: The plugin's wordpress.org slug.
+    required: true
+  zip-url:
+    description: HTTPS URL of the built plugin ZIP. Treated as a secret and never printed.
+    required: true
+  wporg-username:
+    description: WordPress.org account with commit access to the plugin.
+    required: true
+  wporg-password:
+    description: That account's SVN password, not its login password.
+    required: true
+outputs:
+  version:
+    description: The version released, read from the plugin header.
+    value: ${{ steps.release.outputs.version }}
+  revision:
+    description: The revision that populated and completed tags/<version>.
+    value: ${{ steps.release.outputs.revision }}
+  previous-stable:
+    description: The stable tag that tags/<version> was copied from.
+    value: ${{ steps.release.outputs.previous-stable }}
+  copy-revision:
+    description: The revision of the server-side copy that created tags/<version>.
+    value: ${{ steps.release.outputs.copy-revision }}
+runs:
+  using: composite
+  steps:
+    - name: Mask the artifact URL and the password
+      shell: bash
+      env:
+        ZIP_URL: ${{ inputs.zip-url }}
+        PASSWORD: ${{ inputs.wporg-password }}
+      run: printf '%s\n' "$ZIP_URL" "$PASSWORD" | while IFS= read -r line; do [ -z "$line" ] || echo "::add-mask::$line"; done
+    - id: release
+      shell: bash
+      env:
+        WPORG_SLUG: ${{ inputs.plugin-slug }}
+        WPORG_ZIP_URL: ${{ inputs.zip-url }}
+        WPORG_USERNAME: ${{ inputs.wporg-username }}
+        WPORG_PASSWORD: ${{ inputs.wporg-password }}
+      run: bash "$GITHUB_ACTION_PATH/tag.sh"
