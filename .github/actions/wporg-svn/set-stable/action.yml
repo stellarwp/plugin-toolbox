@@ -1,0 +1,40 @@
+name: "WordPress.org SVN: set stable"
+description: >-
+  Release a prepared tag: copy tags/<version>/readme.txt over trunk/readme.txt in one server-side commit,
+  which points the Stable Tag at that version. Choosing an older tag rolls the release back.
+inputs:
+  plugin-slug:
+    description: The plugin's wordpress.org slug.
+    required: true
+  version:
+    description: The tag to release, usually the tag action's version output.
+    required: true
+  wporg-username:
+    description: WordPress.org account with commit access to the plugin.
+    required: true
+  wporg-password:
+    description: That account's SVN password, not its login password.
+    required: true
+outputs:
+  version:
+    description: The version now set as stable.
+    value: ${{ steps.release.outputs.version }}
+  revision:
+    description: The revision of the readme commit, or the observed revision for a verified no-op.
+    value: ${{ steps.release.outputs.revision }}
+runs:
+  using: composite
+  steps:
+    - name: Mask the password
+      shell: bash
+      env:
+        PASSWORD: ${{ inputs.wporg-password }}
+      run: printf '%s\n' "$PASSWORD" | while IFS= read -r line; do [ -z "$line" ] || echo "::add-mask::$line"; done
+    - id: release
+      shell: bash
+      env:
+        WPORG_SLUG: ${{ inputs.plugin-slug }}
+        WPORG_VERSION: ${{ inputs.version }}
+        WPORG_USERNAME: ${{ inputs.wporg-username }}
+        WPORG_PASSWORD: ${{ inputs.wporg-password }}
+      run: bash "$GITHUB_ACTION_PATH/set-stable.sh"
