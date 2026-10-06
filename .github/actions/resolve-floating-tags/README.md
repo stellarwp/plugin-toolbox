@@ -262,4 +262,4 @@ data and cannot become part of the program.
 
 `tests/actions/resolve-floating-tags/resolve.test.js` covers the rules above. It drives the
 real Octokit with the network replaced, so the assertions are the requests this action would
-send. Run `bun install` once, then `node --test`.
+send. Run `npm install` once, then `node --test`.

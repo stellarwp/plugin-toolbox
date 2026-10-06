@@ -1,6 +1,9 @@
 node_modules/
 
-# No lockfile: nothing built is versioned here, so each run installs the newest versions the
-# ranges in package.json allow.
+# No lockfile is committed. Each install resolves the newest versions the ranges in package.json
+# allow, so the versions the tests run against cannot quietly drift from the ones a release gets.
+package-lock.json
+npm-shrinkwrap.json
 bun.lock
 bun.lockb
+yarn.lock
