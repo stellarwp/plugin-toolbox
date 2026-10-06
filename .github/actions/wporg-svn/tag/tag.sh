@@ -53,10 +53,16 @@ destination_absent() {
 # URLs are secrets. No credentials are sent to the artifact host.
 download() {
 	local code status=0
-	code=$(curl -q --silent --show-error --fail --location --proto '=https' --proto-redir '=https' \
-		--max-redirs 5 --connect-timeout 30 --max-time 600 --retry 3 --retry-delay 5 --retry-max-time 900 \
-		--max-filesize "$MAX_ZIP_BYTES" --write-out '%{http_code}' --output "$WORK/artifact.zip" \
-		"$WPORG_ZIP_URL" 2>"$WORK/err") || status=$?
+	# curl before 8.4 ignores --max-filesize when the server sends no length, so a
+	# file size limit (1 KiB blocks, this subshell only) stops it too: SIGXFSZ, 153.
+	code=$(ulimit -f $((MAX_ZIP_BYTES / 1024 + 1)) &&
+		curl -q --silent --show-error --fail --location --proto '=https' --proto-redir '=https' \
+			--max-redirs 5 --connect-timeout 30 --max-time 600 --retry 3 --retry-delay 5 --retry-max-time 900 \
+			--max-filesize "$MAX_ZIP_BYTES" --write-out '%{http_code}' --output "$WORK/artifact.zip" \
+			"$WPORG_ZIP_URL" 2>"$WORK/err") || status=$?
+	if [ "$status" -eq 63 ] || [ "$status" -eq 153 ]; then
+		fail "downloading zip-url failed: the ZIP is larger than $((MAX_ZIP_BYTES / 1048576)) MiB"
+	fi
 	if [ "$status" -ne 0 ]; then
 		if [[ $code =~ ^[1-9][0-9][0-9]$ ]]; then
 			fail "downloading zip-url failed (HTTP $code)"

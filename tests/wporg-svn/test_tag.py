@@ -250,6 +250,22 @@ class TagTest(ActionTest):
         self.rejected(r"downloading zip-url failed \(HTTP 404\)",
                       WPORG_ZIP_URL=f"{self.https.url}/missing.zip?sig={SIGNATURE}")
 
+    def test_curl_runs_under_a_file_size_limit(self):
+        # curl before 8.4 ignores --max-filesize when the server sends no length.
+        seen = os.path.join(self.tmp, "ulimit")
+        self.wrap("curl", f'bash -c "ulimit -f" > \'{seen}\'\nexec "$NEXT" "$@"')
+        self.assert_success(self.tag())
+        with open(seen) as handle:
+            self.assertEqual(int(handle.read()), 256 * 1024 + 1, "in 1 KiB blocks")
+
+    def test_downloads_past_the_size_limit_are_named(self):
+        # Simulated: serving 256 MiB is too slow for a test. 63 is curl's own
+        # --max-filesize exit; 153 is the SIGXFSZ kill from the file size limit.
+        for status in (63, 153):
+            with self.subTest(status=status):
+                self.wrap("curl", f"exit {status}")
+                self.rejected(r"downloading zip-url failed: the ZIP is larger than 256 MiB")
+
     def test_credentials_never_reach_the_artifact_host(self):
         self.assert_success(self.tag())
         for request in self.https.requests:
