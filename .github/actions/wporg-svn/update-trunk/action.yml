@@ -34,7 +34,7 @@ runs:
       shell: bash
       env:
         PASSWORD: ${{ inputs.wporg-password }}
-      run: printf '%s\n' "$PASSWORD" | while IFS= read -r line; do [ -z "$line" ] || echo "::add-mask::$line"; done
+      run: printf '%s\n' "$PASSWORD" | while IFS= read -r line; do [ -z "$line" ] || { line=${line//%/%25}; echo "::add-mask::${line//$'\r'/%0D}"; }; done
     - id: release
       shell: bash
       env:

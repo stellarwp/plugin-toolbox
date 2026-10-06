@@ -7,7 +7,9 @@ inputs:
     description: The plugin's wordpress.org slug.
     required: true
   zip-url:
-    description: HTTPS URL of the built plugin ZIP. Treated as a secret and never printed.
+    description: >-
+      HTTPS URL of the built plugin ZIP. The action never prints it and masks it, but GitHub logs step inputs
+      before the action runs: pass it from a secret, or mask it in an earlier step.
     required: true
   wporg-username:
     description: WordPress.org account with commit access to the plugin.
@@ -33,7 +35,7 @@ runs:
       env:
         ZIP_URL: ${{ inputs.zip-url }}
         PASSWORD: ${{ inputs.wporg-password }}
-      run: printf '%s\n' "$ZIP_URL" "$PASSWORD" | while IFS= read -r line; do [ -z "$line" ] || echo "::add-mask::$line"; done
+      run: printf '%s\n' "$ZIP_URL" "$PASSWORD" | while IFS= read -r line; do [ -z "$line" ] || { line=${line//%/%25}; echo "::add-mask::${line//$'\r'/%0D}"; }; done
     - id: release
       shell: bash
       env:

@@ -104,7 +104,7 @@ jobs:
 | Input | Used by | Value |
 |---|---|---|
 | `plugin-slug` | all | The wordpress.org slug: lowercase letters and digits, single hyphens between them. |
-| `zip-url` | `tag` | HTTPS URL of the ZIP. Treated as a secret. |
+| `zip-url` | `tag` | HTTPS URL of the ZIP. Pass a private URL from a secret, or mask it in an earlier step: see [Security](#security). |
 | `version` | `set-stable`, `update-trunk` | The `version` output of `tag`. |
 | `expected-revision` | `set-stable`, `update-trunk` | Optional: the `revision` output of `tag`. When set, the action refuses unless `tags/<version>` last changed at exactly that revision, so what gets released is the tag that was QA'd. Leave it empty for a manual run or a rollback. |
 | `wporg-username` | all | `${{ secrets.WPORG_USERNAME }}`: an account with commit access to the plugin. |
@@ -212,7 +212,7 @@ Then:
 ## Security
 
 - The password reaches `svn` and `svnmucc` on stdin only. It isn't in any process's arguments or in its child processes' environment. Each action masks it, along with the ZIP URL.
-- The ZIP URL is never printed. Nothing sends WordPress.org credentials to the ZIP host, and curl ignores `.curlrc`.
+- The actions never print the ZIP URL. They mask it too, but only from their own steps on: GitHub logs a step's `with:` inputs before the action runs. If the URL must stay private, pass it from a secret, or mask it with `::add-mask::` in an earlier step. Nothing sends WordPress.org credentials to the ZIP host, and curl ignores `.curlrc`.
 - SVN runs non-interactively with a private, throwaway config directory and no credential cache. Certificate checks are never skipped. Temporary files are removed on success, failure and cancellation.
 - Nothing from the ZIP runs: no PHP, scripts or hooks.
 - Only let trusted workflows, gated by a protected environment, see the release secrets. Never let them reach workflows that run pull request code from forks. Prefer short-lived signed ZIP URLs: `workflow_dispatch` inputs are visible to anyone who can see the run.

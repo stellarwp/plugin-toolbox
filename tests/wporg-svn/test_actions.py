@@ -6,6 +6,7 @@ no linter knows about. The files are read as text: they are ours and simple.
 
 import os
 import re
+import subprocess
 import unittest
 
 from support import ACTIONS
@@ -77,6 +78,20 @@ class ActionMetadataTest(unittest.TestCase):
                 self.assertIn("${{ inputs.wporg-password }}", steps[:steps.index("id: release")])
                 if action == "tag":
                     self.assertIn("${{ inputs.zip-url }}", steps[:steps.index("id: release")])
+
+    def test_mask_values_are_escaped_for_the_runner(self):
+        # The runner unescapes %25, %0D and %0A in ::add-mask:: data before it masks
+        # the value, so a secret containing "%25" would otherwise mask the wrong string.
+        env = {"PATH": os.environ["PATH"], "ZIP_URL": "https://h/a%25b?sig=x%2F", "PASSWORD": "p%41ss\r"}
+        for action in ACTIONS_SPEC:
+            with self.subTest(action=action):
+                steps = block(self.read(ACTIONS, action, "action.yml"), "runs")
+                script = re.search(r"run: (.*::add-mask::.*)", steps).group(1)
+                out = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True,
+                                     check=True).stdout
+                self.assertIn("::add-mask::p%2541ss%0D\n", out)
+                if action == "tag":
+                    self.assertIn("::add-mask::https://h/a%2525b?sig=x%252F\n", out)
 
     def test_the_readme_example_is_the_linted_example_file(self):
         readme = self.read(ACTIONS, "README.md")
