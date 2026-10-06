@@ -145,9 +145,11 @@ Before any write, every action pins one repository revision and reads everything
 |---|---|
 | Download | HTTPS only, redirects too (at most 5); 30 s to connect, 10 min per attempt, 3 retries |
 | ZIP size | 256 MiB |
-| Entries | 50,000 |
+| Files and directories | 50,000, counting parent directories the ZIP doesn't list |
 | Expanded size | 1 GiB |
 | Expansion ratio | 100 to 1 |
+| Path depth | 64 levels |
+| Path length | 1,024 bytes |
 
 Every entry is checked before anything is extracted. Rejected:
 

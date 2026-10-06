@@ -24,6 +24,8 @@ MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
 MAX_ENTRIES = 50_000
 MAX_EXPANDED_BYTES = 1024 * 1024 * 1024
 MAX_RATIO = 100
+MAX_DEPTH = 64
+MAX_PATH_BYTES = 1024
 
 # Packaging noise skipped (never extracted): macOS resource forks and Finder files.
 NOISE_TOP = "__MACOSX"
@@ -94,7 +96,11 @@ def _check_name(info: zipfile.ZipInfo) -> list:
     name = _name(info)
     if "\\" in name or name.startswith("/") or re.match(r"[A-Za-z]:", name):
         raise ArchiveError("an entry has an unsafe path")
+    if len(name.encode()) > MAX_PATH_BYTES:
+        raise ArchiveError(f"an entry path is longer than {MAX_PATH_BYTES} bytes")
     parts = (name[:-1] if name.endswith("/") else name).split("/")
+    if len(parts) > MAX_DEPTH:
+        raise ArchiveError(f"an entry path is deeper than {MAX_DEPTH} levels")
     if any(part in ("", ".", "..") for part in parts):
         raise ArchiveError("an entry has an unsafe path")
     return parts
@@ -133,11 +139,15 @@ def inspect(zf: zipfile.ZipFile, archive_bytes: int) -> list:
             raise ArchiveError("the archive contains version control metadata")
 
         # Every prefix is a directory; the last component is the entry itself.
+        # Each distinct one becomes a file or directory on disk, listed or not.
+        folded = _fold(parts)
         for depth in range(1, len(parts) + 1):
             kind = "file" if depth == len(parts) and not info.is_dir() else "dir"
-            key, spelling = _fold(parts[:depth]), "/".join(parts[:depth])
+            key, spelling = folded[:depth], "/".join(parts[:depth])
             if key not in kinds:
                 kinds[key], spellings[key] = kind, spelling
+                if len(kinds) > MAX_ENTRIES:
+                    raise ArchiveError(f"the archive has more than {MAX_ENTRIES} files and directories")
             elif spellings[key] != spelling:
                 raise ArchiveError("the archive has a duplicate or ambiguous path")
             elif kind == "file" or kinds[key] == "file":

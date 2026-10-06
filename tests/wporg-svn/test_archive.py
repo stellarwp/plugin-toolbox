@@ -283,6 +283,28 @@ class ArchiveTest(unittest.TestCase):
             archive.extract(self.zip, self.dest)
         self.assertEqual(os.listdir(self.dest), [])
 
+    def test_path_depth_and_length_limits(self):
+        root = self.extract({**PLUGIN, "d/" * 63 + "f.txt": "x"})
+        self.assertEqual(self.read(root, *["d"] * 63, "f.txt"), b"x")
+        for name in ("d/" * 64 + "f.txt", "d/" * 4000 + "f.txt", "/".join(["a" * 200] * 6)):
+            with self.subTest(levels=name.count("/") + 1, length=len(name)):
+                shutil.rmtree(self.dest)
+                os.mkdir(self.dest)
+                self.assert_rejected({**PLUGIN, name: "x"}, "deeper than 64 levels|longer than 1024 bytes")
+
+    def test_implicit_parent_directories_count_toward_the_limit(self):
+        # Three entries, but nine files and directories once the parents exist.
+        entries = {**PLUGIN, "b/a/a/a/a/a/x.txt": ""}
+        with mock.patch.object(archive, "MAX_ENTRIES", 8):
+            self.assert_rejected(entries, "more than 8 files and directories")
+        with mock.patch.object(archive, "MAX_ENTRIES", 9):
+            self.extract(entries)
+
+    def test_shared_parent_directories_count_once(self):
+        with mock.patch.object(archive, "MAX_ENTRIES", 5):
+            root = self.extract({**PLUGIN, "d/a.txt": "1", "d/b.txt": "2"})
+        self.assertEqual(self.read(root, "d", "b.txt"), b"2")
+
     def test_entry_count_limit(self):
         entries = dict(PLUGIN)
         entries.update({f"f{i}.txt": "x" for i in range(5)})
