@@ -215,7 +215,7 @@ Then:
 - The actions never print the ZIP URL. They mask it too, but only from their own steps on: GitHub logs a step's `with:` inputs before the action runs. If the URL must stay private, pass it from a secret, or mask it with `::add-mask::` in an earlier step. Nothing sends WordPress.org credentials to the ZIP host, and curl ignores `.curlrc`.
 - SVN runs non-interactively with a private, throwaway config directory and no credential cache. Certificate checks are never skipped. Temporary files are removed on success, failure and cancellation.
 - Nothing from the ZIP runs: no PHP, scripts or hooks.
-- Only let trusted workflows, gated by a protected environment, see the release secrets. Never let them reach workflows that run pull request code from forks. Prefer short-lived signed ZIP URLs: `workflow_dispatch` inputs are visible to anyone who can see the run.
+- The credentials are repository secrets, because the `tag` job writes to SVN without an approval gate. The protected environment in the example gates the release job's approval; it doesn't protect the secrets. Anyone who can push a workflow to the repository can read repository secrets, so limit who can push, and never let the secrets reach workflows that run pull request code from forks. Prefer short-lived signed ZIP URLs: `workflow_dispatch` inputs are visible to anyone who can see the run.
 
 ## Tests
 
