@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# Prepare a release without moving the stable pointer: copy the stable tag to
-# tags/<version> on the server, check out only that new tag, make it match the
-# ZIP exactly and commit the difference. trunk and existing tags stay as they are.
+# Prepare a release without moving the stable pointer: copy the stable tag into
+# an otherwise empty working copy as tags/<version>, make it match the ZIP
+# exactly and commit it. trunk and existing tags stay as they are.
 #
-# This takes two commits. Between them tags/<version> is public but still holds
-# the previous release. A failure there is reported loudly and the tag is
-# never cleaned up or reused automatically.
+# This is one commit: tags/<version> appears complete, or not at all. The
+# commit records a copy of the stable tag, so only changed files are uploaded.
 ACTION_NAME="wporg-svn tag"
 # shellcheck source=SCRIPTDIR/../lib/svn.sh
 . "${BASH_SOURCE[0]%/*}/../lib/svn.sh"
@@ -13,7 +12,7 @@ ACTION_NAME="wporg-svn tag"
 # Keep in step with MAX_ARCHIVE_BYTES in lib/archive.py.
 MAX_ZIP_BYTES=268435456
 
-require_tools svn svnmucc svnrdump python3 curl
+require_tools svn python3 curl
 validate_slug
 validate_credentials
 [ -n "${WPORG_ZIP_URL:-}" ] || fail "zip-url is required"
@@ -88,11 +87,34 @@ VERSION=$(release_py plugin-version "$ROOT")
 
 STAGE="checking tags/$VERSION and tags/$S"
 destination_absent "$R"
-check_tag_props "$BASE/tags/$S" "$R" "tags/$S"
 last_changed "$BASE/tags/$S" "$R"
 SOURCE_CHANGED=$REPLY
 
-STAGE="rechecking before the copy"
+# Stop with MESSAGE when anything in the new tag sets a content-transforming property.
+check_tag_props() {
+	svn_read proplist -R --xml -- "$TAG"
+	python3 "$LIB_DIR/svnxml.py" check-props <"$WORK/out" || fail "$1"
+}
+
+STAGE="copying tags/$S into a working copy"
+WC="$WORK/wc"
+TAG="$WC/$VERSION"
+svn_read checkout --quiet --depth empty -r "$R" -- "$BASE/tags@$R" "$WC"
+svn_read copy --quiet --ignore-externals -r "$R" -- "$BASE/tags/$S@$R" "$TAG"
+check_tag_props "tags/$S has SVN properties that change file contents; an exact release cannot keep them"
+
+STAGE="synchronising tags/$VERSION with the artifact"
+python3 "$LIB_DIR/tree.py" sync "$ROOT" "$TAG"
+CHANGES=$(python3 "$LIB_DIR/tree.py" reconcile "$TAG" "$WORK/svn-config")
+check_tag_props "the working copy of tags/$VERSION has SVN properties that change file contents"
+
+STAGE="validating tags/$VERSION before the commit"
+[ "$(release_py plugin-version "$TAG")" = "$VERSION" ] || fail "the working copy's plugin Version is not $VERSION"
+[ "$(release_py stable-tag "$TAG/readme.txt")" = "$VERSION" ] || fail "the working copy's Stable Tag is not $VERSION"
+python3 "$LIB_DIR/tree.py" compare "$ROOT" "$TAG" || fail "the working copy does not match the artifact"
+[ "$CHANGES" -gt 0 ] || fail "the artifact is identical to tags/$S; there is nothing to release"
+
+STAGE="rechecking before the commit"
 snapshot
 note_revision "recheck r$REPLY"
 RECHECK=$REPLY
@@ -102,65 +124,26 @@ last_changed "$BASE/tags/$S" "$RECHECK"
 [ "$REPLY" = "$SOURCE_CHANGED" ] || fail "tags/$S changed after r$R"
 destination_absent "$RECHECK"
 
-STAGE="copying tags/$S to tags/$VERSION"
-RECOVERY="The copy's outcome is unknown: if tags/$VERSION exists, treat it as INCOMPLETE. Do not approve or release it (wporg-svn README, Recovery)."
-if ! mucc_write -r "$R" -m "Prepare release $VERSION: copy tags/$S" cp "$R" "$BASE/tags/$S" "$BASE/tags/$VERSION"; then
-	svn_error
-	ERROR=$REPLY
-	STAGE="inspecting tags/$VERSION after a failed copy"
-	snapshot
-	HEAD=$REPLY
-	svn_kind "$BASE/tags" "$VERSION" "$HEAD"
-	STAGE="copying tags/$S to tags/$VERSION"
-	if [ "$REPLY" = absent ]; then
-		RECOVERY=
-		fail "the copy failed ($ERROR) and tags/$VERSION does not exist at r$HEAD, so nothing was written. Rerun once the cause is fixed."
-	fi
-	RECOVERY="tags/$VERSION exists at r$HEAD, but this run cannot confirm that it created it. Do not approve or release it: inspect it first (wporg-svn README, Recovery)."
-	fail "the copy reported an error ($ERROR) and tags/$VERSION now exists"
-fi
-C=$REPLY
-note_revision "copy r$C"
-RECOVERY="tags/$VERSION exists since r$C and is INCOMPLETE: it still holds the $S files. Do not approve or release it. Follow the wporg-svn README, Recovery; a rerun refuses to reuse it."
-
-STAGE="checking out tags/$VERSION"
-WC="$WORK/wc"
-svn_read checkout --quiet --ignore-externals -r "$C" -- "$BASE/tags/$VERSION@$C" "$WC"
-
-STAGE="synchronising tags/$VERSION with the artifact"
-python3 "$LIB_DIR/tree.py" sync "$ROOT" "$WC"
-CHANGES=$(python3 "$LIB_DIR/tree.py" reconcile "$WC" "$WORK/svn-config")
-svn_read proplist -R --xml -- "$WC"
-python3 "$LIB_DIR/svnxml.py" check-props <"$WORK/out" ||
-	fail "the working copy of tags/$VERSION has SVN properties that change file contents"
-
-STAGE="validating tags/$VERSION before the commit"
-[ "$(release_py plugin-version "$WC")" = "$VERSION" ] || fail "the working copy's plugin Version is not $VERSION"
-[ "$(release_py stable-tag "$WC/readme.txt")" = "$VERSION" ] || fail "the working copy's Stable Tag is not $VERSION"
-python3 "$LIB_DIR/tree.py" compare "$ROOT" "$WC" || fail "the working copy does not match the artifact"
-[ "$CHANGES" -gt 0 ] || fail "the artifact is identical to tags/$S; there is nothing to release"
-
-STAGE="checking tags/$VERSION is unchanged since r$C"
-snapshot
-last_changed "$BASE/tags/$VERSION" "$REPLY"
-[ "$REPLY" = "$C" ] || fail "tags/$VERSION changed after r$C; someone else is writing to it"
-
-STAGE="committing the artifact to tags/$VERSION"
-if ! commit_write "$WC" "Release $VERSION: populate tags/$VERSION from the artifact"; then
+STAGE="committing tags/$VERSION"
+RECOVERY="The commit's outcome is unknown: if tags/$VERSION exists, do not approve or release it until it is verified against the ZIP (wporg-svn README, Recovery)."
+if ! commit_write "$TAG" "Release $VERSION: create tags/$VERSION from the artifact"; then
 	svn_error
 	ERROR=$REPLY
 	STAGE="inspecting tags/$VERSION after a failed commit"
 	snapshot
-	last_changed "$BASE/tags/$VERSION" "$REPLY"
-	STAGE="committing the artifact to tags/$VERSION"
-	if [ "$REPLY" = "$C" ]; then
-		fail "the commit failed ($ERROR); tags/$VERSION is unchanged since r$C"
+	HEAD=$REPLY
+	svn_kind "$BASE/tags" "$VERSION" "$HEAD"
+	STAGE="committing tags/$VERSION"
+	if [ "$REPLY" = absent ]; then
+		RECOVERY=
+		fail "the commit failed ($ERROR) and tags/$VERSION does not exist at r$HEAD, so nothing was written. Rerun once the cause is fixed."
 	fi
-	fail "the commit reported an error ($ERROR) and tags/$VERSION changed at r$REPLY; this run cannot confirm what it holds"
+	RECOVERY="tags/$VERSION exists at r$HEAD, but this run cannot confirm that it created it. Do not approve or release it: inspect it first (wporg-svn README, Recovery)."
+	fail "the commit reported an error ($ERROR) and tags/$VERSION now exists"
 fi
 N=$REPLY
 note_revision "commit r$N"
-RECOVERY="tags/$VERSION was populated at r$N but not verified against the artifact. Do not approve or release it until it is (wporg-svn README, Recovery)."
+RECOVERY="tags/$VERSION was created at r$N but not verified against the artifact. Do not approve or release it until it is (wporg-svn README, Recovery)."
 
 STAGE="verifying tags/$VERSION at r$N"
 svn_read export --quiet --ignore-externals -r "$N" -- "$BASE/tags/$VERSION@$N" "$WORK/verify"
@@ -170,7 +153,6 @@ RECOVERY=
 output version "$VERSION"
 output revision "$N"
 output previous-stable "$S"
-output copy-revision "$C"
 summary "### $ACTION_NAME: $SLUG $VERSION" "" \
-	"- tags/$VERSION copied from tags/$S@$R at r$C, populated from the artifact at r$N and verified." \
+	"- tags/$VERSION created at r$N as a copy of tags/$S@$R that matches the artifact, and verified." \
 	"- The stable pointer is unchanged. QA tags/$VERSION@$N, then run set-stable and update-trunk."

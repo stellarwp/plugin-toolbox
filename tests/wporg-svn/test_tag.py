@@ -1,4 +1,4 @@
-"""tag: copy the stable tag to tags/<version> server-side, then make it match the ZIP exactly."""
+"""tag: create tags/<version> in one commit, as a copy of the stable tag that matches the ZIP exactly."""
 
 import unittest
 
@@ -61,16 +61,18 @@ class TagTest(ActionTest):
         result = self.tag()
         self.assert_success(result)
 
-        copy, revision = int(result.outputs["copy-revision"]), int(result.outputs["revision"])
+        revision = int(result.outputs["revision"])
         self.assertEqual(result.outputs["version"], "1.1")
         self.assertEqual(result.outputs["previous-stable"], "1.0")
-        self.assertEqual((copy, revision), (snapshot + 1, snapshot + 2))
+        self.assertEqual(revision, snapshot + 1, "the tag must appear in a single commit")
         self.assertEqual(self.repo.tree("tags/1.1"), expected_tree(NEXT))
         self.assertEqual(self.frozen(), before, "trunk, the stable tag and assets must not change")
 
-        self.assertEqual(self.repo.changed(copy), [("A", f"/{SLUG}/tags/1.1")])
-        self.assertTrue(all(path.startswith(f"/{SLUG}/tags/1.1/") for _, path in self.repo.changed(revision)))
-        log = self.repo.svn("log", "-v", "--xml", "-r", str(copy), self.repo.root).decode()
+        changed = self.repo.changed(revision)
+        self.assertIn(("A", f"/{SLUG}/tags/1.1"), changed)
+        self.assertTrue(all(path == f"/{SLUG}/tags/1.1" or path.startswith(f"/{SLUG}/tags/1.1/")
+                            for _, path in changed))
+        log = self.repo.svn("log", "-v", "--xml", "-r", str(revision), self.repo.root).decode()
         self.assertIn(f'copyfrom-path="/{SLUG}/tags/1.0"', log)
         self.assertIn(f'copyfrom-rev="{snapshot}"', log)
 
@@ -86,26 +88,29 @@ class TagTest(ActionTest):
         self.assertFalse([path for path, values in props.items() if "svn:eol-style" in values or "svn:keywords" in values])
         self.assertEqual(self.repo.tree("tags/1.1"), expected_tree(NEXT))
 
-    def test_only_the_new_tag_is_checked_out(self):
-        result = self.tag()
-        self.assert_success(result)
-        checkouts = [call for call in self.svn_calls() if "checkout" in call or "co" in call]
-        self.assertEqual(len(checkouts), 1)
-        copy = result.outputs["copy-revision"]
-        self.assertIn(f"{self.repo.url('tags/1.1')}@{copy}", checkouts[0])
-        self.assertIn("--ignore-externals", checkouts[0])
-
-    def test_stable_tag_properties_are_read_in_one_stream(self):
-        # svn proplist -R on a URL asks for every path separately: minutes on a large tag.
+    def test_the_stable_tag_is_downloaded_once_and_nothing_else(self):
         snapshot = self.repo.head()
         self.assert_success(self.tag())
-        dumps = [call for call in self.svn_calls() if call[0] == "svnrdump"]
-        self.assertEqual(len(dumps), 1)
-        self.assertIn("dump", dumps[0])
-        self.assertEqual(dumps[0][-1], self.repo.url("tags/1.0"))
-        self.assertEqual(dumps[0][dumps[0].index("-r") + 1], str(snapshot))
-        remote = [call for call in self.svn_calls() if "proplist" in call and any(a.startswith("file:") for a in call)]
+        calls = self.svn_calls()
+        self.assertEqual([call[0] for call in calls if call[0] != "svn"], [], "no svnmucc or svnrdump")
+        checkouts = [call for call in calls if "checkout" in call or "co" in call]
+        self.assertEqual(len(checkouts), 1)
+        self.assertIn("empty", checkouts[0])
+        self.assertIn(f"{self.repo.url('tags')}@{snapshot}", checkouts[0])
+        copies = [call for call in calls if "copy" in call or "cp" in call]
+        self.assertEqual(len(copies), 1)
+        self.assertIn(f"{self.repo.url('tags/1.0')}@{snapshot}", copies[0])
+        self.assertIn("--ignore-externals", copies[0])
+        # svn proplist -R on a URL asks for every path separately: minutes on a large tag.
+        remote = [call for call in calls if "proplist" in call and any(a.startswith("file:") for a in call)]
         self.assertEqual(remote, [])
+
+    def test_an_artifact_identical_to_the_stable_tag_writes_nothing(self):
+        # A legacy repository whose tags/1.0 already holds the 1.1 release.
+        self.repo.mucc("rm", self.repo.url("tags/1.0"))
+        self.repo.put_tree("tags/1.0", NEXT)
+        self.rejected(r"the artifact is identical to tags/1\.0; there is nothing to release")
+        self.assertFalse(self.repo.exists("tags/1.1"))
 
     def test_unchanged_files_keep_their_history(self):
         self.assert_success(self.tag())

@@ -22,7 +22,8 @@ import xml.etree.ElementTree as ET
 
 FIXABLE = {"unversioned", "ignored", "missing", "obstructed", "modified"}
 COMMITTABLE = {"added", "deleted", "replaced", "modified"}
-FLAGS = ("tree-conflicted", "switched", "wc-locked", "copied")
+# Not "copied": tag reconciles a fresh copy, where every changed node is copied.
+FLAGS = ("tree-conflicted", "switched", "wc-locked")
 
 
 class TreeError(Exception):
@@ -104,11 +105,17 @@ class _Svn:
         return result.stdout
 
     def status(self, wc) -> list:
-        """(path, item, props, flags) for every entry svn reports."""
+        """(path, item, props, flags) for every entry svn reports.
+
+        A copy scheduled for addition (svn copy URL WC) reports its root as
+        added; that is the copy itself, not a change to reconcile or count.
+        """
         doc = ET.fromstring(self.run("status", "--xml", "--no-ignore", "--", wc + "@"))
         found = []
         for entry in doc.iter("entry"):
             status = entry.find("wc-status")
+            if entry.get("path") == wc and status.get("item") == "added" and status.get("copied") == "true":
+                continue
             flags = {flag for flag in FLAGS if status.get(flag) == "true"}
             found.append((entry.get("path"), status.get("item"), status.get("props"), flags))
         return found

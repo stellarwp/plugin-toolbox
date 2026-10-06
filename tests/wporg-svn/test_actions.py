@@ -13,7 +13,7 @@ from support import ACTIONS
 CREDENTIALS = {"wporg-username": "WPORG_USERNAME", "wporg-password": "WPORG_PASSWORD"}
 ACTIONS_SPEC = {
     "tag": ({"plugin-slug": "WPORG_SLUG", "zip-url": "WPORG_ZIP_URL", **CREDENTIALS},
-            {"version", "revision", "previous-stable", "copy-revision"}),
+            {"version", "revision", "previous-stable"}),
     "set-stable": ({"plugin-slug": "WPORG_SLUG", "version": "WPORG_VERSION", **CREDENTIALS}, {"version", "revision"}),
     "update-trunk": ({"plugin-slug": "WPORG_SLUG", "version": "WPORG_VERSION", **CREDENTIALS}, {"version", "revision"}),
 }

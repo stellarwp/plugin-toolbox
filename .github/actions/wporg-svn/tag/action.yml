@@ -1,7 +1,7 @@
 name: "WordPress.org SVN: tag"
 description: >-
-  Prepare a release: copy the current stable tag to tags/<version> on the server, then make that new tag
-  match a plugin ZIP exactly. Does not touch trunk or move the stable pointer.
+  Prepare a release: create tags/<version> in one commit, as a copy of the current stable tag that matches
+  a plugin ZIP exactly. Does not touch trunk or move the stable pointer.
 inputs:
   plugin-slug:
     description: The plugin's wordpress.org slug.
@@ -20,14 +20,11 @@ outputs:
     description: The version released, read from the plugin header.
     value: ${{ steps.release.outputs.version }}
   revision:
-    description: The revision that populated and completed tags/<version>.
+    description: The revision that created tags/<version>.
     value: ${{ steps.release.outputs.revision }}
   previous-stable:
     description: The stable tag that tags/<version> was copied from.
     value: ${{ steps.release.outputs.previous-stable }}
-  copy-revision:
-    description: The revision of the server-side copy that created tags/<version>.
-    value: ${{ steps.release.outputs.copy-revision }}
 runs:
   using: composite
   steps:

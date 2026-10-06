@@ -1,4 +1,4 @@
-"""Races, failures between commits, cancellation, ambiguous writes and secret handling.
+"""Races, failed commits, cancellation, ambiguous writes and secret handling.
 
 Most failures come from real repository hooks. A few come from PATH wrappers:
 those simulate what a file:// repository cannot produce (a lost network
@@ -40,59 +40,47 @@ if [ "$n" = {number} ]; then {command}; fi
 """)
 
 
-class BetweenTagCommitsTest(Base):
-    def reject_populate(self):
-        self.repo.hook("pre-commit", """
-if svnlook log -t "$2" "$1" | grep -q populate; then echo 'rejected by policy' >&2; exit 1; fi
-""")
+class TagCommitTest(Base):
+    """The tag's only write: tags/<version> lands complete, or not at all."""
 
-    def test_failure_after_the_copy_reports_an_incomplete_tag(self):
-        self.reject_populate()
-        result = self.tag()
-        self.assert_failure(result, r"tags/1\.1 is unchanged since r\d+")
-        self.assertRegex(result.log, r"tags/1\.1 exists since r\d+ and is INCOMPLETE: it still holds the 1\.0 files")
-        self.assertRegex(result.log, r"Known revisions: snapshot r\d+, recheck r\d+, copy r\d+")
-        self.assertRegex(result.summary, "INCOMPLETE")
-        self.assertEqual(self.repo.tree("tags/1.1"), self.repo.tree("tags/1.0"), "the copy is left as it is")
-
-    def test_a_rerun_never_reuses_the_incomplete_tag(self):
-        self.reject_populate()
-        self.assert_failure(self.tag(), "INCOMPLETE")
-        incomplete, head = self.repo.tree("tags/1.1"), self.repo.head()
-        self.repo.hook("pre-commit", "exit 0\n")
-        self.assert_failure(self.tag(), r"tags/1\.1 already exists")
-        self.assertEqual((self.repo.tree("tags/1.1"), self.repo.head()), (incomplete, head))
-
-    def test_cancellation_between_commits_reports_and_cleans_up(self):
-        marker = os.path.join(self.repo.staging, "populating")
-        self.repo.hook("pre-commit", f"""
-if svnlook log -t "$2" "$1" | grep -q populate; then touch '{marker}'; sleep 30; fi
-""")
+    def cancel_during(self, hook, marker):
         process = self.start("tag", WPORG_ZIP_URL=self.zip_url)
         deadline = time.time() + 120
         while not os.path.exists(marker) and time.time() < deadline:
             time.sleep(0.2)
-        self.assertTrue(os.path.exists(marker), "the populate commit never started")
+        self.assertTrue(os.path.exists(marker), f"the {hook} hook never ran")
         os.killpg(process.pid, signal.SIGTERM)  # what a runner does when the job is cancelled
         result = self.finish(process, timeout=60)  # also checks temp cleanup and secrets
         self.assertEqual(result.code, 143, result.log)
-        self.assertRegex(result.log, r"Failed while committing the artifact to tags/1\.1")
-        self.assertRegex(result.log, "INCOMPLETE")
         self.assertEqual(result.outputs, {})
+        return result
 
-    def test_cancellation_while_the_copy_lands_still_warns(self):
-        marker = os.path.join(self.repo.staging, "copied")
-        self.repo.hook("post-commit", f"touch '{marker}'; sleep 30\n")  # the copy is durable now
-        process = self.start("tag", WPORG_ZIP_URL=self.zip_url)
-        deadline = time.time() + 120
-        while not os.path.exists(marker) and time.time() < deadline:
-            time.sleep(0.2)
-        self.assertTrue(os.path.exists(marker), "the copy never committed")
-        os.killpg(process.pid, signal.SIGTERM)
-        result = self.finish(process, timeout=60)
-        self.assertEqual(result.code, 143, result.log)
+    def test_a_rejected_commit_writes_nothing_and_a_rerun_succeeds(self):
+        head = self.repo.head()
+        self.repo.hook("pre-commit", "echo 'rejected by policy' >&2; exit 1\n")
+        result = self.tag()
+        self.assert_failure(result, r"the commit failed \(.*\) and tags/1\.1 does not exist at r\d+, "
+                                    r"so nothing was written")
+        self.assertRegex(result.log, r"Known revisions: snapshot r\d+, recheck r\d+\.")
+        self.assertEqual(self.repo.head(), head)
+        self.repo.hook("pre-commit", "exit 0\n")
+        self.assert_success(self.tag())
+        self.assertEqual(self.repo.tree("tags/1.1"), expected_tree(NEXT))
+
+    def test_cancellation_during_the_commit_leaves_no_tag(self):
+        marker = os.path.join(self.repo.staging, "committing")
+        self.repo.hook("pre-commit", f"touch '{marker}'; sleep 30\n")
+        result = self.cancel_during("pre-commit", marker)
+        self.assertRegex(result.log, r"Failed while committing tags/1\.1")
+        self.assertRegex(result.log, r"The commit's outcome is unknown: if tags/1\.1 exists")
+        self.assertFalse(self.repo.exists("tags/1.1"))
+
+    def test_cancellation_while_the_commit_lands_still_warns(self):
+        marker = os.path.join(self.repo.staging, "committed")
+        self.repo.hook("post-commit", f"touch '{marker}'; sleep 30\n")  # the commit is durable now
+        result = self.cancel_during("post-commit", marker)
         self.assertTrue(self.repo.exists("tags/1.1"))
-        self.assertRegex(result.log, r"if tags/1\.1 exists, treat it as INCOMPLETE")
+        self.assertRegex(result.log, r"if tags/1\.1 exists, do not approve or release it")
 
     def test_a_failed_verification_reports_what_the_tag_now_holds(self):
         # Simulated: a lost connection while exporting the committed tag.
@@ -100,27 +88,10 @@ if svnlook log -t "$2" "$1" | grep -q populate; then touch '{marker}'; sleep 30;
                          'exec "$NEXT" "$@"')
         result = self.tag()
         self.assert_failure(result, r"Failed while verifying tags/1\.1")
-        self.assertRegex(result.log, r"tags/1\.1 was populated at r\d+ but not verified")
-        self.assertNotRegex(result.log, "still holds the 1.0 files")
-
-    def test_competing_edit_to_a_file_we_change_fails_the_commit(self):
-        racer = self.staged("racer.php", "<?php // someone else\n")
-        self.on_commit(2, f"svnmucc --non-interactive -m racer put '{racer}' '{self.repo.url('tags/1.1/src/a.php')}'")
-        result = self.tag()
-        self.assert_failure(result, r"tags/1\.1 changed at r\d+; this run cannot confirm what it holds")
-        self.assertRegex(result.log, "INCOMPLETE")
-        self.assertEqual(self.repo.cat("tags/1.1/src/a.php").decode(), open(racer).read())
-
-    def test_competing_new_file_is_caught_by_verification(self):
-        extra = self.staged("extra.txt", "not in the artifact\n")
-        self.on_commit(2, f"svnmucc --non-interactive -m racer put '{extra}' '{self.repo.url('tags/1.1/extra.txt')}'")
-        result = self.tag()
-        self.assert_failure(result, r"tags/1\.1 at r\d+ does not match the artifact")
-        self.assertRegex(result.log, "differs: extra.txt")
-        self.assertRegex(result.log, r"tags/1\.1 was populated at r\d+ but not verified.*Do not approve or release it")
+        self.assertRegex(result.log, r"tags/1\.1 was created at r\d+ but not verified.*Do not approve or release it")
 
 
-class RaceBeforeTheCopyTest(Base):
+class RaceBeforeTheCommitTest(Base):
     def race_during_download(self, *actions):
         payload = self.https.routes["/release.zip"]
 
@@ -160,11 +131,11 @@ class RaceBeforeTheCopyTest(Base):
     def test_destination_created_at_write_time_is_never_overwritten(self):
         self.on_commit(1, f"svnmucc --non-interactive -m racer mkdir '{self.repo.url('tags/1.1')}'")
         result = self.tag()
-        self.assert_failure(result, r"the copy reported an error .* and tags/1\.1 now exists")
+        self.assert_failure(result, r"the commit reported an error .* and tags/1\.1 now exists")
         self.assertRegex(result.log, "cannot confirm that it created it. Do not approve or release it")
         self.assertEqual(self.repo.tree("tags/1.1"), {}, "the other writer's tag stays as it was")
 
-    def test_an_unrelated_new_tag_does_not_block_the_copy(self):
+    def test_an_unrelated_new_tag_does_not_block_the_commit(self):
         self.on_commit(1, f"svnmucc --non-interactive -m racer mkdir '{self.repo.url('tags/0.5')}'")
         result = self.tag()
         self.assert_success(result)
@@ -178,12 +149,13 @@ class AmbiguousWriteTest(Base):
     def lose_the_response(self):
         self.wrap("svnmucc", '"$NEXT" "$@" >/dev/null 2>&1\necho "svnmucc: E175012: Connection timed out" >&2\nexit 1')
 
-    def test_tag_copy_with_a_lost_response_is_not_trusted(self):
-        self.lose_the_response()
+    def test_tag_commit_with_a_lost_response_is_not_trusted(self):
+        self.wrap("svn", 'case " $* " in *" commit "*) "$NEXT" "$@" >/dev/null 2>&1\n'
+                         'echo "svn: E175012: Connection timed out" >&2; exit 1;; esac\nexec "$NEXT" "$@"')
         result = self.tag()
-        self.assert_failure(result, r"the copy reported an error \(could not connect \(E175012\)\) and tags/1\.1 now exists")
+        self.assert_failure(result, r"the commit reported an error \(could not connect \(E175012\)\) and tags/1\.1 now exists")
         self.assertRegex(result.log, "cannot confirm that it created it")
-        self.assertFalse(any("checkout" in call for call in self.svn_calls()), "never continue past an unconfirmed write")
+        self.assertFalse(any("export" in call for call in self.svn_calls()), "never continue past an unconfirmed write")
         self.assertTrue(self.repo.exists("tags/1.1"))
 
     def test_set_stable_with_a_lost_response_says_a_rerun_is_safe(self):
@@ -206,11 +178,14 @@ class AmbiguousWriteTest(Base):
 class ErrorClassificationTest(Base):
     """Failed reads stop the action; they are never taken to mean "absent"."""
 
-    def test_authentication_failure_on_the_copy(self):
+    def test_authentication_failure_on_the_commit(self):
         # Simulated: file:// never asks for credentials.
-        self.wrap("svnmucc", 'echo "svnmucc: E170001: Authorization failed" >&2\nexit 1')
+        self.wrap("svn", 'case " $* " in *" commit "*) echo "svn: E170001: Authorization failed" >&2; exit 1;; esac\n'
+                         'exec "$NEXT" "$@"')
+        head = self.repo.head()
         result = self.tag()
-        self.assert_failure(result, r"the copy failed \(authentication failed \(E170001\)\) and tags/1\.1 does not exist")
+        self.assert_failure(result, r"the commit failed \(authentication failed \(E170001\)\) and tags/1\.1 does not exist")
+        self.assertEqual(self.repo.head(), head)
 
     def test_tls_failure_on_a_read_is_not_absence(self):
         # Simulated: file:// has no TLS.
@@ -232,13 +207,13 @@ class ErrorClassificationTest(Base):
         self.assert_failure(result, r"could not connect \(E170013 E175002\)")
         self.assertNotRegex(result.log, "does not exist")
 
-    def test_connection_failure_while_dumping_the_stable_tag_is_not_absence(self):
+    def test_connection_failure_while_copying_the_stable_tag_stops_the_tag(self):
         # Simulated: file:// cannot drop a connection.
-        self.wrap("svnrdump", 'echo "svnrdump: E170013: Unable to connect" >&2; '
-                              'echo "svnrdump: E175002: Connection reset" >&2; exit 1')
+        self.wrap("svn", 'case " $* " in *" copy "*) echo "svn: E170013: Unable to connect" >&2; '
+                         'echo "svn: E175002: Connection reset" >&2; exit 1;; esac\nexec "$NEXT" "$@"')
         head = self.repo.head()
         result = self.tag()
-        self.assert_failure(result, r"SVN read failed while checking tags/1\.1 and tags/1\.0: "
+        self.assert_failure(result, r"SVN read failed while copying tags/1\.0 into a working copy: "
                                     r"could not connect \(E170013 E175002\)")
         self.assertEqual(self.repo.head(), head)
 
@@ -260,19 +235,6 @@ class HelperFailureTest(Base):
         self.assert_failure(self.tag(), r"Failed while checking tags/1\.1")
         self.assertEqual(self.repo.head(), head)
 
-    def assert_unreadable_dump_stops_the_tag(self, body):
-        self.wrap("svnrdump", body)
-        head = self.repo.head()
-        self.assert_failure(self.tag(), r"could not read svnrdump's output for tags/1\.0")
-        self.assertEqual(self.repo.head(), head)
-
-    def test_a_truncated_dump_of_the_stable_tag_stops_the_tag(self):
-        self.assert_unreadable_dump_stops_the_tag('out=$(mktemp)\n"$NEXT" "$@" >"$out" || exit\n'
-                                                  'head -c $(($(wc -c <"$out") / 2)) "$out"; rm -f "$out"')
-
-    def test_a_garbled_dump_of_the_stable_tag_stops_the_tag(self):
-        self.assert_unreadable_dump_stops_the_tag('"$NEXT" "$@" | LC_ALL=C sed "s/^Node-action: add$/Node-action: change/"')
-
     def test_unreadable_diff_output_stops_update_trunk(self):
         self.repo.put_tree("tags/1.1", plugin("1.1"))
         self.wrap("svn", 'case " $* " in *" diff "*) echo "<not xml"; exit 0;; esac\nexec "$NEXT" "$@"')
@@ -284,7 +246,7 @@ class HelperFailureTest(Base):
 class SecretsTest(Base):
     def test_password_reaches_svn_only_on_stdin(self):
         dump = os.path.join(self.tmp, "child-env")
-        for tool in ("svn", "svnmucc", "curl"):
+        for tool in ("svn", "curl"):
             self.wrap(tool, f'env >> \'{dump}\'\nexec "$NEXT" "$@"')
         result = self.tag()
         self.assert_success(result)
@@ -307,7 +269,7 @@ class RunnerTest(Base):
 
     def test_missing_tool(self):
         path = self.env["PATH"]
-        for missing in ("svnmucc", "svnrdump"):
+        for missing in ("svn", "curl"):
             with self.subTest(missing=missing):
                 # A PATH holding every tool except the missing one.
                 farm = os.path.join(self.tmp, "farm-" + missing)

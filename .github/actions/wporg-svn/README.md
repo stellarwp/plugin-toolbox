@@ -4,7 +4,7 @@ Three composite actions that release a plugin to plugins.svn.wordpress.org from 
 
 | Action | Inputs | What it does |
 |---|---|---|
-| `tag` | `plugin-slug`, `zip-url` | Copies the current stable tag to `tags/<version>` on the server, checks out only that new tag, makes it match the ZIP exactly, and commits the difference. trunk and the stable pointer don't move. |
+| `tag` | `plugin-slug`, `zip-url` | Creates `tags/<version>` in one commit, as a copy of the current stable tag that matches the ZIP exactly. Only changed files are uploaded. trunk and the stable pointer don't move. |
 | `set-stable` | `plugin-slug`, `version` | Copies `tags/<version>/readme.txt` over `trunk/readme.txt` in one server-side commit. WordPress.org reads the Stable Tag from that file, so this is the release. |
 | `update-trunk` | `plugin-slug`, `version` | Replaces trunk with `tags/<version>` in one atomic server-side commit. Housekeeping after the release. |
 
@@ -13,8 +13,8 @@ All three also take `wporg-username` and `wporg-password`. The version always co
 ## Read this first
 
 - **This is not WordPress.org's documented flow.** [Using Subversion](https://developer.wordpress.org/plugins/wordpress-org/how-to-use-subversion/) updates trunk first and copies trunk to a tag. These actions prepare the tag first, on purpose, so that it can be checked before anything points at it.
-- **A new tag is public the moment it exists.** It is not private staging. If [Release Confirmation](https://developer.wordpress.org/plugins/wordpress-org/release-confirmation-emails/) is on, WordPress.org may see the new tag and email about a pending release before `set-stable` runs. Never confirm a tag that `tag` did not finish.
-- **`tag` takes two commits.** The first (the server-side copy) creates `tags/<version>` holding the *previous* release. The second makes it match the ZIP. If the job fails or is cancelled in between, the tag stays incomplete and public. The action says so loudly and never cleans it up or reuses it. See [Recovery](#recovery).
+- **A new tag is public the moment it exists.** It is not private staging. If [Release Confirmation](https://developer.wordpress.org/plugins/wordpress-org/release-confirmation-emails/) is on, WordPress.org may see the new tag and email about a pending release before `set-stable` runs. Never confirm a tag that `tag` did not verify.
+- **`tag` takes one commit.** It prepares the new tag in a local working copy and commits it once, so `tags/<version>` appears complete or not at all. If the outcome of that commit is unclear, the action says so loudly and never cleans up or reuses the tag. See [Recovery](#recovery).
 - **Released tags never change.** `tag` refuses a version whose tag already exists, under any spelling (`1.2` and `1.2.0` are the same version).
 
 ## Order
@@ -112,13 +112,12 @@ Every action outputs `version` and `revision` once it has verified its result. A
 | Output | Meaning |
 |---|---|
 | `version` | The version released (`tag`: read from the plugin header). |
-| `revision` | `tag`: the commit that completed the new tag. `set-stable`, `update-trunk`: their commit. For a verified no-op, the revision that was checked; the step summary says it was a no-op. |
+| `revision` | `tag`: the commit that created the new tag. `set-stable`, `update-trunk`: their commit. For a verified no-op, the revision that was checked; the step summary says it was a no-op. |
 | `previous-stable` | `tag` only: the tag it copied from. |
-| `copy-revision` | `tag` only: the server-side copy that created the tag. |
 
 ## Requirements
 
-An Ubuntu runner with bash, Subversion 1.10 or newer (`svn`, `svnmucc` and, for `tag`, `svnrdump`), Python 3.8 or newer, and, for `tag`, curl. Ubuntu runner images may not include Subversion: install the `subversion` package as in the example. Each action checks its tools and stops with a clear error if one is missing or the runner isn't Linux.
+An Ubuntu runner with bash, Subversion 1.10 or newer (`svn`, and `svnmucc` for `set-stable` and `update-trunk`), Python 3.8 or newer, and, for `tag`, curl. Ubuntu runner images may not include Subversion: install the `subversion` package as in the example. Each action checks its tools and stops with a clear error if one is missing or the runner isn't Linux.
 
 ## What gets checked
 
@@ -128,10 +127,10 @@ Before any write, every action pins one repository revision and reads everything
 
 - trunk's readme names a numeric stable tag S, and `tags/S` exists. A stable tag of `trunk` (a first release) is not supported.
 - The ZIP passes every check in [ZIP limits](#zip-limits). The plugin header version V is numeric and newer than S, and the ZIP's readme Stable Tag is exactly V.
-- `tags/V` doesn't exist under any spelling, and `tags/S` sets no property that changes file bytes (`svn:eol-style`, `svn:keywords`, `svn:special`, `svn:externals`).
-- Just before the copy it checks again that the stable pointer, `tags/S` and the absence of `tags/V` haven't changed.
-- After the copy it checks out only `tags/V`, syncs the ZIP byte for byte (additions, deletions, dotfiles, file/directory swaps), adds files even where ignore patterns would hide them, and re-validates the version, readme and full tree.
-- It commits only if nobody else has touched `tags/V` since the copy, then exports the committed tag and compares it with the ZIP again.
+- `tags/V` doesn't exist under any spelling, and the copy of `tags/S` sets no property that changes file bytes (`svn:eol-style`, `svn:keywords`, `svn:special`, `svn:externals`).
+- It copies `tags/S` at the pinned revision into an otherwise empty working copy as `tags/V`, syncs the ZIP byte for byte (additions, deletions, dotfiles, file/directory swaps), adds files even where ignore patterns would hide them, and re-validates the version, readme and full tree. An artifact identical to `tags/S` is refused.
+- Just before the commit it checks again that the stable pointer, `tags/S` and the absence of `tags/V` haven't changed. If someone creates `tags/V` before the commit lands, the commit fails instead of overwriting it.
+- After the commit it exports the committed tag and compares it with the ZIP again.
 
 `set-stable`: `tags/V/readme.txt` and `trunk/readme.txt` are regular files without byte-changing properties, and the tag readme's Stable Tag is exactly V. The write is pinned to the snapshot revision, so a competing change to `trunk/readme.txt` makes it fail instead of being overwritten. Identical bytes are a verified no-op.
 
@@ -168,7 +167,7 @@ New files are added without SVN auto-props, including any a repository inherits.
   - authentication with an SVN password;
   - out-of-date detection over HTTPS;
   - real lost responses;
-  - whether wordpress.org's server-side rules accept the second commit into a just-created tag.
+  - whether wordpress.org's server-side rules accept a new tag committed as a copy with changes, the shape common deploy scripts use.
 
   Supervise the first real release, with this page at hand.
 
@@ -176,9 +175,15 @@ New files are added without SVN auto-props, including any a repository inherits.
 
 A failure prints an error naming the stage and the revisions known so far, and repeats it in the step summary. Don't rerun a write blindly: each action has already inspected the server after a failed write and says what it found.
 
-**Nothing was written.** Every check runs before the first write, so any failure before the copy, and `the copy failed ... tags/V does not exist`, mean nothing changed. Fix the cause and rerun.
+**Nothing was written.** Every check runs before the only write, so any failure before the commit, and `the commit failed ... tags/V does not exist`, mean nothing changed. Fix the cause and rerun.
 
-**`tags/V ... is INCOMPLETE`.** The copy landed but the tag wasn't finished, through a failure, a cancellation or a rejected commit. The tag is public and holds the previous release.
+**`tag` can't vouch for `tags/V`.** One of these:
+
+- `... cannot confirm that it created it`: the commit reported an error, but `tags/V` now exists. Either the response got lost after the commit landed, or someone else created the tag.
+- `The commit's outcome is unknown`: the job stopped during the commit, usually because it was cancelled. If `tags/V` doesn't exist, nothing was written; rerun.
+- `tags/V was created at rN but not verified`: the commit landed, but comparing the committed tag with the ZIP failed or didn't finish.
+
+Then:
 
 1. Don't confirm it in Release Confirmation, and don't run `set-stable` for it.
 2. Look at what happened (reads only):
@@ -188,19 +193,13 @@ A failure prints an error naming the stage and the revisions known so far, and r
    svn diff --summarize https://plugins.svn.wordpress.org/<slug>/tags/<S> https://plugins.svn.wordpress.org/<slug>/tags/<V>
    ```
 
-3. A maintainer decides what to do. The usual fix is to delete the incomplete tag and run `tag` again. Deleting is a write to the live plugin, so it needs that maintainer's explicit go-ahead:
+3. A maintainer decides what to do: release it once someone has compared it with the ZIP, or delete it and run `tag` again. Deleting is a write to the live plugin, so it needs that maintainer's explicit go-ahead:
 
    ```sh
-   svn rm -m "Remove incomplete tag <V>" https://plugins.svn.wordpress.org/<slug>/tags/<V>
+   svn rm -m "Remove unverified tag <V>" https://plugins.svn.wordpress.org/<slug>/tags/<V>
    ```
 
    If WordPress.org already lists the tag as a pending release, follow its Release Confirmation guidance for a release you won't ship.
-
-**`... cannot confirm that it created it`.** The copy reported an error but `tags/V` now exists. Either the response got lost after the copy landed, or someone else created the tag. Treat it as incomplete until `svn log` shows who created it.
-
-**`The copy's outcome is unknown`.** The job stopped during the copy, usually because it was cancelled. Check whether `tags/V` exists. If it doesn't, nothing was written. If it does, treat it as incomplete.
-
-**`tags/V was populated at rN but not verified`.** The second commit landed, but comparing the committed tag with the ZIP failed or didn't finish. The tag holds whatever rN committed. Don't release it until someone has compared it with the ZIP, or deleted it as above and run `tag` again.
 
 **`set-stable` or `update-trunk` failed.**
 

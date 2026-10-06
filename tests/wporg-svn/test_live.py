@@ -41,7 +41,7 @@ class LiveReadTest(unittest.TestCase):
     cache = {}
 
     def read(self, slug):
-        """Run the read harness once per plugin; the recursive property read takes minutes."""
+        """Run the read harness once per plugin."""
         if slug not in self.cache:
             started = time.time()
             result = subprocess.run(["bash", os.path.join(TESTS, "live_reads.sh"), slug], env=self.env,
@@ -60,7 +60,6 @@ class LiveReadTest(unittest.TestCase):
                 self.assertEqual(seen["stable-kind"], "dir")
                 self.assertEqual(seen["probe-kind"], "absent")
                 self.assertIn(seen["stable"], seen["tags"].split(","))
-                self.assertEqual(seen["props"], "ok")
                 print(f"\n  {slug}: r{seen['revision']} stable {seen['stable']} "
                       f"({len(seen['tags'].split(','))} tags), read helpers took {self.cache[slug][2]:.0f}s")
 
@@ -152,7 +151,7 @@ class LiveMirrorReleaseTest(ActionTest):
         self.assertEqual(local.tree("trunk"), local_tag)
         self.assertEqual(release.stable_tag(local.cat("trunk/readme.txt")), version)
         print(f"\n  {slug}: {previous} -> {version}, {len(local_tag)} paths, "
-              f"{len(local.changed(int(tagged.outputs['revision'])))} changed by the populate commit, "
+              f"{len(local.changed(int(tagged.outputs['revision'])))} changed by the tag commit, "
               f"{time.time() - started:.0f}s")
 
 

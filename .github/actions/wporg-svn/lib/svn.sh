@@ -199,26 +199,6 @@ check_props() {
 		fail "$3 has SVN properties that change file contents; an exact release cannot keep them"
 }
 
-# check_props for a whole tag, in one streamed read: svn proplist -R on a URL
-# asks for every path separately, which takes minutes on a large tag.
-check_tag_props() {
-	local codes
-	set +e
-	svnrdump dump --quiet --non-interactive --no-auth-cache --config-dir "$WORK/svn-config" -r "$2" -- "$1" \
-		2>"$WORK/err" | python3 "$LIB_DIR/svndump.py" check-props
-	codes=("${PIPESTATUS[@]}")
-	set -e
-	if [ "${codes[0]}" != 0 ]; then
-		svn_error
-		fail "SVN read failed while $STAGE: $REPLY"
-	fi
-	case ${codes[1]} in
-		0) ;;
-		1) fail "$3 has SVN properties that change file contents; an exact release cannot keep them" ;;
-		*) fail "could not read svnrdump's output for $3" ;;
-	esac
-}
-
 # Authenticated writes. The password travels on stdin, never in argv. On
 # success REPLY is the new revision. On failure they return 1 and the outcome
 # is unknown: the caller inspects, reports and stops. Writes are never retried.
