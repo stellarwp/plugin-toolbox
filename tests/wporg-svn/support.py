@@ -13,6 +13,7 @@ import pathlib
 import re
 import shutil
 import ssl
+import struct
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,7 @@ import threading
 import unittest
 import xml.etree.ElementTree as ET
 import zipfile
+import zlib
 
 TESTS = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(TESTS))
@@ -100,6 +102,31 @@ def make_zip(files, wrapper=None):
             name = f"{wrapper}/{rel}" if wrapper else rel
             zf.writestr(name, b"" if data is None else data)
     return buffer.getvalue()
+
+
+def patch_name(path, placeholder, raw):
+    """Swap an ASCII entry name for raw bytes of the same length, in both headers,
+    leaving the UTF-8 flag clear: what a tool that never sets the flag writes."""
+    assert len(placeholder) == len(raw)
+    with open(path, "r+b") as handle:
+        blob = handle.read()
+        assert blob.count(placeholder.encode()) == 2
+        handle.seek(0)
+        handle.write(blob.replace(placeholder.encode(), raw))
+
+
+def add_unicode_path_entry(path, header_raw, *unicode_names, data=b"z", crc=None):
+    """Append to the ZIP at path an unflagged entry named header_raw (bytes) with one
+    Info-ZIP Unicode Path field (0x7075) per name in unicode_names, in order. crc
+    defaults to the header name's, which makes the fields valid."""
+    placeholder = "q" * len(header_raw)
+    crc = zlib.crc32(header_raw) if crc is None else crc
+    fields = [struct.pack("<BI", 1, crc) + name.encode() for name in unicode_names]
+    with zipfile.ZipFile(path, "a") as zf:
+        info = zipfile.ZipInfo(placeholder)
+        info.extra = b"".join(struct.pack("<HH", 0x7075, len(field)) + field for field in fields)
+        zf.writestr(info, data)
+    patch_name(path, placeholder, header_raw)
 
 
 def expected_tree(files):

@@ -3,6 +3,7 @@
 import os
 import shutil
 import stat
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -213,6 +214,74 @@ class ArchiveTest(unittest.TestCase):
             handle.write(blob)
         with self.assertRaisesRegex(archive.ArchiveError, "malformed"):
             archive.extract(self.zip, self.dest)
+
+    def test_utf8_names_from_info_zip_keep_their_spelling(self):
+        # Info-ZIP's zip (macOS, Ubuntu) writes UTF-8 names without the UTF-8 flag.
+        if not shutil.which("zip"):
+            self.skipTest("Info-ZIP zip is not installed")
+        source = os.path.join(self.tmp, "src")
+        for name, data in {**PLUGIN, "caf\u00e9/na\u00efve.txt": "x", "\u65e5\u672c.txt": "y"}.items():
+            support.write(os.path.join(source, "plugin"), name, data)
+        subprocess.run(["zip", "-qr", self.zip, "plugin"], cwd=source, check=True)
+        with zipfile.ZipFile(self.zip) as zf:
+            self.assertFalse(any(info.flag_bits & 0x800 for info in zf.infolist()))
+        root = archive.extract(self.zip, self.dest)
+        self.assertEqual(self.read(root, "caf\u00e9", "na\u00efve.txt"), b"x")
+        self.assertEqual(self.read(root, "\u65e5\u672c.txt"), b"y")
+
+    def test_flagged_utf8_names_keep_their_spelling(self):
+        root = self.extract({**PLUGIN, "caf\u00e9.php": "x"})
+        self.assertEqual(self.read(root, "caf\u00e9.php"), b"x")
+
+    def unicode_path_zip(self, header_raw, *unicode_names, **field):
+        build_zip(self.zip, PLUGIN)
+        support.add_unicode_path_entry(self.zip, header_raw, *unicode_names, **field)
+
+    def test_a_unicode_path_field_that_agrees_is_accepted(self):
+        self.unicode_path_zip("caf\u00e9.php".encode(), "caf\u00e9.php")
+        root = archive.extract(self.zip, self.dest)
+        self.assertEqual(self.read(root, "caf\u00e9.php"), b"z")
+
+    def test_a_unicode_path_field_that_disagrees_is_rejected(self):
+        # On every Python: zipfile before 3.12 ignores the field.
+        for header in ("caf\u00e9.php", "plain.php"):
+            with self.subTest(header=header):
+                self.unicode_path_zip(header.encode(), "other.php")
+                with self.assertRaisesRegex(archive.ArchiveError, "two different names"):
+                    archive.extract(self.zip, self.dest)
+                self.assertEqual(os.listdir(self.dest), [])
+
+    def test_every_unicode_path_field_must_agree(self):
+        # unzip and zipfile 3.12+ take the last valid field: an agreeing one must
+        # not hide a later one that disagrees, nor the reverse.
+        for names in (("caf\u00e9.php", "other.php"), ("other.php", "caf\u00e9.php")):
+            with self.subTest(names=names):
+                shutil.rmtree(self.dest)
+                os.mkdir(self.dest)
+                self.unicode_path_zip("caf\u00e9.php".encode(), *names)
+                with self.assertRaisesRegex(archive.ArchiveError, "two different names"):
+                    archive.extract(self.zip, self.dest)
+                self.assertEqual(os.listdir(self.dest), [])
+
+    def test_repeated_agreeing_unicode_path_fields_are_accepted(self):
+        self.unicode_path_zip("caf\u00e9.php".encode(), "caf\u00e9.php", "caf\u00e9.php")
+        root = archive.extract(self.zip, self.dest)
+        self.assertEqual(self.read(root, "caf\u00e9.php"), b"z")
+
+    def test_a_stale_unicode_path_field_is_ignored(self):
+        # Its CRC no longer matches the header name, which a later tool changed.
+        self.unicode_path_zip("caf\u00e9.php".encode(), "other.php", crc=0)
+        root = archive.extract(self.zip, self.dest)
+        self.assertEqual(sorted(os.listdir(root)), sorted(["caf\u00e9.php", *PLUGIN]))
+        self.assertEqual(self.read(root, "caf\u00e9.php"), b"z")
+
+    def test_names_that_are_not_utf8_are_rejected(self):
+        # A legacy tool's CP437 name: its e-acute is byte 0x82, which is not UTF-8.
+        build_zip(self.zip, {**PLUGIN, "cafX.txt": "x"})
+        support.patch_name(self.zip, "cafX.txt", b"caf\x82.txt")
+        with self.assertRaisesRegex(archive.ArchiveError, "not UTF-8"):
+            archive.extract(self.zip, self.dest)
+        self.assertEqual(os.listdir(self.dest), [])
 
     def test_entry_count_limit(self):
         entries = dict(PLUGIN)

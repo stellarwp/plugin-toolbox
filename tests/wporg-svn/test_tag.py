@@ -1,8 +1,12 @@
 """tag: create tags/<version> in one commit, as a copy of the stable tag that matches the ZIP exactly."""
 
+import os
+import shutil
+import subprocess
+import tempfile
 import unittest
 
-from support import ActionTest, SIGNATURE, SLUG, expected_tree, make_zip, plugin
+from support import ActionTest, SIGNATURE, SLUG, add_unicode_path_entry, as_bytes, expected_tree, make_zip, plugin, write
 
 STABLE = plugin("1.0", extra={
     "keep.txt": "unchanged",
@@ -121,6 +125,38 @@ class TagTest(ActionTest):
         url = self.serve(wrapper="build-output-xyz")
         self.assert_success(self.tag(url))
         self.assertEqual(self.repo.tree("tags/1.1"), expected_tree(NEXT))
+
+    def test_info_zip_archives_keep_non_ascii_names(self):
+        # Info-ZIP's zip (macOS, Ubuntu) writes UTF-8 names without the UTF-8 flag.
+        if not shutil.which("zip"):
+            self.skipTest("Info-ZIP zip is not installed")
+        source = tempfile.mkdtemp(dir=self.tmp)
+        for rel, data in as_bytes(NEXT).items():
+            if rel.endswith("/"):
+                os.makedirs(os.path.join(source, rel), exist_ok=True)
+            else:
+                write(source, rel, data)
+        built = os.path.join(self.tmp, "info-zip.zip")
+        subprocess.run(["zip", "-qr", built, "."], cwd=source, check=True)
+        with open(built, "rb") as handle:
+            self.https.routes["/info-zip.zip"] = handle.read()
+        self.assert_success(self.tag(f"{self.https.url}/info-zip.zip?sig={SIGNATURE}"))
+        self.assertEqual(self.repo.tree("tags/1.1"), expected_tree(NEXT))
+
+    def test_an_entry_with_two_names_is_rejected_before_any_write(self):
+        # The header says src/café.php; an Info-ZIP Unicode Path field says
+        # src/intended.php, which is what unzip extracts. zipfile before 3.12
+        # ignores the field, so the action must check it itself, every field.
+        for i, fields in enumerate((["src/intended.php"], ["src/café.php", "src/intended.php"])):
+            with self.subTest(fields=fields):
+                built = os.path.join(self.tmp, f"two-names-{i}.zip")
+                with open(built, "wb") as handle:
+                    handle.write(make_zip(NEXT))
+                add_unicode_path_entry(built, "src/café.php".encode(), *fields)
+                with open(built, "rb") as handle:
+                    self.https.routes[f"/two-names-{i}.zip"] = handle.read()
+                self.rejected(r"an entry has two different names",
+                              WPORG_ZIP_URL=f"{self.https.url}/two-names-{i}.zip?sig={SIGNATURE}")
 
     def test_version_comes_from_the_plugin_header_not_the_filename(self):
         url = self.serve(path="/fixture-plugin.9.9.zip")

@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import re
 import stat
+import struct
 import sys
 import unicodedata
 import zipfile
@@ -34,14 +35,66 @@ class ArchiveError(Exception):
     pass
 
 
+def _check_control(name: str) -> None:
+    if any(ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F for c in name):
+        raise ArchiveError("an entry name contains a control character")
+
+
+def _unicode_paths(info: zipfile.ZipInfo, header: bytes):
+    """Yield the name in each of the entry's Info-ZIP Unicode Path fields (0x7075).
+
+    Only version 1 fields whose CRC matches the header name count; any other is
+    stale, as unzip and zipfile treat it.
+    """
+    extra, header_crc = info.extra, zlib.crc32(header)
+    while len(extra) >= 4:
+        kind, size = struct.unpack("<HH", extra[:4])
+        data, extra = extra[4:4 + size], extra[4 + size:]
+        if kind != 0x7075:
+            continue
+        if len(data) < 5:
+            raise ArchiveError("the archive is malformed")
+        version, crc = struct.unpack("<BI", data[:5])
+        if version == 1 and crc == header_crc:
+            try:
+                yield data[5:].decode("utf-8")
+            except UnicodeDecodeError:
+                raise ArchiveError("an entry name is not UTF-8") from None
+
+
+def _name(info: zipfile.ZipInfo) -> str:
+    """The entry's name as its author wrote it.
+
+    zipfile reads a name without the UTF-8 flag as CP437, but Info-ZIP's zip
+    (macOS, Ubuntu) writes UTF-8 there without setting the flag. Such names are
+    taken as UTF-8; one that isn't valid UTF-8 is refused rather than guessed.
+    """
+    raw = info.orig_filename
+    _check_control(raw)
+    flagged = info.flag_bits & 0x800
+    name = raw
+    if not flagged and not raw.isascii():
+        try:
+            name = raw.encode("cp437").decode("utf-8")
+        except UnicodeError:
+            raise ArchiveError("an entry name is not UTF-8") from None
+        _check_control(name)
+    # unzip and zipfile 3.12+ take the name from the last valid Unicode Path
+    # field; older zipfile ignores them. Every one must agree, on every Python.
+    if any(other != name for other in _unicode_paths(info, raw.encode("utf-8" if flagged else "cp437"))):
+        raise ArchiveError("an entry has two different names")
+    # Otherwise filename differs from both only where zipfile changed the name.
+    if info.filename not in (raw, name):
+        raise ArchiveError("an entry has an unsafe path")
+    return name
+
+
 def _check_name(info: zipfile.ZipInfo) -> list:
     """Return the path components of a safe entry name, or raise."""
-    raw = info.orig_filename
-    if any(ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F for c in raw):
-        raise ArchiveError("an entry name contains a control character")
-    if raw != info.filename or "\\" in raw or raw.startswith("/") or re.match(r"[A-Za-z]:", raw):
+    name = _name(info)
+    if "\\" in name or name.startswith("/") or re.match(r"[A-Za-z]:", name):
         raise ArchiveError("an entry has an unsafe path")
-    parts = (raw[:-1] if raw.endswith("/") else raw).split("/")
+    parts = (name[:-1] if name.endswith("/") else name).split("/")
     if any(part in ("", ".", "..") for part in parts):
         raise ArchiveError("an entry has an unsafe path")
     return parts
