@@ -2,7 +2,7 @@
 
 import unittest
 
-from support import ActionTest, SLUG, plugin
+from support import ActionTest, SLUG, plugin, write
 
 
 class SetStableTest(ActionTest):
@@ -49,6 +49,24 @@ class SetStableTest(ActionTest):
         self.assert_success(self.set_stable("1.1"))
         self.assert_success(self.set_stable("1.0"))
         self.assertEqual(self.repo.cat("trunk/readme.txt"), self.repo.cat("tags/1.0/readme.txt"))
+
+    def test_expected_revision_refuses_a_tag_changed_after_approval(self):
+        approved = self.repo.last_changed("tags/1.1")
+        self.repo.mucc("put", write(self.repo.staging, "late.php", "<?php // after QA"),
+                       self.repo.url("tags/1.1/late.php"))
+        head = self.repo.head()
+        result = self.set_stable(WPORG_EXPECTED_REVISION=str(approved))
+        self.assert_failure(result, rf"tags/1\.1 last changed at r{head}, not at the expected r{approved}")
+        self.assertEqual(self.repo.head(), head)
+        self.assert_success(self.set_stable(WPORG_EXPECTED_REVISION=str(head)))
+
+    def test_expected_revision_must_be_a_revision_number(self):
+        head = self.repo.head()
+        for value in ("abc", "0", "05", "r5", "5 ", "-1"):
+            with self.subTest(value=value):
+                self.assert_failure(self.set_stable(WPORG_EXPECTED_REVISION=value),
+                                    r"expected-revision must be a revision number")
+        self.assertEqual(self.repo.head(), head)
 
     def test_missing_tag_fails_without_writing(self):
         head = self.repo.head()

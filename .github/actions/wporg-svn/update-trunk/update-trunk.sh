@@ -10,6 +10,7 @@ ACTION_NAME="wporg-svn update-trunk"
 require_tools svn svnmucc python3
 validate_slug
 validate_version
+validate_expected_revision
 validate_credentials
 prepare
 
@@ -21,6 +22,7 @@ svn_kind "$BASE" trunk "$R"
 [ "$REPLY" = dir ] || fail "trunk does not exist at r$R"
 svn_kind "$BASE/tags" "$VERSION" "$R"
 [ "$REPLY" = dir ] || fail "tags/$VERSION does not exist at r$R"
+check_expected_revision "$R"
 svn_kind "$BASE/trunk" readme.txt "$R"
 [ "$REPLY" = file ] || fail "trunk/readme.txt is not a file at r$R"
 svn_cat "$BASE/trunk/readme.txt" "$R" "$WORK/trunk-readme.txt"

@@ -9,6 +9,11 @@ inputs:
   version:
     description: The tag to release, usually the tag action's version output.
     required: true
+  expected-revision:
+    description: >-
+      Optional: the tag action's revision output. When set, refuse unless tags/<version> last changed at
+      exactly this revision, so the release is the tag that was QA'd. Leave it empty for a manual run or rollback.
+    required: false
   wporg-username:
     description: WordPress.org account with commit access to the plugin.
     required: true
@@ -35,6 +40,7 @@ runs:
       env:
         WPORG_SLUG: ${{ inputs.plugin-slug }}
         WPORG_VERSION: ${{ inputs.version }}
+        WPORG_EXPECTED_REVISION: ${{ inputs.expected-revision }}
         WPORG_USERNAME: ${{ inputs.wporg-username }}
         WPORG_PASSWORD: ${{ inputs.wporg-password }}
       run: bash "$GITHUB_ACTION_PATH/set-stable.sh"

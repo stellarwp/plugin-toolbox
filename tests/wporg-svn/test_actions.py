@@ -11,11 +11,15 @@ import unittest
 from support import ACTIONS
 
 CREDENTIALS = {"wporg-username": "WPORG_USERNAME", "wporg-password": "WPORG_PASSWORD"}
+EXPECTED = {"expected-revision": "WPORG_EXPECTED_REVISION"}
+OPTIONAL = set(EXPECTED)
 ACTIONS_SPEC = {
     "tag": ({"plugin-slug": "WPORG_SLUG", "zip-url": "WPORG_ZIP_URL", **CREDENTIALS},
             {"version", "revision", "previous-stable"}),
-    "set-stable": ({"plugin-slug": "WPORG_SLUG", "version": "WPORG_VERSION", **CREDENTIALS}, {"version", "revision"}),
-    "update-trunk": ({"plugin-slug": "WPORG_SLUG", "version": "WPORG_VERSION", **CREDENTIALS}, {"version", "revision"}),
+    "set-stable": ({"plugin-slug": "WPORG_SLUG", "version": "WPORG_VERSION", **EXPECTED, **CREDENTIALS},
+                   {"version", "revision"}),
+    "update-trunk": ({"plugin-slug": "WPORG_SLUG", "version": "WPORG_VERSION", **EXPECTED, **CREDENTIALS},
+                     {"version", "revision"}),
 }
 
 
@@ -45,7 +49,7 @@ class ActionMetadataTest(unittest.TestCase):
                 declared = named(block(text, "inputs"))
                 self.assertEqual(set(declared), set(inputs))
                 for name, body in declared.items():
-                    self.assertIn("required: true", body, name)
+                    self.assertIn("required: false" if name in OPTIONAL else "required: true", body, name)
 
                 self.assertRegex(text, r"(?m)^  using: composite$")
                 steps = block(text, "runs")
@@ -73,7 +77,6 @@ class ActionMetadataTest(unittest.TestCase):
                 self.assertIn("${{ inputs.wporg-password }}", steps[:steps.index("id: release")])
                 if action == "tag":
                     self.assertIn("${{ inputs.zip-url }}", steps[:steps.index("id: release")])
-
 
     def test_the_readme_example_is_the_linted_example_file(self):
         readme = self.read(ACTIONS, "README.md")

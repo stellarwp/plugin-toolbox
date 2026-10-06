@@ -23,7 +23,7 @@ All three also take `wporg-username` and `wporg-password`. The version always co
 tag  ->  QA the new tag, approve  ->  set-stable  ->  update-trunk
 ```
 
-- QA `tags/<version>` at the `revision` the tag job reports, not just the ZIP you started from.
+- QA `tags/<version>` at the `revision` the tag job reports, not just the ZIP you started from. Pass that revision as `expected-revision`, as the example does, and both later actions refuse a tag that changed after QA.
 - `update-trunk` also replaces `trunk/readme.txt`, so it refuses to run until `set-stable` has pointed trunk's Stable Tag at the version. It can't release anything by itself.
 - `set-stable` has no upgrade-only rule. Pointing it at an older tag rolls the release back.
 
@@ -85,12 +85,14 @@ jobs:
         with:
           plugin-slug: ${{ inputs.plugin-slug }}
           version: ${{ needs.tag.outputs.version }}
+          expected-revision: ${{ needs.tag.outputs.revision }}
           wporg-username: ${{ secrets.WPORG_USERNAME }}
           wporg-password: ${{ secrets.WPORG_PASSWORD }}
       - uses: stellarwp/plugin-toolbox/.github/actions/wporg-svn/update-trunk@<full-commit-sha>
         with:
           plugin-slug: ${{ inputs.plugin-slug }}
           version: ${{ needs.tag.outputs.version }}
+          expected-revision: ${{ needs.tag.outputs.revision }}
           wporg-username: ${{ secrets.WPORG_USERNAME }}
           wporg-password: ${{ secrets.WPORG_PASSWORD }}
 ```
@@ -104,6 +106,7 @@ jobs:
 | `plugin-slug` | all | The wordpress.org slug: lowercase letters and digits, single hyphens between them. |
 | `zip-url` | `tag` | HTTPS URL of the ZIP. Treated as a secret. |
 | `version` | `set-stable`, `update-trunk` | The `version` output of `tag`. |
+| `expected-revision` | `set-stable`, `update-trunk` | Optional: the `revision` output of `tag`. When set, the action refuses unless `tags/<version>` last changed at exactly that revision, so what gets released is the tag that was QA'd. Leave it empty for a manual run or a rollback. |
 | `wporg-username` | all | `${{ secrets.WPORG_USERNAME }}`: an account with commit access to the plugin. |
 | `wporg-password` | all | `${{ secrets.WPORG_PASSWORD }}`: that account's [SVN password](https://make.wordpress.org/plugins/2024/09/04/upcoming-security-changes-for-plugin-and-theme-authors-on-wordpress-org/), not its login password. |
 

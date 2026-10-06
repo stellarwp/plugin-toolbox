@@ -201,6 +201,9 @@ class Repo:
     def cat(self, path, rev="HEAD"):
         return self.svn("cat", "-r", str(rev), f"{self.url(path)}@{rev}")
 
+    def last_changed(self, path, rev="HEAD"):
+        return int(self.svn("info", "--show-item", "last-changed-revision", f"{self.url(path)}@{rev}").decode())
+
     def exists(self, path, rev="HEAD"):
         return self.svn("info", f"{self.url(path)}@{rev}", check=False) != b""
 

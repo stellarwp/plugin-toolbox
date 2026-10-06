@@ -9,6 +9,7 @@ ACTION_NAME="wporg-svn set-stable"
 require_tools svn svnmucc python3 cmp
 validate_slug
 validate_version
+validate_expected_revision
 validate_credentials
 prepare
 
@@ -18,6 +19,7 @@ R=$REPLY
 note_revision "snapshot r$R"
 svn_kind "$BASE/tags" "$VERSION" "$R"
 [ "$REPLY" = dir ] || fail "tags/$VERSION does not exist at r$R"
+check_expected_revision "$R"
 svn_kind "$BASE/tags/$VERSION" readme.txt "$R"
 [ "$REPLY" = file ] || fail "tags/$VERSION/readme.txt is not a file at r$R"
 svn_kind "$BASE/trunk" readme.txt "$R"

@@ -108,6 +108,22 @@ validate_version() {
 	VERSION=$WPORG_VERSION
 }
 
+# Optional: empty means "not given".
+validate_expected_revision() {
+	local pattern='^[1-9][0-9]*$'
+	[ -z "${WPORG_EXPECTED_REVISION:-}" ] || [[ $WPORG_EXPECTED_REVISION =~ $pattern ]] ||
+		fail "expected-revision must be a revision number, like the tag action's revision output"
+}
+
+# With expected-revision given, stop unless tags/<version> last changed at
+# exactly that revision, as of REV: what gets released is the tag that was QA'd.
+check_expected_revision() {
+	[ -n "${WPORG_EXPECTED_REVISION:-}" ] || return 0
+	last_changed "$BASE/tags/$VERSION" "$1"
+	[ "$REPLY" = "$WPORG_EXPECTED_REVISION" ] ||
+		fail "tags/$VERSION last changed at r$REPLY, not at the expected r$WPORG_EXPECTED_REVISION; it is not the tag that was approved"
+}
+
 validate_credentials() {
 	if [ -z "${WPORG_USERNAME:-}" ] || [ -z "$SVN_PASSWORD" ]; then
 		fail "wporg-username and wporg-password are required"

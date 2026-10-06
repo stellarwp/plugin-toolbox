@@ -82,12 +82,14 @@ jobs:
         with:
           plugin-slug: fixture-plugin
           version: ${{ steps.tag.outputs.version }}
+          expected-revision: ${{ steps.tag.outputs.revision }}
           wporg-username: fixture-user
           wporg-password: fixture-password
       - uses: ./.github/actions/wporg-svn/update-trunk
         with:
           plugin-slug: fixture-plugin
           version: ${{ steps.tag.outputs.version }}
+          expected-revision: ${{ steps.tag.outputs.revision }}
           wporg-username: fixture-user
           wporg-password: fixture-password
       - name: Check the end state

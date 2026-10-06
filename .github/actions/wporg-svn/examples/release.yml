@@ -51,11 +51,13 @@ jobs:
         with:
           plugin-slug: ${{ inputs.plugin-slug }}
           version: ${{ needs.tag.outputs.version }}
+          expected-revision: ${{ needs.tag.outputs.revision }}
           wporg-username: ${{ secrets.WPORG_USERNAME }}
           wporg-password: ${{ secrets.WPORG_PASSWORD }}
       - uses: stellarwp/plugin-toolbox/.github/actions/wporg-svn/update-trunk@<full-commit-sha>
         with:
           plugin-slug: ${{ inputs.plugin-slug }}
           version: ${{ needs.tag.outputs.version }}
+          expected-revision: ${{ needs.tag.outputs.revision }}
           wporg-username: ${{ secrets.WPORG_USERNAME }}
           wporg-password: ${{ secrets.WPORG_PASSWORD }}

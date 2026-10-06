@@ -84,6 +84,16 @@ class UpdateTrunkTest(ActionTest):
         self.assert_success(self.update_trunk("1.0"))
         self.assertEqual(self.repo.tree("trunk"), self.repo.tree("tags/1.0"))
 
+    def test_expected_revision_refuses_a_tag_changed_after_approval(self):
+        approved = self.repo.last_changed("tags/1.1")
+        self.repo.mucc("put", write(self.repo.staging, "late.php", "<?php // after QA"),
+                       self.repo.url("tags/1.1/late.php"))
+        head, trunk = self.repo.head(), self.repo.tree("trunk")
+        result = self.update_trunk(WPORG_EXPECTED_REVISION=str(approved))
+        self.assert_failure(result, rf"tags/1\.1 last changed at r{head}, not at the expected r{approved}")
+        self.assertEqual((self.repo.head(), self.repo.tree("trunk")), (head, trunk))
+        self.assert_success(self.update_trunk(WPORG_EXPECTED_REVISION=str(head)))
+
     def test_missing_tag_fails_without_writing(self):
         self.assert_failure(self.update_trunk("1.5"), r"tags/1\.5 does not exist")
         self.assertEqual(self.repo.head(), self.snapshot)
