@@ -46,6 +46,9 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 1
+          # Nothing here runs git. Both actions below write through the API with the token they are
+          # handed, so keeping credentials in .git/config would only leave them for a later step.
+          persist-credentials: false
 
       - name: Resolve the floating tags for this release
         id: floating
