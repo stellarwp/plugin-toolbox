@@ -155,7 +155,7 @@ Every entry is checked before anything is extracted. Rejected:
 
 - absolute paths, `..`, backslashes, empty or `.` path segments, and names that only differ by case or Unicode form;
 - control characters;
-- names that aren't valid UTF-8. Names without the ZIP's UTF-8 flag are read as UTF-8, which is what Info-ZIP's `zip` on macOS and Linux writes;
+- names that aren't valid UTF-8. Names without the ZIP's UTF-8 flag are read as UTF-8, which is what Info-ZIP's `zip` writes on macOS, and on Linux depending on its locales;
 - entries with two different names, where an Info-ZIP Unicode Path field disagrees with the header;
 - symlinks and other special files;
 - encrypted entries;

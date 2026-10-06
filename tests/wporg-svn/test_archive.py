@@ -37,14 +37,16 @@ def build_zip(path, entries):
     return path
 
 
-def set_encrypted_flag(path):
-    """Flip the 'encrypted' general purpose bit in every header."""
+def set_flag_bits(path, bits, on=True):
+    """Set, or clear, general purpose flag bits in every header."""
     with open(path, "r+b") as handle:
         blob = bytearray(handle.read())
         for signature, offset in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
             start = blob.find(signature)
             while start != -1:
-                blob[start + offset] |= 0x01
+                at = start + offset
+                flags = int.from_bytes(blob[at:at + 2], "little")
+                blob[at:at + 2] = (flags | bits if on else flags & ~bits).to_bytes(2, "little")
                 start = blob.find(signature, start + 4)
         handle.seek(0)
         handle.write(blob)
@@ -187,7 +189,7 @@ class ArchiveTest(unittest.TestCase):
 
     def test_rejects_encrypted_entries(self):
         build_zip(self.zip, PLUGIN)
-        set_encrypted_flag(self.zip)
+        set_flag_bits(self.zip, 0x1)
         with self.assertRaisesRegex(archive.ArchiveError, "encrypted"):
             archive.extract(self.zip, self.dest)
         self.assertEqual(os.listdir(self.dest), [])
@@ -218,16 +220,24 @@ class ArchiveTest(unittest.TestCase):
         with self.assertRaisesRegex(archive.ArchiveError, "malformed"):
             archive.extract(self.zip, self.dest)
 
+    def test_unflagged_utf8_names_keep_their_spelling(self):
+        # What Info-ZIP's zip writes on macOS, and on Ubuntu without en_US.UTF-8.
+        build_zip(self.zip, {**PLUGIN, "caf\u00e9/na\u00efve.txt": "x", "\u65e5\u672c.txt": "y"})
+        set_flag_bits(self.zip, 0x800, on=False)
+        with zipfile.ZipFile(self.zip) as zf:
+            self.assertFalse(any(info.flag_bits & 0x800 for info in zf.infolist()))
+        root = archive.extract(self.zip, self.dest)
+        self.assertEqual(self.read(root, "caf\u00e9", "na\u00efve.txt"), b"x")
+        self.assertEqual(self.read(root, "\u65e5\u672c.txt"), b"y")
+
     def test_utf8_names_from_info_zip_keep_their_spelling(self):
-        # Info-ZIP's zip (macOS, Ubuntu) writes UTF-8 names without the UTF-8 flag.
+        # Flagged or not: Ubuntu's zip sets the UTF-8 flag once en_US.UTF-8 is installed.
         if not shutil.which("zip"):
             self.skipTest("Info-ZIP zip is not installed")
         source = os.path.join(self.tmp, "src")
         for name, data in {**PLUGIN, "caf\u00e9/na\u00efve.txt": "x", "\u65e5\u672c.txt": "y"}.items():
             support.write(os.path.join(source, "plugin"), name, data)
         subprocess.run(["zip", "-qr", self.zip, "plugin"], cwd=source, check=True)
-        with zipfile.ZipFile(self.zip) as zf:
-            self.assertFalse(any(info.flag_bits & 0x800 for info in zf.infolist()))
         root = archive.extract(self.zip, self.dest)
         self.assertEqual(self.read(root, "caf\u00e9", "na\u00efve.txt"), b"x")
         self.assertEqual(self.read(root, "\u65e5\u672c.txt"), b"y")

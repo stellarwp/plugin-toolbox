@@ -68,8 +68,9 @@ def _name(info: zipfile.ZipInfo) -> str:
     """The entry's name as its author wrote it.
 
     zipfile reads a name without the UTF-8 flag as CP437, but Info-ZIP's zip
-    (macOS, Ubuntu) writes UTF-8 there without setting the flag. Such names are
-    taken as UTF-8; one that isn't valid UTF-8 is refused rather than guessed.
+    writes UTF-8 there without setting the flag: on macOS, and on Ubuntu without
+    en_US.UTF-8. Such names are taken as UTF-8; one that isn't valid UTF-8 is
+    refused rather than guessed.
     """
     raw = info.orig_filename
     _check_control(raw)

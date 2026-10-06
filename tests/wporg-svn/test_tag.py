@@ -138,7 +138,7 @@ class TagTest(ActionTest):
         self.assertEqual(self.repo.tree("tags/1.1"), expected_tree(NEXT))
 
     def test_info_zip_archives_keep_non_ascii_names(self):
-        # Info-ZIP's zip (macOS, Ubuntu) writes UTF-8 names without the UTF-8 flag.
+        # Info-ZIP's zip writes UTF-8 names, with or without the UTF-8 flag.
         if not shutil.which("zip"):
             self.skipTest("Info-ZIP zip is not installed")
         source = tempfile.mkdtemp(dir=self.tmp)
