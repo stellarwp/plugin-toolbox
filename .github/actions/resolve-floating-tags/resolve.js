@@ -186,6 +186,11 @@ function readLevels(levels) {
  * blocks itself. Matching on the core instead would drop a released 1.4.0 when 1.4.0-rc.1 is
  * published, and that 1.4.0 is exactly what has to block it.
  *
+ * Fewer than three parts is dropped as well, because the floating tags are themselves tags in the
+ * repository and come back from the same listing. Without this, v1.0 reads as the version 1.0,
+ * which isInLine counts as a release of the 1.x line, and the action reads its own output back as
+ * proof that the line has shipped. A release always has three parts; a floating tag never does.
+ *
  * @param {string[]} tagNames  Every tag name in the repository.
  * @param {string}   excluding The name of the release being published, without build metadata.
  *
@@ -194,7 +199,12 @@ function readLevels(levels) {
 function releasedVersions(tagNames, excluding) {
   return tagNames
     .map(toVersion)
-    .filter((candidate) => NUMERIC_VERSION.test(candidate) && candidate !== excluding)
+    .filter(
+      (candidate) =>
+        NUMERIC_VERSION.test(candidate) &&
+        toParts(candidate).length >= 3 &&
+        candidate !== excluding
+    )
 }
 
 /**

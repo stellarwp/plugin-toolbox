@@ -231,6 +231,13 @@ describe('resolve-floating-tags', () => {
       assert.deepEqual(releasedVersions(['1.3.0', '1.2.1'], '1.3.0'), ['1.2.1'])
     })
 
+    it('ignores the floating tags, which are tags in the repository too', () => {
+      // listTags returns v1 and v1.0 alongside the releases. Read as versions they would be 1 and
+      // 1.0, and isInLine counts 1.0 as a release of the 1.x line, so the action would read its own
+      // output back as proof that the line has shipped. A release always has three parts.
+      assert.deepEqual(releasedVersions(['v1', 'v1.0', 'v1.2', '1.2.3'], ''), ['1.2.3'])
+    })
+
     it('keeps a released version that shares a published prerelease core', () => {
       // 1.4.0-rc.1 is published while 1.4.0 is already out. Excluding by core instead of by name
       // would drop the 1.4.0 that has to block the rc.
@@ -739,6 +746,18 @@ describe('resolve-floating-tags', () => {
 
           assert.deepEqual(tags, ['v1.4'])
           assert.deepEqual(skipped, ['v1'])
+        })
+
+        it('lets one prerelease replace another, with the earlier floating tags present', () => {
+          // The repository holds v1 and v1.0 from rc.1 by now, and neither may count as a release.
+          const { tags, skipped } = resolveFloatingTags({
+            tag: '1.0.0-rc.2',
+            tagNames: ['1.0.0-rc.1', 'v1', 'v1.0', '1.0.0-rc.2'],
+            allowPrereleases,
+          })
+
+          assert.deepEqual(tags, ['v1', 'v1.0'])
+          assert.deepEqual(skipped, [])
         })
 
         it('lets one prerelease replace another', () => {
