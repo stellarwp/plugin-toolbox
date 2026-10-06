@@ -24,7 +24,7 @@ tag  ->  QA the new tag, approve  ->  set-stable  ->  update-trunk
 ```
 
 - QA `tags/<version>` at the `revision` the tag job reports, not just the ZIP you started from.
-- `update-trunk` also replaces `trunk/readme.txt`. Running it before `set-stable` moves the stable pointer by itself, so never use it in place of `set-stable`.
+- `update-trunk` also replaces `trunk/readme.txt`, so it refuses to run until `set-stable` has pointed trunk's Stable Tag at the version. It can't release anything by itself.
 - `set-stable` has no upgrade-only rule. Pointing it at an older tag rolls the release back.
 
 ## Example
@@ -134,7 +134,7 @@ Before any write, every action pins one repository revision and reads everything
 
 `set-stable`: `tags/V/readme.txt` and `trunk/readme.txt` are regular files without byte-changing properties, and the tag readme's Stable Tag is exactly V. The write is pinned to the snapshot revision, so a competing change to `trunk/readme.txt` makes it fail instead of being overwritten. Identical bytes are a verified no-op.
 
-`update-trunk`: `trunk` and `tags/V` exist. The remove and copy are one commit, copying `tags/V` as it was at the snapshot revision, and a change anywhere inside trunk since then makes the whole commit fail. The result is compared on the server, files and properties both. A trunk that already matches is a verified no-op.
+`update-trunk`: `trunk` and `tags/V` exist, and trunk's readme already names V as its Stable Tag. The remove and copy are one commit, copying `tags/V` as it was at the snapshot revision, and a change anywhere inside trunk since then makes the whole commit fail. The result is compared on the server, files and properties both. A trunk that already matches is a verified no-op.
 
 ## ZIP limits
 

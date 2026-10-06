@@ -25,6 +25,11 @@ class Base(ActionTest):
         env.setdefault("WPORG_ZIP_URL", self.zip_url)
         return self.run_action("tag", **env)
 
+    def point_trunk_at(self, stable):
+        """What set-stable does: trunk's readme names stable."""
+        self.repo.mucc("put", self.staged(f"readme-{stable}.txt", plugin(stable)["readme.txt"]),
+                       self.repo.url("trunk/readme.txt"))
+
     def staged(self, name, text):
         path = os.path.join(self.repo.staging, name)
         with open(path, "w") as handle:
@@ -170,6 +175,7 @@ class AmbiguousWriteTest(Base):
 
     def test_update_trunk_with_a_lost_response_says_a_rerun_is_safe(self):
         self.repo.put_tree("tags/1.1", plugin("1.1"))
+        self.point_trunk_at("1.1")
         self.lose_the_response()
         result = self.run_action("update-trunk", WPORG_VERSION="1.1")
         self.assert_failure(result, r"trunk now matches tags/1\.1\. Rerunning is safe")
@@ -237,6 +243,7 @@ class HelperFailureTest(Base):
 
     def test_unreadable_diff_output_stops_update_trunk(self):
         self.repo.put_tree("tags/1.1", plugin("1.1"))
+        self.point_trunk_at("1.1")
         self.wrap("svn", 'case " $* " in *" diff "*) echo "<not xml"; exit 0;; esac\nexec "$NEXT" "$@"')
         head = self.repo.head()
         self.assert_failure(self.run_action("update-trunk", WPORG_VERSION="1.1"), r"could not read svn's diff output")

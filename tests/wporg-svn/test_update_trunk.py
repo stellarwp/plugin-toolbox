@@ -2,7 +2,7 @@
 
 import unittest
 
-from support import ActionTest, SLUG, plugin
+from support import ActionTest, SLUG, plugin, write
 
 
 class UpdateTrunkTest(ActionTest):
@@ -13,7 +13,12 @@ class UpdateTrunkTest(ActionTest):
                                                           "img/logo.png": b"\x89PNG"}))
         self.repo.mucc("propset", "svn:mime-type", "image/png", self.repo.url("tags/1.1/img/logo.png"),
                        "propset", "custom:flag", "on", self.repo.url("tags/1.1"))
+        self.point_trunk_at("1.1")  # what set-stable does
         self.snapshot = self.repo.head()
+
+    def point_trunk_at(self, stable):
+        readme = write(self.repo.staging, f"readme-{stable}.txt", plugin(stable)["readme.txt"])
+        self.repo.mucc("put", readme, self.repo.url("trunk/readme.txt"))
 
     def update_trunk(self, version="1.1", **env):
         return self.run_action("update-trunk", WPORG_VERSION=version, **env)
@@ -63,6 +68,21 @@ class UpdateTrunkTest(ActionTest):
                 self.assert_success(result)
                 self.assertEqual(int(result.outputs["revision"]), head + 1, "must commit, not no-op")
                 self.assertEqual(self.repo.props("trunk"), self.repo.props("tags/1.1"))
+
+    def test_refuses_until_set_stable_points_at_the_version(self):
+        # update-trunk also replaces trunk/readme.txt: run first, it would release by itself.
+        self.point_trunk_at("1.0")
+        head, trunk = self.repo.head(), self.repo.tree("trunk")
+        result = self.update_trunk()
+        self.assert_failure(result, r"the trunk/readme\.txt Stable Tag is not 1\.1 at r\d+; run set-stable for 1\.1 first")
+        self.assertEqual(self.repo.head(), head)
+        self.assertEqual(self.repo.tree("trunk"), trunk)
+
+    def test_trunk_follows_a_rollback_by_set_stable(self):
+        self.assert_success(self.update_trunk())
+        self.assert_success(self.run_action("set-stable", WPORG_VERSION="1.0"))
+        self.assert_success(self.update_trunk("1.0"))
+        self.assertEqual(self.repo.tree("trunk"), self.repo.tree("tags/1.0"))
 
     def test_missing_tag_fails_without_writing(self):
         self.assert_failure(self.update_trunk("1.5"), r"tags/1\.5 does not exist")

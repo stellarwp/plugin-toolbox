@@ -1,7 +1,7 @@
 name: "WordPress.org SVN: update trunk"
 description: >-
   Post-release housekeeping: replace trunk with tags/<version> in one atomic server-side commit. This also
-  replaces trunk/readme.txt, so run it after set-stable, never instead of it.
+  replaces trunk/readme.txt, so it refuses to run until set-stable has pointed the Stable Tag at the version.
 inputs:
   plugin-slug:
     description: The plugin's wordpress.org slug.
