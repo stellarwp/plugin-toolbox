@@ -110,7 +110,8 @@ def _check_type(info: zipfile.ZipInfo) -> None:
     if info.flag_bits & 0x1:
         raise ArchiveError("the archive has encrypted entries")
     kind = stat.S_IFMT(info.external_attr >> 16)
-    if info.create_system == 3 and kind not in (0, stat.S_IFREG, stat.S_IFDIR):
+    # Hosts that store Unix modes: 3 is Unix, 19 is OS X.
+    if info.create_system in (3, 19) and kind not in (0, stat.S_IFREG, stat.S_IFDIR):
         raise ArchiveError("an entry is not a regular file or directory")
     if kind == stat.S_IFDIR and not info.is_dir():
         raise ArchiveError("an entry is not a regular file or directory")

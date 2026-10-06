@@ -30,6 +30,7 @@ def build_zip(path, entries):
                 data = value.get("data", b"")
                 if "mode" in value:
                     info.external_attr = value["mode"] << 16
+                info.create_system = value.get("host", info.create_system)
             if name.endswith("/"):
                 info.external_attr = info.external_attr or (stat.S_IFDIR | 0o755) << 16
             zf.writestr(info, data.encode() if isinstance(data, str) else data)
@@ -163,11 +164,13 @@ class ArchiveTest(unittest.TestCase):
             archive.extract(self.zip, self.dest)
 
     def test_rejects_symlinks_and_special_files(self):
-        for kind in (stat.S_IFLNK, stat.S_IFIFO, stat.S_IFCHR, stat.S_IFBLK, stat.S_IFSOCK):
-            with self.subTest(kind=kind):
-                entries = dict(PLUGIN)
-                entries["link"] = {"data": "/etc/passwd", "mode": kind | 0o777}
-                self.assert_rejected(entries, "not a regular file")
+        # Host 19 (OS X) stores Unix modes too; Go's archive/zip reads them that way.
+        for host in (3, 19):
+            for kind in (stat.S_IFLNK, stat.S_IFIFO, stat.S_IFCHR, stat.S_IFBLK, stat.S_IFSOCK):
+                with self.subTest(host=host, kind=kind):
+                    entries = dict(PLUGIN)
+                    entries["link"] = {"data": "/etc/passwd", "mode": kind | 0o777, "host": host}
+                    self.assert_rejected(entries, "not a regular file")
 
     def test_rejects_vcs_metadata(self):
         for name in (".svn/entries", "w/.git/config", ".git", "x/.SVN/wc.db"):
