@@ -146,7 +146,9 @@ prepare() {
 	WORK=$(mktemp -d "${tmp%/}/wporg-svn.XXXXXXXX")
 	mkdir "$WORK/svn-config"
 	printf '[auth]\npassword-stores =\n[miscellany]\nenable-auto-props = no\n' >"$WORK/svn-config/config"
-	printf '[global]\nstore-passwords = no\nstore-auth-creds = no\n' >"$WORK/svn-config/servers"
+	# Bulk updates: one streamed response per checkout or export instead of one
+	# request per file, 2-5x faster from plugins.svn.wordpress.org.
+	printf '[global]\nstore-passwords = no\nstore-auth-creds = no\nhttp-bulk-updates = yes\n' >"$WORK/svn-config/servers"
 }
 
 # A short, sanitized description of the last SVN error: a class and the codes.
