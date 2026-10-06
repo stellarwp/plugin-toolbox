@@ -17,6 +17,17 @@ on:
   release:
     types: [published]
 
+# Two releases published close together would otherwise read the tag list and write to it at the
+# same time, and the later write would win regardless of which release is newer. One group for the
+# whole workflow serialises them.
+#
+# `queue: max` because the default, `single`, keeps only one run pending and cancels the one already
+# waiting. Publishing three releases at once would move the tags for the first and the last, and
+# silently drop the middle.
+concurrency:
+  group: ${{ github.workflow }}
+  queue: max
+
 permissions:
   contents: read
 
