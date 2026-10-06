@@ -249,6 +249,82 @@ function decideTag(linePrefix, released, { core, version, isPrerelease }) {
 }
 
 /**
+ * The result for a release that owns no floating tags, carrying the reason to log.
+ *
+ * @param {string} reason Why it owns none.
+ *
+ * @returns {{tags: string[], skipped: string[], version: string, notices: object[]}} Empty lists
+ *          and one notice.
+ */
+function resolvedNothing(reason) {
+  return {
+    tags: [],
+    skipped: [],
+    version: '',
+    notices: [{ level: 'notice', message: `Resolved no floating tags: ${reason}` }],
+  }
+}
+
+/**
+ * Whether the release counts as a prerelease, by its own tag or by what GitHub says.
+ *
+ * @param {object}  release           A release read by readReleaseTag.
+ * @param {boolean} flaggedPrerelease Whether GitHub marks it as one.
+ *
+ * @returns {boolean} Whether it is a prerelease.
+ */
+function isPrereleaseRelease(release, flaggedPrerelease) {
+  return release.core !== release.releaseVersion || flaggedPrerelease
+}
+
+/**
+ * The reason a prerelease owns no floating tag while allow-prereleases is off.
+ *
+ * Shared so that resolveFloatingTags and run report a skipped prerelease in the same words, even
+ * though they reach the decision at different points.
+ *
+ * @param {string} tag The release tag, as it was given.
+ *
+ * @returns {string} The reason, for resolvedNothing to log.
+ */
+function prereleaseSkipped(tag) {
+  return `${tag} is a prerelease. Set allow-prereleases to change that.`
+}
+
+/**
+ * Decides each requested tag, once everything that can reject the release outright has passed.
+ *
+ * @param {object}   release    A release read by readReleaseTag.
+ * @param {number[]} depths     Tag lengths read by readLevels.
+ * @param {boolean}  prerelease Whether the release is a prerelease.
+ * @param {string[]} tagNames   Every tag name in the repository.
+ *
+ * @returns {{tags: string[], skipped: string[], version: string, notices: object[]}} The same shape
+ *          resolveFloatingTags returns.
+ */
+function decideTags({ release, depths, prerelease, tagNames }) {
+  const released = releasedVersions(tagNames, release.releaseVersion)
+  const notices = []
+  const tags = []
+  const skipped = []
+
+  for (const depth of depths) {
+    const linePrefix = release.parts.slice(0, depth)
+    const decision = decideTag(linePrefix, released, { ...release, isPrerelease: prerelease })
+
+    if (decision.owned) {
+      tags.push(decision.floating)
+      continue
+    }
+
+    skipped.push(decision.floating)
+    notices.push(decision.notice)
+  }
+
+  return { tags, skipped, version: release.version, notices }
+}
+
+/**
  * Decides the floating tags for one release.
  *
  * @param {string}   tag               The release tag, with or without a leading `v`.
@@ -271,44 +347,20 @@ function resolveFloatingTags({
   levels = 'major minor',
   allowPrereleases = false,
 }) {
-  const notices = []
-  const nothingToDo = (reason) => {
-    notices.push({ level: 'notice', message: `Resolved no floating tags: ${reason}` })
-
-    return { tags: [], skipped: [], version: '', notices }
-  }
-
   const release = readReleaseTag(tag)
 
   if (release.reason) {
-    return nothingToDo(release.reason)
+    return resolvedNothing(release.reason)
   }
 
   const depths = readLevels(levels)
-  const isPrerelease = release.core !== release.releaseVersion || flaggedPrerelease
+  const prerelease = isPrereleaseRelease(release, flaggedPrerelease)
 
-  if (isPrerelease && !allowPrereleases) {
-    return nothingToDo(`${tag} is a prerelease. Set allow-prereleases to change that.`)
+  if (prerelease && !allowPrereleases) {
+    return resolvedNothing(prereleaseSkipped(tag))
   }
 
-  const released = releasedVersions(tagNames, release.releaseVersion)
-  const tags = []
-  const skipped = []
-
-  for (const depth of depths) {
-    const linePrefix = release.parts.slice(0, depth)
-    const decision = decideTag(linePrefix, released, { ...release, isPrerelease })
-
-    if (decision.owned) {
-      tags.push(decision.floating)
-      continue
-    }
-
-    skipped.push(decision.floating)
-    notices.push(decision.notice)
-  }
-
-  return { tags, skipped, version: release.version, notices }
+  return decideTags({ release, depths, prerelease, tagNames })
 }
 
 /**
@@ -376,6 +428,27 @@ async function readPrereleaseFlag({ github, owner, repo, tag }) {
 }
 
 /**
+ * Logs what was decided and writes the action's outputs.
+ *
+ * @param {object} core     The @actions/core toolkit.
+ * @param {string} tag      The tag that was resolved, for the log line when it was rejected.
+ * @param {object} resolved A result from resolveFloatingTags or decideTags.
+ *
+ * @returns {void} Nothing. The outputs are the result.
+ */
+function report({ core, tag, resolved }) {
+  for (const notice of resolved.notices) {
+    core[notice.level](notice.message)
+  }
+
+  core.info(`Resolved for ${resolved.version || tag}: ${resolved.tags.join(' ') || 'none'}`)
+
+  core.setOutput('tags', resolved.tags.join(' '))
+  core.setOutput('skipped', resolved.skipped.join(' '))
+  core.setOutput('version', resolved.version)
+}
+
+/**
  * Reads what the repository has, resolves the floating tags and writes the action's outputs.
  *
  * @param {object} github An Octokit, as actions/github-script supplies it.
@@ -389,33 +462,48 @@ async function run({ github, core, env }) {
   const [owner, repo] = repository.split('/')
   const tag = env.INPUT_TAG
 
-  const tagNames = await readTagNames({ github, owner, repo })
-  const flaggedPrerelease = await readPrereleaseFlag({ github, owner, repo, tag })
+  /**
+   * The steps run cheapest first, so nothing is fetched until it could still change the answer.
+   * A tag that is not a version, and a level that is not a level, are settled without a request.
+   * A prerelease nobody asked for costs the single release lookup. Only a release that can still
+   * own a tag pays for the tag list, which is the paginated one.
+   *
+   * resolveFloatingTags runs these same steps in this same order, for a caller that already has
+   * the tags. The tests assert the requests this makes, so the two cannot drift apart unnoticed.
+   */
+  const release = readReleaseTag(tag)
 
-  const resolved = resolveFloatingTags({
-    tag,
-    flaggedPrerelease,
-    tagNames,
-    levels: env.INPUT_LEVELS,
-    allowPrereleases: env.INPUT_ALLOW_PRERELEASES === 'true',
-  })
-
-  for (const notice of resolved.notices) {
-    core[notice.level](notice.message)
+  if (release.reason) {
+    return report({ core, tag, resolved: resolvedNothing(release.reason) })
   }
 
-  core.info(`Resolved for ${resolved.version || tag}: ${resolved.tags.join(' ') || 'none'}`)
+  const depths = readLevels(env.INPUT_LEVELS)
 
-  core.setOutput('tags', resolved.tags.join(' '))
-  core.setOutput('skipped', resolved.skipped.join(' '))
-  core.setOutput('version', resolved.version)
+  // A `-` suffix settles this on its own, so the release is only looked up for a plain version,
+  // where nothing but GitHub's flag can say.
+  const prerelease =
+    release.core !== release.releaseVersion ||
+    (await readPrereleaseFlag({ github, owner, repo, tag }))
+
+  if (prerelease && env.INPUT_ALLOW_PRERELEASES !== 'true') {
+    return report({ core, tag, resolved: resolvedNothing(prereleaseSkipped(tag)) })
+  }
+
+  const tagNames = await readTagNames({ github, owner, repo })
+
+  return report({ core, tag, resolved: decideTags({ release, depths, prerelease, tagNames }) })
 }
 
 module.exports = {
   run,
+  report,
   readTagNames,
   readPrereleaseFlag,
   resolveFloatingTags,
+  resolvedNothing,
+  isPrereleaseRelease,
+  prereleaseSkipped,
+  decideTags,
   readReleaseTag,
   readLevels,
   releasedVersions,

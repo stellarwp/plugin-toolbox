@@ -5,9 +5,14 @@ const assert = require('node:assert')
 
 const {
   run,
+  report,
   readTagNames,
   readPrereleaseFlag,
   resolveFloatingTags,
+  resolvedNothing,
+  isPrereleaseRelease,
+  prereleaseSkipped,
+  decideTags,
   readReleaseTag,
   readLevels,
   releasedVersions,
@@ -381,6 +386,146 @@ describe('resolve-floating-tags', () => {
     })
   })
 
+  describe('resolvedNothing', () => {
+    it('reports empty lists and no version', () => {
+      const { tags, skipped, version } = resolvedNothing('1.2 has 2 parts; at least three are needed.')
+
+      assert.deepEqual(tags, [])
+      assert.deepEqual(skipped, [])
+      assert.equal(version, '')
+    })
+
+    it('carries the reason as the one notice to log', () => {
+      const { notices } = resolvedNothing('nonsense is not a numeric version.')
+
+      assert.deepEqual(notices, [
+        {
+          level: 'notice',
+          message: 'Resolved no floating tags: nonsense is not a numeric version.',
+        },
+      ])
+    })
+  })
+
+  describe('isPrereleaseRelease', () => {
+    it('is true for a tag with a prerelease suffix, whatever GitHub says', () => {
+      const suffixed = readReleaseTag('1.4.0-rc.1')
+
+      assert.equal(isPrereleaseRelease(suffixed, false), true)
+      assert.equal(isPrereleaseRelease(suffixed, true), true)
+    })
+
+    it('falls back to GitHub for a plain version, which the tag cannot answer', () => {
+      const plain = readReleaseTag('1.4.0')
+
+      assert.equal(isPrereleaseRelease(plain, true), true)
+      assert.equal(isPrereleaseRelease(plain, false), false)
+    })
+
+    it('is false for build metadata, which is not a prerelease', () => {
+      assert.equal(isPrereleaseRelease(readReleaseTag('1.4.0+build.7'), false), false)
+    })
+  })
+
+  describe('prereleaseSkipped', () => {
+    it('names the tag and the input that would change it', () => {
+      assert.equal(
+        prereleaseSkipped('1.4.0-rc.1'),
+        '1.4.0-rc.1 is a prerelease. Set allow-prereleases to change that.'
+      )
+    })
+  })
+
+  describe('decideTags', () => {
+    const planFor = (tag, depths = [1, 2], prerelease = false) => ({
+      release: readReleaseTag(tag),
+      depths,
+      prerelease,
+      tagNames: [],
+    })
+
+    it('decides one tag per requested depth, shortest first', () => {
+      const { tags, skipped, version } = decideTags({
+        ...planFor('1.3.0'),
+        tagNames: ['1.2.1', '1.3.0'],
+      })
+
+      assert.deepEqual(tags, ['v1', 'v1.3'])
+      assert.deepEqual(skipped, [])
+      assert.equal(version, '1.3.0')
+    })
+
+    it('decides only the depths it was given', () => {
+      assert.deepEqual(decideTags(planFor('1.3.0', [1])).tags, ['v1'])
+      assert.deepEqual(decideTags(planFor('1.3.0', [2])).tags, ['v1.3'])
+    })
+
+    it('collects a notice for each tag it leaves alone', () => {
+      const { tags, skipped, notices } = decideTags({
+        ...planFor('1.2.5'),
+        tagNames: ['1.3.0', '1.2.5'],
+      })
+
+      assert.deepEqual(tags, ['v1.2'])
+      assert.deepEqual(skipped, ['v1'])
+      assert.equal(notices.length, 1)
+      assert.match(notices[0].message, /^v1 stays where it is: 1\.3\.0 is newer/)
+    })
+
+    it('passes the prerelease decision down to each tag', () => {
+      const { tags, skipped } = decideTags({
+        ...planFor('1.4.0-rc.1', [1, 2], true),
+        tagNames: ['1.3.0'],
+      })
+
+      assert.deepEqual(tags, ['v1.4'], 'the 1.4 line has nothing released behind it')
+      assert.deepEqual(skipped, ['v1'], 'the 1.x line does, so a prerelease cannot have it')
+    })
+  })
+
+  describe('report', () => {
+    it('writes the three outputs a later step reads', async (t) => {
+      const { core, outputs } = await actionsFor(t)
+
+      report({
+        core,
+        tag: 'v1.2.5',
+        resolved: { tags: ['v1.2'], skipped: ['v1'], version: '1.2.5', notices: [] },
+      })
+
+      assert.deepEqual(outputs(), { tags: 'v1.2', skipped: 'v1', version: '1.2.5' })
+    })
+
+    it('logs every notice it was given', async (t) => {
+      const { core, logged } = await actionsFor(t)
+
+      report({
+        core,
+        tag: 'v1.2.5',
+        resolved: {
+          tags: [],
+          skipped: ['v1'],
+          version: '1.2.5',
+          notices: [{ level: 'notice', message: 'v1 stays where it is' }],
+        },
+      })
+
+      assert.match(logged(), /::notice::v1 stays where it is/)
+    })
+
+    it('names the tag in the log when the version was rejected', async (t) => {
+      const { core, logged } = await actionsFor(t)
+
+      report({
+        core,
+        tag: 'latest',
+        resolved: { tags: [], skipped: [], version: '', notices: [] },
+      })
+
+      assert.match(logged(), /Resolved for latest: none/)
+    })
+  })
+
   describe('resolveFloatingTags', () => {
     describe('each tag is decided on its own line', () => {
       const tagNames = ['1.0.0', '1.2.1', '1.3.0', '2.0.0']
@@ -462,6 +607,36 @@ describe('resolve-floating-tags', () => {
 
         assert.deepEqual(tags, ['v1', 'v1.2'])
         assert.deepEqual(skipped, [])
+      })
+    })
+
+    /**
+     * Everything the individual functions decide has its own cases above. What is left to
+     * resolveFloatingTags is the order it asks them in, and that order is observable: whether a bad
+     * input is reported or thrown depends entirely on which check runs first.
+     */
+    describe('the order it checks things in', () => {
+      it('reports a bad tag rather than throwing over the levels beside it', () => {
+        const { tags, notices } = resolveFloatingTags({ tag: 'latest', levels: 'major hotfix' })
+
+        assert.deepEqual(tags, [])
+        assert.match(notices[0].message, /latest is not a numeric version/)
+      })
+
+      it('throws over a bad level before deciding a prerelease is not allowed', () => {
+        // Both are wrong. The level throws, so a caller fixes its own configuration first rather
+        // than reading a notice that says the release was skipped.
+        assert.throws(
+          () => resolveFloatingTags({ tag: '1.3.0-rc.1', levels: 'major hotfix' }),
+          /Unknown level 'hotfix'/
+        )
+      })
+
+      it('throws over a bad level even for a release it would have resolved', () => {
+        assert.throws(
+          () => resolveFloatingTags({ tag: '1.3.0', levels: 'major hotfix' }),
+          /Unknown level 'hotfix'/
+        )
       })
     })
 
@@ -659,6 +834,81 @@ describe('resolve-floating-tags', () => {
   })
 
   describe('run', () => {
+    it('sends no request at all for a tag that is not a version', async (t) => {
+      // Nothing the API could say changes the answer, so nothing is asked.
+      const { github, core, requests, outputs } = await actionsFor(t)
+
+      await run({
+        github,
+        core,
+        env: {
+          INPUT_TAG: 'latest',
+          INPUT_LEVELS: 'major minor',
+          GITHUB_REPOSITORY: 'stellarwp/plugin-toolbox',
+        },
+      })
+
+      assert.deepEqual(requests, [])
+      assert.deepEqual(outputs(), { tags: '', skipped: '', version: '' })
+    })
+
+    it('sends no request for a suffixed prerelease it is not allowed to move', async (t) => {
+      // The suffix settles both questions: it is a prerelease, and prereleases are not allowed.
+      const { github, core, requests } = await actionsFor(t)
+
+      await run({
+        github,
+        core,
+        env: {
+          INPUT_TAG: '1.4.0-rc.1',
+          INPUT_LEVELS: 'major minor',
+          GITHUB_REPOSITORY: 'stellarwp/plugin-toolbox',
+        },
+      })
+
+      assert.deepEqual(requests, [])
+    })
+
+    it('reads the release but not the tag list when a flagged prerelease is skipped', async (t) => {
+      // A plain version needs the release to know, but once it does the tag list cannot matter.
+      const { github, core, requests } = await actionsFor(
+        t,
+        repoWith(['1.2.1', '1.3.0'], { tag: '1.3.0', prerelease: true })
+      )
+
+      await run({
+        github,
+        core,
+        env: {
+          INPUT_TAG: '1.3.0',
+          INPUT_LEVELS: 'major minor',
+          GITHUB_REPOSITORY: 'stellarwp/plugin-toolbox',
+        },
+      })
+
+      assert.equal(requests.length, 1)
+      assert.match(requests[0].path, /\/releases\/tags\//)
+    })
+
+    it('fails on a bad level before sending anything', async (t) => {
+      const { github, core, requests } = await actionsFor(t)
+
+      await assert.rejects(
+        run({
+          github,
+          core,
+          env: {
+            INPUT_TAG: '1.3.0',
+            INPUT_LEVELS: 'major hotfix',
+            GITHUB_REPOSITORY: 'stellarwp/plugin-toolbox',
+          },
+        }),
+        /Unknown level 'hotfix'/
+      )
+
+      assert.deepEqual(requests, [])
+    })
+
     it('reads every tag, following pagination to the last page', async (t) => {
       const { github, requests, core, outputs } = await actionsFor(t, [
         { method: 'GET', path: /\/releases\/tags\//, status: 404, body: { message: 'Not Found' } },
