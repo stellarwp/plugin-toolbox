@@ -120,11 +120,20 @@ class _Svn:
             found.append((entry.get("path"), status.get("item"), status.get("props"), flags))
         return found
 
-    def add(self, path):
-        self.run("add", "--depth", "infinity", "--no-ignore", "--no-auto-props", "--", path + "@")
+    def _each(self, args, paths):
+        """Run svn args once for all paths, listed in a --targets file."""
+        if not paths:
+            return
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".targets") as targets:
+            targets.write("".join(path + "@\n" for path in paths))
+            targets.flush()
+            self.run(*args, "--targets", targets.name)
 
-    def rm(self, path):
-        self.run("rm", "--force", "--", path + "@")
+    def add(self, *paths):
+        self._each(["add", "--depth", "infinity", "--no-ignore", "--no-auto-props"], paths)
+
+    def rm(self, *paths):
+        self._each(["rm", "--force"], paths)
 
 
 def _check(found, allowed, when):
@@ -136,8 +145,16 @@ def _check(found, allowed, when):
         raise TreeError(f"unexpected working copy state {when}: " + "; ".join(bad))
 
 
-def _under(path, roots):
-    return any(path == root or path.startswith(root + os.sep) for root in roots)
+def _tops(paths) -> list:
+    """paths without those inside another of them: svn add and rm recurse."""
+    tops = set()
+    for path in sorted(paths, key=_depth):
+        parent = os.path.dirname(path)
+        while parent not in tops and parent != os.path.dirname(parent):
+            parent = os.path.dirname(parent)
+        if parent not in tops:
+            tops.add(path)
+    return sorted(tops)
 
 
 def reconcile(wc, config) -> int:
@@ -155,17 +172,8 @@ def reconcile(wc, config) -> int:
             os.rmdir(aside)
             svn.add(path)
 
-    removed = []
-    for path in sorted((p for p, item, _, _ in svn.status(wc) if item == "missing"), key=_depth):
-        if not _under(path, removed):
-            svn.rm(path)
-            removed.append(path)
-
-    added = []
-    for path in sorted((p for p, item, _, _ in svn.status(wc) if item in ("unversioned", "ignored")), key=_depth):
-        if not _under(path, added):
-            svn.add(path)
-            added.append(path)
+    svn.rm(*_tops(p for p, item, _, _ in svn.status(wc) if item == "missing"))
+    svn.add(*_tops(p for p, item, _, _ in svn.status(wc) if item in ("unversioned", "ignored")))
 
     final = svn.status(wc)
     _check(final, COMMITTABLE, "after reconciling")

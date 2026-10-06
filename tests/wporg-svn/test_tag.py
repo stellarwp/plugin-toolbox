@@ -116,6 +116,17 @@ class TagTest(ActionTest):
         self.rejected(r"the artifact is identical to tags/1\.0; there is nothing to release")
         self.assertFalse(self.repo.exists("tags/1.1"))
 
+    def test_adds_and_deletes_are_batched(self):
+        # One svn add and one svn rm, however many paths: per-path calls take
+        # minutes on a large release.
+        files = plugin("1.1", extra={**{f"new/{i}.txt": "n" for i in range(20)},
+                                     **{f"top{i}@x.txt": "t" for i in range(5)}, "naïve résumé.txt": "u"})
+        self.assert_success(self.tag(self.serve(files)))
+        calls = self.svn_calls()
+        self.assertEqual(sum("add" in call for call in calls), 1)
+        self.assertEqual(sum("rm" in call for call in calls), 1)
+        self.assertEqual(self.repo.tree("tags/1.1"), expected_tree(files))
+
     def test_unchanged_files_keep_their_history(self):
         self.assert_success(self.tag())
         log = self.repo.svn("log", "-q", self.repo.url("tags/1.1/keep.txt")).decode()
