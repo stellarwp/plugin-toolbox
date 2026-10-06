@@ -1,0 +1,98 @@
+# Self-checks for the wporg-svn actions. Nothing here touches wordpress.org:
+# every SVN write goes to a throwaway file:// repository, behind the test-only
+# write guard (tests/wporg-svn/guard).
+name: wporg-svn actions
+
+on:
+  pull_request:
+    paths:
+      - .github/actions/wporg-svn/**
+      - .github/workflows/wporg-svn.yml
+      - tests/wporg-svn/**
+  push:
+    branches: [main]
+    paths:
+      - .github/actions/wporg-svn/**
+      - .github/workflows/wporg-svn.yml
+      - tests/wporg-svn/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Locally: shellcheck -x .github/actions/wporg-svn/*/*.sh .github/actions/wporg-svn/lib/svn.sh tests/wporg-svn/guard/bin/*
+      - name: shellcheck
+        run: shellcheck -x .github/actions/wporg-svn/*/*.sh .github/actions/wporg-svn/lib/svn.sh tests/wporg-svn/guard/bin/*
+      # Locally: actionlint && actionlint .github/actions/wporg-svn/examples/release.yml
+      - name: actionlint
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/actionlint.tar.gz" \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint"
+          "$RUNNER_TEMP/actionlint" .github/actions/wporg-svn/examples/release.yml
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Subversion
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends subversion
+      # Locally: python3 -m unittest discover -s tests/wporg-svn -v
+      - name: Unit and integration tests
+        run: python3 -m unittest discover -s tests/wporg-svn -v
+
+  # Runs the three composite actions the way a caller would, against the local fixture.
+  end-to-end:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Subversion
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends subversion
+      - name: Start the fixture
+        run: |
+          echo "$PWD/tests/wporg-svn/guard/bin" >> "$GITHUB_PATH"
+          python3 tests/wporg-svn/fixture.py up "$RUNNER_TEMP/fixture" &
+          for _ in $(seq 60); do [ -f "$RUNNER_TEMP/fixture/env" ] && break; sleep 1; done
+          cat "$RUNNER_TEMP/fixture/env" >> "$GITHUB_ENV"
+      - id: tag
+        uses: ./.github/actions/wporg-svn/tag
+        with:
+          plugin-slug: fixture-plugin
+          zip-url: ${{ env.FIXTURE_ZIP_URL }}
+          wporg-username: fixture-user
+          wporg-password: fixture-password
+      - uses: ./.github/actions/wporg-svn/set-stable
+        with:
+          plugin-slug: fixture-plugin
+          version: ${{ steps.tag.outputs.version }}
+          expected-revision: ${{ steps.tag.outputs.revision }}
+          wporg-username: fixture-user
+          wporg-password: fixture-password
+      - uses: ./.github/actions/wporg-svn/update-trunk
+        with:
+          plugin-slug: fixture-plugin
+          version: ${{ steps.tag.outputs.version }}
+          expected-revision: ${{ steps.tag.outputs.revision }}
+          wporg-username: fixture-user
+          wporg-password: fixture-password
+      - name: Check the end state
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: python3 tests/wporg-svn/fixture.py check "$RUNNER_TEMP/fixture" "$VERSION"
