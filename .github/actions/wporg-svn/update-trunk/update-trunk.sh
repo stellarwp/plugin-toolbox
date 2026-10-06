@@ -52,12 +52,13 @@ if ! mucc_write -r "$R" -m "Release $VERSION: sync trunk with tags/$VERSION" \
 	ERROR=$REPLY
 	STAGE="inspecting trunk after a failed write"
 	snapshot
-	if same_tree "$REPLY"; then
+	HEAD=$REPLY
+	if same_tree "$HEAD"; then
 		STAGE="replacing trunk with tags/$VERSION@$R"
 		fail "the write reported an error ($ERROR), but trunk now matches tags/$VERSION. Rerunning is safe: it verifies and reports a no-op."
 	fi
 	STAGE="replacing trunk with tags/$VERSION@$R"
-	fail "the write failed ($ERROR); trunk was not changed by this run. Check who else is committing before rerunning."
+	fail "the write failed ($ERROR) and trunk does not match tags/$VERSION at r$HEAD; check who else is committing (svn log) before rerunning."
 fi
 N=$REPLY
 note_revision "commit r$N"

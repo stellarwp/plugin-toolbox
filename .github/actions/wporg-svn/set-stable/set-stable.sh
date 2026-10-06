@@ -46,12 +46,13 @@ if ! mucc_write -r "$R" -m "Release $VERSION: set the Stable Tag" \
 	ERROR=$REPLY
 	STAGE="inspecting trunk/readme.txt after a failed write"
 	snapshot
-	svn_cat "$BASE/trunk/readme.txt" "$REPLY" "$WORK/after-readme.txt"
+	HEAD=$REPLY
+	svn_cat "$BASE/trunk/readme.txt" "$HEAD" "$WORK/after-readme.txt"
 	STAGE="committing trunk/readme.txt"
 	if cmp -s "$WORK/release-readme.txt" "$WORK/after-readme.txt"; then
 		fail "the write reported an error ($ERROR), but trunk/readme.txt now matches tags/$VERSION/readme.txt. Rerunning is safe: it verifies and reports a no-op."
 	fi
-	fail "the write failed ($ERROR); trunk/readme.txt was not changed by this run. Check who else is committing before rerunning."
+	fail "the write failed ($ERROR) and trunk/readme.txt does not match tags/$VERSION/readme.txt at r$HEAD; check who else is committing (svn log) before rerunning."
 fi
 N=$REPLY
 note_revision "commit r$N"

@@ -150,7 +150,8 @@ exec "$NEXT" "$@"
         trunk = self.repo.tree("trunk")
         self.repo.hook("pre-commit", "echo 'rejected by policy' >&2\nexit 1\n")
         result = self.update_trunk()
-        self.assert_failure(result, r"trunk was not changed by this run")
+        self.assert_failure(result, r"trunk does not match tags/1\.1 at r\d+; "
+                                    r"check who else is committing \(svn log\) before rerunning")
         self.assertEqual(self.repo.head(), self.snapshot)
         self.assertEqual(self.repo.tree("trunk"), trunk)
 

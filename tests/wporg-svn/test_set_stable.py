@@ -129,7 +129,9 @@ fi
         result = self.set_stable()
         self.assert_failure(result, r"(?i)out of date|conflict")
         self.assertEqual(self.repo.cat("trunk/readme.txt").decode(), open(racer).read())
-        self.assertRegex(result.log, r"trunk/readme\.txt was not changed by this run")
+        self.assertRegex(result.log, r"trunk/readme\.txt does not match tags/1\.1/readme\.txt at r\d+; "
+                                     r"check who else is committing \(svn log\) before rerunning")
+        self.assertNotRegex(result.log, "not changed by this run")
 
 
     def test_edit_between_snapshot_and_write_is_never_overwritten(self):

@@ -206,7 +206,7 @@ Then:
 
 **`set-stable` or `update-trunk` failed.**
 
-- `... was not changed by this run`: another commit got there first. Find out who else is releasing before you rerun.
+- `... does not match ...; check who else is committing`: the write failed, and the target doesn't hold the release. Usually another commit got there first or the server refused the write; `svn log` shows which. Find out who else is releasing before you rerun.
 - `... now matches ... Rerunning is safe`: the write most likely landed but its response was lost. A rerun verifies it and reports a no-op.
 
 ## Security
