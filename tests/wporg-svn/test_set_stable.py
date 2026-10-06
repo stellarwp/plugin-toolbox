@@ -60,6 +60,22 @@ class SetStableTest(ActionTest):
         self.assertEqual(self.repo.head(), head)
         self.assert_success(self.set_stable(WPORG_EXPECTED_REVISION=str(head)))
 
+    def test_expected_revision_refuses_an_edit_to_an_existing_file_in_the_tag(self):
+        # The tag's last-changed revision covers its descendants' contents and properties.
+        existing = self.repo.url("tags/1.1/fixture-plugin.php")
+        edits = {
+            "content": ("put", write(self.repo.staging, "edited.php", "<?php // after QA"), existing),
+            "property": ("propset", "qa", "changed", existing),
+        }
+        for change, actions in edits.items():
+            with self.subTest(change=change):
+                approved = self.repo.last_changed("tags/1.1")
+                self.repo.mucc(*actions)
+                head = self.repo.head()
+                self.assert_failure(self.set_stable(WPORG_EXPECTED_REVISION=str(approved)),
+                                    rf"tags/1\.1 last changed at r{head}, not at the expected r{approved}")
+                self.assertEqual(self.repo.head(), head)
+
     def test_expected_revision_must_be_a_revision_number(self):
         head = self.repo.head()
         for value in ("abc", "0", "05", "r5", "5 ", "-1"):
