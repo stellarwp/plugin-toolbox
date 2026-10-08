@@ -331,11 +331,14 @@ describe('release-prep', () => {
       assert.equal(Buffer.from(credential, 'base64').toString(), 'x-access-token:ghs_abc')
     })
 
-    it('reaches git through its environment, scoped to the server', () => {
+    it('reaches git through its environment, scoped to the server, after clearing the key', () => {
+      // The empty first value resets the list, dropping a header the checkout persisted.
       assert.deepEqual(pushEnv('ghs_abc', 'https://github.com'), {
-        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_COUNT: '2',
         GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader',
-        GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basicCredential('ghs_abc')}`,
+        GIT_CONFIG_VALUE_0: '',
+        GIT_CONFIG_KEY_1: 'http.https://github.com/.extraheader',
+        GIT_CONFIG_VALUE_1: `AUTHORIZATION: basic ${basicCredential('ghs_abc')}`,
       })
     })
 
@@ -578,7 +581,40 @@ describe('release-prep', () => {
 
       const push = calls.find((call) => call.args[0] === 'push')
       assert.deepEqual(push.args, ['push', 'origin', 'HEAD:refs/heads/release/4.17.0'])
-      assert.equal(push.options.env.GIT_CONFIG_VALUE_0, `AUTHORIZATION: basic ${credential}`)
+      assert.equal(push.options.env.GIT_CONFIG_VALUE_1, `AUTHORIZATION: basic ${credential}`)
+    })
+
+    it('sends only its own credential when the checkout persisted another', async (t) => {
+      // actions/checkout persists its token under the same http.<server>/.extraheader key, and git
+      // sends every value of that key. Two Authorization headers make GitHub answer 400.
+      const http = require('node:http')
+      const seen = []
+      const server = http.createServer((request, response) => {
+        const { rawHeaders } = request
+        seen.push(
+          rawHeaders.filter((value, index) => index % 2 === 1 && /^authorization$/i.test(rawHeaders[index - 1]))
+        )
+        response.writeHead(404).end()
+      })
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+      t.after(() => server.close())
+
+      const serverUrl = `http://127.0.0.1:${server.address().port}`
+      const { core } = await coreWithOutputs(t)
+      const { exec } = await recordedRealExec()
+      const { work } = repositoryOn('release/4.17.0')
+      git(work, 'remote', 'set-url', 'origin', `${serverUrl}/stellarwp/plugin.git`)
+      git(work, 'config', `http.${serverUrl}/.extraheader`, 'AUTHORIZATION: basic cGVyc2lzdGVk')
+      fs.writeFileSync(path.join(work, 'plugin.php'), 'Version: 4.17.0\n')
+      const env = commitEnv({ GITHUB_SERVER_URL: serverUrl, GIT_TERMINAL_PROMPT: '0' })
+
+      // The server has no repository, so the push fails once git has sent its first request.
+      await assert.rejects(runCommit({ core, exec, env, cwd: work }), /Pushing to release\/4\.17\.0 failed/)
+
+      assert.ok(seen.length > 0, 'git reached the server')
+      for (const headers of seen) {
+        assert.deepEqual(headers, [`basic ${basicCredential(env.INPUT_TOKEN)}`])
+      }
     })
 
     it('neither commits nor pushes when nothing changed, and still succeeds', async (t) => {

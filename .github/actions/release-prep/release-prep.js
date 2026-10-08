@@ -258,6 +258,11 @@ function basicCredential(token) {
  * written to .git/config, where a later step could read it. That is what lets a caller check out
  * with `persist-credentials: false`.
  *
+ * A checkout that does persist its credentials puts its own header under the same key, and git
+ * sends every value of it: two Authorization headers, which GitHub refuses with a 400. An empty
+ * value resets the key's list, so the first entry clears whatever the checkout left and only this
+ * token is sent.
+ *
  * @param {string} token     The token, or empty to leave authentication to the checkout.
  * @param {string} serverUrl The GitHub server, e.g. https://github.com.
  *
@@ -268,10 +273,14 @@ function pushEnv(token, serverUrl) {
     return {}
   }
 
+  const key = `http.${serverUrl.replace(/\/+$/, '')}/.extraheader`
+
   return {
-    GIT_CONFIG_COUNT: '1',
-    GIT_CONFIG_KEY_0: `http.${serverUrl.replace(/\/+$/, '')}/.extraheader`,
-    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basicCredential(token)}`,
+    GIT_CONFIG_COUNT: '2',
+    GIT_CONFIG_KEY_0: key,
+    GIT_CONFIG_VALUE_0: '',
+    GIT_CONFIG_KEY_1: key,
+    GIT_CONFIG_VALUE_1: `AUTHORIZATION: basic ${basicCredential(token)}`,
   }
 }
 

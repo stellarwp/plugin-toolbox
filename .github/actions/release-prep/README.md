@@ -148,6 +148,11 @@ The action pushes with `token` itself, to `HEAD:refs/heads/<ref>`, so the checko
 on its command line, which the log echoes, and never in `.git/config`, where a later step could read it.
 It is masked in the log, together with the encoded credential built from it.
 
+A checkout that keeps its credentials does not get in the way. actions/checkout stores its token under
+the same `http.<server>/.extraheader` key, and git sends every value of that key, so the push would
+carry two Authorization headers and GitHub would refuse it. The action clears that key for its push
+before adding its own header, so only `token` is sent.
+
 The push is a fast-forward. If the branch moved after the checkout, the push is refused and the job
 fails with git's output, rather than overwriting what landed.
 
