@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test')
 const assert = require('node:assert')
 
-const { actionsFor, coreWithOutputs, recordingExec } = require('./actions.js')
+const { actionsFor, coreWithOutputs, recordingExec, isLogWrite } = require('./actions.js')
 
 describe('tests/support/actions', () => {
   describe('the captured log', () => {
@@ -30,6 +30,16 @@ describe('tests/support/actions', () => {
       // There is one @actions/core for the process, so the newest capture is the one collecting.
       assert.match(second.logged(), /from the second/, 'the newest capture still works')
       assert.equal(first.logged(), '', 'the earlier one stopped when the second began')
+    })
+  })
+
+  describe('isLogWrite', () => {
+    it("collects the toolkit's string writes and leaves the runner's Buffers alone", () => {
+      // The runner reports results as Buffers over the same stdout. Collecting them swallowed the
+      // report of every test that finished while a later one was awaiting.
+      assert.equal(isLogWrite('::warning::a warning\n'), true)
+      assert.equal(isLogWrite(Buffer.from('report')), false)
+      assert.equal(isLogWrite(new Uint8Array([1, 2])), false)
     })
   })
 

@@ -140,6 +140,22 @@ let realStdoutWrite = null
 let collecting = null
 
 /**
+ * Whether a stdout write is the action's log, which a test collects, or the test runner's own.
+ *
+ * node --test runs each file in a child process that reports its results to the parent over stdout,
+ * as serialized Buffers written whenever the runner flushes, which can be in the middle of a later
+ * test that awaits. Collecting those swallowed the reports of every test before it, and the file
+ * counted as a single test. @actions/core writes its log as strings, so only strings are collected.
+ *
+ * @param {string|Uint8Array} chunk What was written.
+ *
+ * @returns {boolean} True for a write to collect.
+ */
+function isLogWrite(chunk) {
+  return typeof chunk === 'string'
+}
+
+/**
  * Collects what is written to stdout for the length of one test.
  *
  * @actions/core writes its log there, including the `::notice::` and `::warning::` commands the
@@ -161,7 +177,7 @@ function captureStdout(t) {
     realStdoutWrite = process.stdout.write.bind(process.stdout)
 
     process.stdout.write = (chunk, encoding, callback) => {
-      if (!collecting) {
+      if (!collecting || !isLogWrite(chunk)) {
         return realStdoutWrite(chunk, encoding, callback)
       }
 
@@ -316,4 +332,5 @@ module.exports = {
   recordingFetch,
   recordingExec,
   readOutputs,
+  isLogWrite,
 }
