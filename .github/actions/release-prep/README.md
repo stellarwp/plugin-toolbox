@@ -93,8 +93,10 @@ changelogger's `stellarwp` versioning accepts, so a version the changelog step w
 before pup has touched anything.
 
 - **An empty version is refused.** A tool that dispatches the workflow for a release with no version set
-  sends an empty one. The job fails with "No version was given", and the release needs a version before
-  the step is run again.
+  sends an empty one. When the workflow declares `version` as required, as the template does, GitHub
+  refuses that dispatch itself with HTTP 422 ("Required input 'version' not provided") and no run starts.
+  When a workflow declares it optional, the run starts and the action fails it with "No version was
+  given". Either way the release needs a version before the step is run again.
 - **A pre-release is refused.** `4.17.0-beta.1` is rejected by the `stellarwp` versioning, so the action
   cannot prepare one, even though it is a valid tag name.
 
