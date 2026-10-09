@@ -1,0 +1,99 @@
+# Prepares a release branch: bumps the version, replaces the TBD placeholders, writes the changelog,
+# then commits that and pushes it to the branch. It opens no pull request, so the change is reviewed
+# wherever the release itself is reviewed.
+#
+# The checks and the git work live in release-prep.js, run by actions/github-script, so there is no
+# dependency to install and nothing to build. The changelog is written by the changelogger's own
+# action between the two script steps, rather than reimplemented here.
+name: Release prep
+description: Bumps the version, replaces TBDs and writes the changelog, then pushes it to the release branch
+
+inputs:
+  ref:
+    description: >-
+      The release branch to push the preparation to, e.g. `release/4.17.0`. A branch name, not a
+      ref. The action does not check it out: the caller's checkout has to be on it, and the action
+      refuses to run when it is not.
+    required: true
+  version:
+    description: >-
+      The version to prepare: three or four numeric parts, such as `4.17.0` or `4.17.0.1`. An empty
+      value, a pre-release such as `4.17.0-beta.1`, and a version lower than the one the branch
+      already has are refused before anything is changed.
+    required: true
+  date:
+    description: >-
+      The release date for the changelog, as `YYYY-MM-DD`. Empty or `today` writes today's date in
+      UTC.
+    required: false
+    default: ''
+  token:
+    description: >-
+      Token the commit is pushed with. It needs `contents: write` on the repository, so the job needs
+      that permission too. The action pushes with it explicitly, so the checkout can use
+      `persist-credentials: false`.
+    required: false
+    default: ${{ github.token }}
+  pup-version:
+    description: 'The pup release that bumps the version and replaces the TBDs.'
+    required: false
+    default: '2.0.0'
+
+outputs:
+  version:
+    description: 'The version prepared.'
+    value: ${{ steps.prepare.outputs.version }}
+  date:
+    description: 'The date written in the changelog, as `YYYY-MM-DD`.'
+    value: ${{ steps.prepare.outputs.date }}
+  commit:
+    description: 'The commit pushed to the branch. Empty when nothing changed and nothing was pushed.'
+    value: ${{ steps.commit.outputs.commit }}
+  files:
+    description: 'The files the commit changed, one per line. Empty when nothing changed.'
+    value: ${{ steps.commit.outputs.files }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check the inputs, bump the version and replace the TBDs
+      id: prepare
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so an input is data and
+        # never part of the program.
+        INPUT_REF: ${{ inputs.ref }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_DATE: ${{ inputs.date }}
+        INPUT_PUP_VERSION: ${{ inputs.pup-version }}
+      with:
+        script: |
+          const { runPrepare } = require(`${process.env.ACTION_PATH}/release-prep.js`)
+          await runPrepare({ core, exec, env: process.env })
+
+    # The resolved date, never inputs.date: this action writes the date it is given as it is, so
+    # `today` would land in the changelog as the word and an empty value as an empty date.
+    - name: Write the changelog
+      uses: stellarwp/changelogger@v1
+      with:
+        command: write
+        version: ${{ steps.prepare.outputs.version }}
+        date: ${{ steps.prepare.outputs.date }}
+
+    - name: Commit the preparation and push it to the release branch
+      id: commit
+      uses: actions/github-script@v9
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        # The values the prepare step validated, not the raw inputs.
+        INPUT_REF: ${{ steps.prepare.outputs.ref }}
+        INPUT_VERSION: ${{ steps.prepare.outputs.version }}
+        INPUT_TOKEN: ${{ inputs.token }}
+      with:
+        script: |
+          const { runCommit } = require(`${process.env.ACTION_PATH}/release-prep.js`)
+          await runCommit({ core, exec, env: process.env })
