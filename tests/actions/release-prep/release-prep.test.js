@@ -543,17 +543,39 @@ describe('release-prep', () => {
       assert.equal(outputs().version, '4.17.0')
     })
 
-    it('warns and goes on when pup cannot read the current version', async (t) => {
+    it('warns and goes on when the branch holds a version that is not numeric', async (t) => {
       const { core, logged } = await coreWithOutputs(t)
       const { exec, calls } = recordingExec(
-        allSucceed([{ command: 'php', args: /get-version$/, stdout: 'unknown\n' }])
+        allSucceed([{ command: 'php', args: /get-version$/, stdout: 'dev\n' }])
       )
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await runPrepare({ core, exec, env: prepareEnv(), cwd })
 
-      assert.match(logged(), /::warning::.*current version/)
+      assert.match(logged(), /::warning::The version files hold `dev`, which is not a numeric version/)
       assert.ok(sequence(calls).some((call) => call.endsWith('replace-version 4.17.0')))
+    })
+
+    it('fails with pup output when pup cannot find the current version, and changes nothing', async (t) => {
+      // pup refuses to load a .puprc whose version regex finds nothing, so get-version exits 1.
+      const { core } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(
+        allSucceed([
+          {
+            command: 'php',
+            args: /get-version$/,
+            exitCode: 1,
+            stdout: 'ERROR: Could not find version in file plugin.php using regex "/(Version: )(.+)/"',
+          },
+        ])
+      )
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+      await assert.rejects(
+        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        /pup get-version failed.*Could not find version in file plugin\.php/s
+      )
+      assert.ok(!sequence(calls).some((call) => / replace-(version|tbd) /.test(call)), 'pup changed nothing')
     })
 
     it('stops before running pup when the repository has no usable .puprc', async (t) => {

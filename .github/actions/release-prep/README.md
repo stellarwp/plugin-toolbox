@@ -103,8 +103,9 @@ before pup has touched anything.
 - **A version lower than the branch's is refused.** pup reads the version the branch already has
   (`pup get-version`, the first file in `paths.versions`), and preparing `4.17.0` on a branch at
   `4.18.0` fails: it would bump the plugin backwards, so either the version or the branch is wrong. The
-  same version is accepted, since that is what re-running a preparation finds. When pup can't read a
-  version, the job only warns.
+  same version is accepted, since that is what re-running a preparation finds. When the version files
+  hold something that isn't a numeric version, such as `dev`, the job only warns; when pup can't find a
+  version at all, it fails, as `replace-version` would.
 
 Each refusal happens before anything is changed, as does a `date` that is not `YYYY-MM-DD`, a `ref`
 that is not a valid branch name, and a checkout that is not on `ref`.

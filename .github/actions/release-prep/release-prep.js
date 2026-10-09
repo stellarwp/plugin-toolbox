@@ -321,16 +321,33 @@ function compareVersions(a, b) {
 }
 
 /**
+ * The last non-empty line of a command's output, where `pup get-version` prints the version after any
+ * PHP notice.
+ *
+ * @param {string} output What the command printed.
+ *
+ * @returns {string} The line, trimmed, or an empty string.
+ */
+function lastLine(output) {
+  return (
+    String(output ?? '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .at(-1) ?? ''
+  )
+}
+
+/**
  * Reads the version `pup get-version` printed: the numeric part of its last line, so a suffix such as
  * -beta.1 is ignored and a PHP notice printed before it is skipped.
  *
  * @param {string} output What pup printed.
  *
- * @returns {string|null} The version, or null when pup printed none (it prints `unknown`).
+ * @returns {string|null} The version, or null when the line holds no numeric version, such as `dev`.
  */
 function readCurrentVersion(output) {
-  const lines = String(output ?? '').split('\n').map((line) => line.trim()).filter(Boolean)
-  const match = /^\d+(\.\d+)*/.exec(lines.at(-1) ?? '')
+  const match = /^\d+(\.\d+)*/.exec(lastLine(output))
 
   return match ? match[0] : null
 }
@@ -457,21 +474,21 @@ async function runPrepare({ core, exec, env, cwd = process.cwd() }) {
   )
 
   // A version lower than the one the branch already has would bump it backwards: a wrong version, or
-  // the wrong branch. The same version is fine, it is what re-running a preparation finds.
-  const current = readCurrentVersion(
-    await runOrFail(
-      exec,
-      'php',
-      ['-d', 'display_errors=stderr', phar, 'get-version'],
-      { cwd, silent: true },
-      'pup get-version'
-    )
+  // the wrong branch. The same version is fine, it is what re-running a preparation finds. When pup
+  // finds no version at all it exits non-zero, which fails here as replace-version would.
+  const printed = await runOrFail(
+    exec,
+    'php',
+    ['-d', 'display_errors=stderr', phar, 'get-version'],
+    { cwd, silent: true },
+    'pup get-version'
   )
+  const current = readCurrentVersion(printed)
 
   if (current === null) {
     core.warning(
-      `pup could not read the current version from the version files, so ${version} was not ` +
-        'checked against it.'
+      `The version files hold \`${lastLine(printed)}\`, which is not a numeric version, so ` +
+        `${version} was not checked against it.`
     )
   } else if (compareVersions(version, current) < 0) {
     throw new Error(
