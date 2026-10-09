@@ -20,6 +20,8 @@ const {
   basicCredential,
   pushEnv,
   commitMessage,
+  compareVersions,
+  readCurrentVersion,
 } = require('../../../.github/actions/release-prep/release-prep.js')
 const { coreWithOutputs, recordingExec } = require('../../support/actions.js')
 
@@ -84,6 +86,7 @@ function allSucceed(before = []) {
     { command: 'git', args: /^check-ref-format / },
     { command: 'git', args: /^symbolic-ref /, stdout: 'release/4.17.0\n' },
     { command: 'curl' },
+    { command: 'php', args: /get-version$/, stdout: '4.16.0\n' },
     { command: 'php', stdout: 'ok' },
   ]
 }
@@ -347,6 +350,33 @@ describe('release-prep', () => {
     })
   })
 
+  describe('compareVersions', () => {
+    it('orders versions by their numeric parts, a missing part counting as 0', () => {
+      assert.equal(compareVersions('4.17.0', '4.18.0'), -1)
+      assert.equal(compareVersions('4.18.0', '4.17.9'), 1)
+      assert.equal(compareVersions('4.18.0', '4.18.0'), 0)
+      assert.equal(compareVersions('4.18.0', '4.18.0.0'), 0)
+      assert.equal(compareVersions('4.18.0.1', '4.18.0'), 1)
+      assert.equal(compareVersions('4.10.0', '4.9.0'), 1)
+    })
+  })
+
+  describe('readCurrentVersion', () => {
+    it('reads the version pup prints, ignoring anything before it', () => {
+      assert.equal(readCurrentVersion('4.18.0\n'), '4.18.0')
+      assert.equal(readCurrentVersion('PHP Deprecated: something\n4.18.0.1\n'), '4.18.0.1')
+    })
+
+    it('reads the numeric part of a version with a suffix', () => {
+      assert.equal(readCurrentVersion('4.19.0-beta.1\n'), '4.19.0')
+    })
+
+    it('returns null when pup could not read a version', () => {
+      assert.equal(readCurrentVersion('unknown\n'), null)
+      assert.equal(readCurrentVersion(''), null)
+    })
+  })
+
   describe('commitMessage', () => {
     it('names the branch and the version', () => {
       assert.equal(commitMessage('release/4.17.0', '4.17.0'), 'Prepare release/4.17.0 (4.17.0)')
@@ -366,6 +396,7 @@ describe('release-prep', () => {
         'git check-ref-format refs/heads/release/4.17.0',
         'git symbolic-ref --quiet --short HEAD',
         `curl -fsSL --retry 3 -o ${phar} https://github.com/stellarwp/pup/releases/download/2.0.0/pup.phar`,
+        `php -d display_errors=stderr ${phar} get-version`,
         `php ${phar} replace-version 4.17.0`,
         `php ${phar} replace-tbd 4.17.0`,
       ])
@@ -457,6 +488,72 @@ describe('release-prep', () => {
         /The checkout is on a detached commit, not on 'release\/4\.17\.0'/
       )
       assert.ok(!calls.some((call) => call.command === 'curl' || call.command === 'php'))
+    })
+
+    it('refuses a version lower than the one the branch already has, before changing anything', async (t) => {
+      const { core, outputs } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(
+        allSucceed([{ command: 'php', args: /get-version$/, stdout: '4.18.0\n' }])
+      )
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+      await assert.rejects(
+        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        /Refusing to prepare 4\.17\.0: release\/4\.17\.0 already has 4\.18\.0.*Nothing was changed/s
+      )
+      assert.ok(!sequence(calls).some((call) => / replace-(version|tbd) /.test(call)), 'pup changed nothing')
+      assert.deepEqual(outputs(), {})
+    })
+
+    it('compares a four-part version by all four parts', async (t) => {
+      for (const [current, version, accepted] of [
+        ['4.18.0.1', '4.18.0', false],
+        ['4.18.0.1', '4.18.0.2', true],
+        ['4.18.0.1', '4.18.1', true],
+      ]) {
+        const { core } = await coreWithOutputs(t)
+        const { exec } = recordingExec(
+          allSucceed([
+            { command: 'git', args: /^symbolic-ref /, stdout: `release/${version}\n` },
+            { command: 'php', args: /get-version$/, stdout: `${current}\n` },
+          ])
+        )
+        const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+        const env = prepareEnv({ INPUT_VERSION: version, INPUT_REF: `release/${version}` })
+        const prepare = runPrepare({ core, exec, env, cwd })
+
+        if (accepted) {
+          await prepare
+        } else {
+          await assert.rejects(prepare, /already has 4\.18\.0\.1/)
+        }
+      }
+    })
+
+    it('prepares the version the branch already has, as a re-run of the same release does', async (t) => {
+      const { core, outputs } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(
+        allSucceed([{ command: 'php', args: /get-version$/, stdout: '4.17.0\n' }])
+      )
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+      await runPrepare({ core, exec, env: prepareEnv(), cwd })
+
+      assert.ok(sequence(calls).some((call) => call.endsWith('replace-version 4.17.0')))
+      assert.equal(outputs().version, '4.17.0')
+    })
+
+    it('warns and goes on when pup cannot read the current version', async (t) => {
+      const { core, logged } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(
+        allSucceed([{ command: 'php', args: /get-version$/, stdout: 'unknown\n' }])
+      )
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+      await runPrepare({ core, exec, env: prepareEnv(), cwd })
+
+      assert.match(logged(), /::warning::.*current version/)
+      assert.ok(sequence(calls).some((call) => call.endsWith('replace-version 4.17.0')))
     })
 
     it('stops before running pup when the repository has no usable .puprc', async (t) => {

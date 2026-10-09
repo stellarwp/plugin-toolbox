@@ -18,7 +18,8 @@ inputs:
   version:
     description: >-
       The version to prepare: three or four numeric parts, such as `4.17.0` or `4.17.0.1`. An empty
-      value and a pre-release such as `4.17.0-beta.1` are refused before anything is changed.
+      value, a pre-release such as `4.17.0-beta.1`, and a version lower than the one the branch
+      already has are refused before anything is changed.
     required: true
   date:
     description: >-

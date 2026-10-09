@@ -297,6 +297,45 @@ function commitMessage(ref, version) {
 }
 
 /**
+ * Orders two versions by their numeric parts, a missing part counting as 0, so 4.18.0.1 comes after
+ * 4.18.0 and 4.10.0 after 4.9.0.
+ *
+ * @param {string} a A version of numeric dot-separated parts.
+ * @param {string} b Another one.
+ *
+ * @returns {number} -1 when `a` comes first, 1 when `b` does, 0 when they are the same version.
+ */
+function compareVersions(a, b) {
+  const left = a.split('.').map(Number)
+  const right = b.split('.').map(Number)
+
+  for (let index = 0; index < Math.max(left.length, right.length); index++) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0)
+
+    if (difference !== 0) {
+      return difference < 0 ? -1 : 1
+    }
+  }
+
+  return 0
+}
+
+/**
+ * Reads the version `pup get-version` printed: the numeric part of its last line, so a suffix such as
+ * -beta.1 is ignored and a PHP notice printed before it is skipped.
+ *
+ * @param {string} output What pup printed.
+ *
+ * @returns {string|null} The version, or null when pup printed none (it prints `unknown`).
+ */
+function readCurrentVersion(output) {
+  const lines = String(output ?? '').split('\n').map((line) => line.trim()).filter(Boolean)
+  const match = /^\d+(\.\d+)*/.exec(lines.at(-1) ?? '')
+
+  return match ? match[0] : null
+}
+
+/**
  * Reads a file of the checkout.
  *
  * @param {string} cwd  The checkout.
@@ -347,8 +386,8 @@ async function runOrFail(exec, command, args, options, what) {
  * Validates the inputs, then bumps the version and replaces the TBDs with pup.
  *
  * Every check runs before anything is written, so a wrong version, date or ref, a checkout that is
- * not on the release branch, or a repository without a usable .puprc, fails with the branch
- * untouched.
+ * not on the release branch, a repository without a usable .puprc, or a version lower than the one
+ * the branch already has, fails with the branch untouched.
  *
  * @param {object} core The @actions/core toolkit, for the log and the outputs.
  * @param {object} exec The @actions/exec toolkit.
@@ -416,6 +455,30 @@ async function runPrepare({ core, exec, env, cwd = process.cwd() }) {
     {},
     `Downloading pup ${pupVersion}`
   )
+
+  // A version lower than the one the branch already has would bump it backwards: a wrong version, or
+  // the wrong branch. The same version is fine, it is what re-running a preparation finds.
+  const current = readCurrentVersion(
+    await runOrFail(
+      exec,
+      'php',
+      ['-d', 'display_errors=stderr', phar, 'get-version'],
+      { cwd, silent: true },
+      'pup get-version'
+    )
+  )
+
+  if (current === null) {
+    core.warning(
+      `pup could not read the current version from the version files, so ${version} was not ` +
+        'checked against it.'
+    )
+  } else if (compareVersions(version, current) < 0) {
+    throw new Error(
+      `Refusing to prepare ${version}: ${ref} already has ${current}, a later version. Check the ` +
+        'version and the release branch. Nothing was changed.'
+    )
+  }
 
   for (const { command, args } of pupCommands(phar, version)) {
     await runOrFail(exec, command, args, { cwd }, `pup ${args[1]}`)
@@ -527,5 +590,7 @@ module.exports = {
   basicCredential,
   pushEnv,
   commitMessage,
+  compareVersions,
+  readCurrentVersion,
   VERSION_PATTERN,
 }

@@ -100,6 +100,12 @@ before pup has touched anything.
 - **A pre-release is refused.** `4.17.0-beta.1` is rejected by the `stellarwp` versioning, so the action
   cannot prepare one, even though it is a valid tag name.
 
+- **A version lower than the branch's is refused.** pup reads the version the branch already has
+  (`pup get-version`, the first file in `paths.versions`), and preparing `4.17.0` on a branch at
+  `4.18.0` fails: it would bump the plugin backwards, so either the version or the branch is wrong. The
+  same version is accepted, since that is what re-running a preparation finds. When pup can't read a
+  version, the job only warns.
+
 Each refusal happens before anything is changed, as does a `date` that is not `YYYY-MM-DD`, a `ref`
 that is not a valid branch name, and a checkout that is not on `ref`.
 
