@@ -114,7 +114,7 @@ that is not a valid branch name, and a checkout that is not on `ref`.
 
 | Input | Required | Default | What it does |
 |---|---|---|---|
-| `ref` | yes | | The release branch to push to, e.g. `release/4.17.0`. A branch name, not `refs/heads/…`. The checkout has to be on it; see [Pushing](#pushing) |
+| `ref` | yes | | The release branch to push to, e.g. `release/M26.jigglypuff`. A branch name, not `refs/heads/…`. The checkout has to be on it; see [Pushing](#pushing) |
 | `version` | yes | | The version to prepare, e.g. `4.17.0`. See [Versions it refuses](#versions-it-refuses) |
 | `date` | no | today, in UTC | The changelog date as `YYYY-MM-DD`. Empty or `today` writes today |
 | `token` | no | `github.token` | The token the commit is pushed with. See [Pushing](#pushing) |

@@ -12,13 +12,13 @@ name: Release Prep
 # refuses a workflow that requires more.
 #
 # Run it locally: you cannot, it pushes to a branch. Start it by hand with
-# `gh workflow run release-prep.yml -f ref=release/4.17.0 -f version=4.17.0`.
+# `gh workflow run release-prep.yml -f ref=release/M26.jigglypuff -f version=4.17.0`.
 
 on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Release branch to prepare and push to, e.g. release/4.17.0'
+        description: 'Release branch to prepare and push to, e.g. release/M26.jigglypuff'
         required: true
         type: string
       version:

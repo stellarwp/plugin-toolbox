@@ -64,7 +64,7 @@ function checkoutWith(files = {}) {
  */
 function prepareEnv(overrides = {}) {
   return {
-    INPUT_REF: 'release/4.17.0',
+    INPUT_REF: 'release/M26.jigglypuff',
     INPUT_VERSION: '4.17.0',
     INPUT_DATE: '',
     INPUT_PUP_VERSION: '2.0.0',
@@ -84,7 +84,7 @@ function allSucceed(before = []) {
   return [
     ...before,
     { command: 'git', args: /^check-ref-format / },
-    { command: 'git', args: /^symbolic-ref /, stdout: 'release/4.17.0\n' },
+    { command: 'git', args: /^symbolic-ref /, stdout: 'release/M26.jigglypuff\n' },
     { command: 'curl' },
     { command: 'php', args: /get-version$/, stdout: '4.16.0\n' },
     { command: 'php', stdout: 'ok' },
@@ -185,7 +185,7 @@ async function recordedRealExec() {
 function commitEnv(overrides = {}) {
   return {
     ...process.env,
-    INPUT_REF: 'release/4.17.0',
+    INPUT_REF: 'release/M26.jigglypuff',
     INPUT_VERSION: '4.17.0',
     INPUT_TOKEN: 'ghs_notarealtoken123',
     GITHUB_SERVER_URL: 'https://github.com',
@@ -250,7 +250,7 @@ describe('release-prep', () => {
 
   describe('validateRef', () => {
     it('accepts a branch name', () => {
-      assert.equal(validateRef('release/4.17.0'), 'release/4.17.0')
+      assert.equal(validateRef('release/M26.jigglypuff'), 'release/M26.jigglypuff')
     })
 
     it('refuses an empty ref', () => {
@@ -259,8 +259,8 @@ describe('release-prep', () => {
 
     it('refuses a full ref, naming the branch to pass instead', () => {
       assert.throws(
-        () => validateRef('refs/heads/release/4.17.0'),
-        /pass the branch name, e\.g\. 'release\/4\.17\.0'/
+        () => validateRef('refs/heads/release/M26.jigglypuff'),
+        /pass the branch name, e\.g\. 'release\/M26\.jigglypuff'/
       )
     })
   })
@@ -379,7 +379,7 @@ describe('release-prep', () => {
 
   describe('commitMessage', () => {
     it('names the branch and the version', () => {
-      assert.equal(commitMessage('release/4.17.0', '4.17.0'), 'Prepare release/4.17.0 (4.17.0)')
+      assert.equal(commitMessage('release/M26.jigglypuff', '4.17.0'), 'Prepare release/M26.jigglypuff (4.17.0)')
     })
   })
 
@@ -393,7 +393,7 @@ describe('release-prep', () => {
 
       const phar = '/runner/temp/pup-2.0.0.phar'
       assert.deepEqual(sequence(calls), [
-        'git check-ref-format refs/heads/release/4.17.0',
+        'git check-ref-format refs/heads/release/M26.jigglypuff',
         'git symbolic-ref --quiet --short HEAD',
         `curl -fsSL --retry 3 -o ${phar} https://github.com/stellarwp/pup/releases/download/2.0.0/pup.phar`,
         `php -d display_errors=stderr ${phar} get-version`,
@@ -404,7 +404,7 @@ describe('release-prep', () => {
         calls.filter((call) => call.command === 'php').every((call) => call.options.cwd === cwd),
         'pup runs in the checkout'
       )
-      assert.deepEqual(outputs(), { version: '4.17.0', date: TODAY, ref: 'release/4.17.0' })
+      assert.deepEqual(outputs(), { version: '4.17.0', date: TODAY, ref: 'release/M26.jigglypuff' })
     })
 
     it('hands the changelog step a date it can write, never `today`', async (t) => {
@@ -471,7 +471,7 @@ describe('release-prep', () => {
 
       await assert.rejects(
         runPrepare({ core, exec, env: prepareEnv(), cwd }),
-        /The checkout is on 'main', not on 'release\/4\.17\.0'.*Nothing was changed/s
+        /The checkout is on 'main', not on 'release\/M26\.jigglypuff'.*Nothing was changed/s
       )
       assert.ok(!calls.some((call) => call.command === 'curl' || call.command === 'php'))
     })
@@ -485,7 +485,7 @@ describe('release-prep', () => {
 
       await assert.rejects(
         runPrepare({ core, exec, env: prepareEnv(), cwd }),
-        /The checkout is on a detached commit, not on 'release\/4\.17\.0'/
+        /The checkout is on a detached commit, not on 'release\/M26\.jigglypuff'/
       )
       assert.ok(!calls.some((call) => call.command === 'curl' || call.command === 'php'))
     })
@@ -499,7 +499,7 @@ describe('release-prep', () => {
 
       await assert.rejects(
         runPrepare({ core, exec, env: prepareEnv(), cwd }),
-        /Refusing to prepare 4\.17\.0: release\/4\.17\.0 already has 4\.18\.0.*Nothing was changed/s
+        /Refusing to prepare 4\.17\.0: release\/M26\.jigglypuff already has 4\.18\.0.*Nothing was changed/s
       )
       assert.ok(!sequence(calls).some((call) => / replace-(version|tbd) /.test(call)), 'pup changed nothing')
       assert.deepEqual(outputs(), {})
@@ -660,35 +660,35 @@ describe('release-prep', () => {
     it('commits every change and pushes it to the release branch', async (t) => {
       const { core, outputs, summary } = await coreWithOutputs(t)
       const { exec } = await recordedRealExec()
-      const { work, remote } = repositoryOn('release/4.17.0')
+      const { work, remote } = repositoryOn('release/M26.jigglypuff')
       fs.writeFileSync(path.join(work, 'plugin.php'), 'Version: 4.17.0\n')
       fs.writeFileSync(path.join(work, 'changelog.txt'), '= 4.17.0 =\n')
 
       await runCommit({ core, exec, env: commitEnv(), cwd: work })
 
-      const pushed = git(remote, 'rev-parse', 'refs/heads/release/4.17.0')
+      const pushed = git(remote, 'rev-parse', 'refs/heads/release/M26.jigglypuff')
       assert.equal(pushed, git(work, 'rev-parse', 'HEAD'))
-      assert.equal(git(remote, 'log', '-1', '--format=%s', pushed), 'Prepare release/4.17.0 (4.17.0)')
+      assert.equal(git(remote, 'log', '-1', '--format=%s', pushed), 'Prepare release/M26.jigglypuff (4.17.0)')
       assert.equal(
         git(remote, 'log', '-1', '--format=%an <%ae>', pushed),
         'github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>'
       )
       assert.deepEqual(outputs(), { commit: pushed, files: 'changelog.txt\nplugin.php' })
-      assert.match(summary(), /Prepare release\/4\.17\.0 \(4\.17\.0\)/)
+      assert.match(summary(), /Prepare release\/M26\.jigglypuff \(4\.17\.0\)/)
       assert.match(summary(), /^- `changelog\.txt`\n- `plugin\.php`$/m)
     })
 
     it('never puts the token on a command line, in the log or in the git config', async (t) => {
       const { core, logged } = await coreWithOutputs(t)
       const { exec, calls, printed } = await recordedRealExec()
-      const { work } = repositoryOn('release/4.17.0')
+      const { work } = repositoryOn('release/M26.jigglypuff')
       fs.writeFileSync(path.join(work, 'plugin.php'), 'Version: 4.17.0\n')
       const token = commitEnv().INPUT_TOKEN
       const credential = basicCredential(token)
 
       await runCommit({ core, exec, env: commitEnv(), cwd: work })
 
-      assert.match(printed(), /\[command\].*git push origin HEAD:refs\/heads\/release\/4\.17\.0/)
+      assert.match(printed(), /\[command\].*git push origin HEAD:refs\/heads\/release\/M26\.jigglypuff/)
       const log = `${logged()}\n${printed()}`
       assert.match(log, new RegExp(`::add-mask::${token}`))
       assert.match(log, new RegExp(`::add-mask::${credential}`))
@@ -699,7 +699,7 @@ describe('release-prep', () => {
       assert.ok(!fs.readFileSync(path.join(work, '.git', 'config'), 'utf8').includes(credential))
 
       const push = calls.find((call) => call.args[0] === 'push')
-      assert.deepEqual(push.args, ['push', 'origin', 'HEAD:refs/heads/release/4.17.0'])
+      assert.deepEqual(push.args, ['push', 'origin', 'HEAD:refs/heads/release/M26.jigglypuff'])
       assert.equal(push.options.env.GIT_CONFIG_VALUE_1, `AUTHORIZATION: basic ${credential}`)
     })
 
@@ -721,14 +721,14 @@ describe('release-prep', () => {
       const serverUrl = `http://127.0.0.1:${server.address().port}`
       const { core } = await coreWithOutputs(t)
       const { exec } = await recordedRealExec()
-      const { work } = repositoryOn('release/4.17.0')
+      const { work } = repositoryOn('release/M26.jigglypuff')
       git(work, 'remote', 'set-url', 'origin', `${serverUrl}/stellarwp/plugin.git`)
       git(work, 'config', `http.${serverUrl}/.extraheader`, 'AUTHORIZATION: basic cGVyc2lzdGVk')
       fs.writeFileSync(path.join(work, 'plugin.php'), 'Version: 4.17.0\n')
       const env = commitEnv({ GITHUB_SERVER_URL: serverUrl, GIT_TERMINAL_PROMPT: '0' })
 
       // The server has no repository, so the push fails once git has sent its first request.
-      await assert.rejects(runCommit({ core, exec, env, cwd: work }), /Pushing to release\/4\.17\.0 failed/)
+      await assert.rejects(runCommit({ core, exec, env, cwd: work }), /Pushing to release\/M26\.jigglypuff failed/)
 
       assert.ok(seen.length > 0, 'git reached the server')
       for (const headers of seen) {
@@ -740,12 +740,12 @@ describe('release-prep', () => {
       // A retry of the same version finds the branch already prepared.
       const { core, outputs } = await coreWithOutputs(t)
       const { exec, calls } = await recordedRealExec()
-      const { work, remote } = repositoryOn('release/4.17.0')
-      const before = git(remote, 'rev-parse', 'refs/heads/release/4.17.0')
+      const { work, remote } = repositoryOn('release/M26.jigglypuff')
+      const before = git(remote, 'rev-parse', 'refs/heads/release/M26.jigglypuff')
 
       await runCommit({ core, exec, env: commitEnv(), cwd: work })
 
-      assert.equal(git(remote, 'rev-parse', 'refs/heads/release/4.17.0'), before)
+      assert.equal(git(remote, 'rev-parse', 'refs/heads/release/M26.jigglypuff'), before)
       assert.ok(!calls.some((call) => call.args.includes('commit') || call.args.includes('push')))
       assert.deepEqual(outputs(), { commit: '', files: '' })
     })
@@ -753,21 +753,21 @@ describe('release-prep', () => {
     it('fails with git output when the push is refused', async (t) => {
       const { core } = await coreWithOutputs(t)
       const { exec } = await recordedRealExec()
-      const { work, remote } = repositoryOn('release/4.17.0')
+      const { work, remote } = repositoryOn('release/M26.jigglypuff')
 
       // Someone else pushed to the branch after the checkout, so the push is not a fast-forward.
       const other = path.join(path.dirname(remote), 'other')
-      git(path.dirname(remote), 'clone', '--quiet', '-b', 'release/4.17.0', remote, other)
+      git(path.dirname(remote), 'clone', '--quiet', '-b', 'release/M26.jigglypuff', remote, other)
       git(other, 'config', 'user.name', 'Other')
       git(other, 'config', 'user.email', 'other@example.com')
       git(other, 'commit', '--quiet', '--allow-empty', '-m', 'Elsewhere')
-      git(other, 'push', '--quiet', 'origin', 'HEAD:refs/heads/release/4.17.0')
+      git(other, 'push', '--quiet', 'origin', 'HEAD:refs/heads/release/M26.jigglypuff')
 
       fs.writeFileSync(path.join(work, 'plugin.php'), 'Version: 4.17.0\n')
 
       await assert.rejects(
         runCommit({ core, exec, env: commitEnv(), cwd: work }),
-        /Pushing to release\/4\.17\.0 failed.*rejected/s
+        /Pushing to release\/M26\.jigglypuff failed.*rejected/s
       )
     })
   })

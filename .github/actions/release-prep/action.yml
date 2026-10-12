@@ -11,7 +11,7 @@ description: Bumps the version, replaces TBDs and writes the changelog, then pus
 inputs:
   ref:
     description: >-
-      The release branch to push the preparation to, e.g. `release/4.17.0`. A branch name, not a
+      The release branch to push the preparation to, e.g. `release/M26.jigglypuff`. A branch name, not a
       ref. The action does not check it out: the caller's checkout has to be on it, and the action
       refuses to run when it is not.
     required: true

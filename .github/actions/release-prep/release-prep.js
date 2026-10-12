@@ -115,7 +115,7 @@ function validateRef(ref) {
   const trimmed = String(ref ?? '').trim()
 
   if (trimmed === '') {
-    throw new Error('No ref was given: pass the release branch to prepare, e.g. release/4.17.0.')
+    throw new Error('No ref was given: pass the release branch to prepare, e.g. release/M26.jigglypuff.')
   }
 
   // The push writes refs/heads/<ref>, so a full ref would create a branch named refs/heads/….
