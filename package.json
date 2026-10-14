@@ -1,0 +1,13 @@
+{
+  "name": "@stellarwp/plugin-toolbox",
+  "private": true,
+  "description": "Shared CI for StellarWP plugin repositories",
+  "license": "GPL-2.0-or-later",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "@actions/core": "^3.0.1",
+    "@actions/github": "^9.1.1"
+  }
+}

@@ -171,6 +171,7 @@ Each phase ends with something people can actually use.
 - [ ] `changelog.yml`: the changelogger check.
 - [ ] `zip.yml`: reconcile TEC's and LD's versions.
 - [ ] `release-prep.yml`: version bump, changelog, tested-up-to.
+- [ ] `release-tags.yml`: a `workflow_call` wrapper for the floating tag actions, so a repo gets a `uses:` instead of copying the workflow. The actions have to be referenced by full path, not `./`, because a relative path in a called workflow resolves against the caller.
 - [ ] Document each in `docs/continuous-integration.md` with its local command.
 
 ### Phase 4: file sync

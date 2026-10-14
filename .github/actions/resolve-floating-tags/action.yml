@@ -1,0 +1,83 @@
+# Works out which floating tags a released version should own: v1 and v1.2 for 1.2.3. Writing them
+# is a separate action: see .github/actions/move-git-tags.
+#
+# The decision lives in resolve.js. actions/github-script runs it with a pre-authenticated Octokit,
+# so there is no dependency to install and nothing to build: the file in the repository is the file
+# that runs.
+name: Resolve floating version tags
+description: Works out which v<major> and v<major>.<minor> tags a released version should own
+
+inputs:
+  tag:
+    description: >-
+      The release tag to resolve, with or without a leading `v`, e.g. `1.2.3` or `v1.2.3`. It needs
+      at least three dot-separated numbers. A fourth is read as part of the same line, so a hotfix
+      1.2.3.1 counts as the newest release of 1.2; see the action's README. A prerelease suffix and
+      build metadata are read but are not part of a floating tag name.
+    required: true
+  levels:
+    description: >-
+      Which floating tags to resolve, space separated. `major` resolves v1, `minor` resolves v1.2.
+      Order does not matter, and naming one twice resolves one tag. Drop `minor` on a repo whose
+      consumers only ever pin a major.
+    required: false
+    default: 'major minor'
+  allow-prereleases:
+    description: >-
+      Let a prerelease own a floating tag whose line has had no stable release yet. Off by default,
+      so a release marked as a prerelease on GitHub, or tagged with a suffix such as `1.3.0-rc.1`,
+      resolves no tags at all. Turning it on never takes a tag from a stable release: a 1.4.0-rc.1
+      resolves v1.4 and leaves v1 on the newest stable 1.x. See the action's README.
+    required: false
+    default: 'false'
+  repository:
+    description: 'The `<owner>/<repo>` whose tags and releases to read. Defaults to the current one.'
+    required: false
+    default: ''
+  token:
+    description: >-
+      Token used to read the repository's tags, and the prerelease flag of the release named by
+      `tag`. Read access to the repository's contents is enough.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  tags:
+    description: >-
+      The floating tags this version should own, space separated, e.g. `v1 v1.2`, ordered from
+      shortest to longest. Pass it straight to move-git-tags. Empty when the version should own
+      none.
+    value: ${{ steps.resolve.outputs.tags }}
+  skipped:
+    description: >-
+      The floating tags a newer release of the same line already owns, space separated. Empty when
+      the version itself was rejected; read `version` to tell the two apart.
+    value: ${{ steps.resolve.outputs.skipped }}
+  version:
+    description: >-
+      The released version without its leading `v`, e.g. `1.2.3`. Empty when the tag was not a
+      numeric version of at least three parts.
+    value: ${{ steps.resolve.outputs.version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve the floating tags for the released version
+      id: resolve
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so a tag name is data and
+        # never part of the program.
+        INPUT_TAG: ${{ inputs.tag }}
+        INPUT_LEVELS: ${{ inputs.levels }}
+        INPUT_ALLOW_PRERELEASES: ${{ inputs.allow-prereleases }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const { run } = require(`${process.env.ACTION_PATH}/resolve.js`)
+          await run({ github, core, env: process.env })
