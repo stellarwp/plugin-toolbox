@@ -88,17 +88,20 @@ action runs. One written in TypeScript has to be built in an earlier step.
 
 ## Versions it refuses
 
-The version has to be three or four numeric parts, such as `4.17.0` or `4.17.0.1`. That is what the
-changelogger's `stellarwp` versioning accepts, so a version the changelog step would fail on is refused
-before pup has touched anything.
+The version has to be three or four numeric parts, such as `4.17.0` or `4.17.0.1`. That is the shape
+the changelogger's default `stellarwp` versioning accepts. A repository with a custom changelogger
+version strategy may accept other shapes, but this action still takes three or four numeric parts:
+a version the changelog step would fail on is refused before pup has touched anything, whatever the
+strategy.
 
 - **An empty version is refused.** A tool that dispatches the workflow for a release with no version set
   sends an empty one. When the workflow declares `version` as required, as the template does, GitHub
   refuses that dispatch itself with HTTP 422 ("Required input 'version' not provided") and no run starts.
   When a workflow declares it optional, the run starts and the action fails it with "No version was
   given". Either way the release needs a version before the step is run again.
-- **A pre-release is refused.** `4.17.0-beta.1` is rejected by the `stellarwp` versioning, so the action
-  cannot prepare one, even though it is a valid tag name.
+- **A pre-release is refused.** `4.17.0-beta.1` is rejected by the `stellarwp` versioning, so the
+  action cannot prepare one, even though it is a valid tag name. A custom version strategy that
+  accepts pre-releases does not change this.
 
 - **A version lower than the branch's is refused.** pup reads the version the branch already has
   (`pup get-version`, the first file in `paths.versions`), and preparing `4.17.0` on a branch at
