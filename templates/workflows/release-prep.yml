@@ -58,6 +58,6 @@ jobs:
 
       - uses: stellarwp/plugin-toolbox/.github/actions/release-prep@v1
         with:
-          ref: ${{ inputs.ref }}
+          branch: ${{ inputs.ref }}
           version: ${{ inputs.version }}
           date: ${{ inputs.date }}

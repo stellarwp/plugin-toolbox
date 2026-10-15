@@ -11,7 +11,7 @@ changelog, then commits that and pushes it to the branch:
 
 - uses: stellarwp/plugin-toolbox/.github/actions/release-prep@v1
   with:
-    ref: ${{ inputs.ref }}
+    branch: ${{ inputs.ref }}
     version: ${{ inputs.version }}
 ```
 
@@ -110,14 +110,14 @@ strategy.
   hold something that isn't a numeric version, such as `dev`, the job only warns; when pup can't find a
   version at all, it fails, as `replace-version` would.
 
-Each refusal happens before anything is changed, as does a `date` that is not `YYYY-MM-DD`, a `ref`
-that is not a valid branch name, and a checkout that is not on `ref`.
+Each refusal happens before anything is changed, as does a `date` that is not `YYYY-MM-DD`, a `branch`
+that is not a valid branch name, and a checkout that is not on `branch`.
 
 ## Inputs
 
 | Input | Required | Default | What it does |
 |---|---|---|---|
-| `ref` | yes | | The release branch to push to, e.g. `release/M26.jigglypuff`. A branch name, not `refs/heads/…`. The checkout has to be on it; see [Pushing](#pushing) |
+| `branch` | yes | | The release branch to push to, e.g. `release/M26.jigglypuff`. A branch name, not `refs/heads/…`. The checkout has to be on it; see [Pushing](#pushing) |
 | `version` | yes | | The version to prepare, e.g. `4.17.0`. See [Versions it refuses](#versions-it-refuses) |
 | `date` | no | today, in UTC | The changelog date as `YYYY-MM-DD`. Empty or `today` writes today |
 | `token` | no | `github.token` | The token the commit is pushed with. See [Pushing](#pushing) |
@@ -168,7 +168,7 @@ before adding its own header, so only `token` is sent.
 The push is a fast-forward. If the branch moved after the checkout, the push is refused and the job
 fails with git's output, rather than overwriting what landed.
 
-The checkout has to be on `ref` itself, and the action checks that before it changes anything. Pushing
+The checkout has to be on `branch` itself, and the action checks that before it changes anything. Pushing
 from another branch would also be a fast-forward whenever the release branch is an ancestor of it,
 for instance a run started from `main` whose checkout was given no `ref`, and the release would pick
 up every commit of that branch. A detached checkout, of a tag or a commit, is refused for the same

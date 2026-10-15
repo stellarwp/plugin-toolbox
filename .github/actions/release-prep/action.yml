@@ -9,11 +9,11 @@ name: Release prep
 description: Bumps the version, replaces TBDs and writes the changelog, then pushes it to the release branch
 
 inputs:
-  ref:
+  branch:
     description: >-
-      The release branch to push the preparation to, e.g. `release/M26.jigglypuff`. A branch name, not a
-      ref. The action does not check it out: the caller's checkout has to be on it, and the action
-      refuses to run when it is not.
+      The release branch to push the preparation to, e.g. `release/M26.jigglypuff`. A branch name, not
+      any git ref. The action does not check it out: the caller's checkout has to be on it, and the
+      action refuses to run when it is not.
     required: true
   version:
     description: >-
@@ -66,7 +66,7 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
         # Read from process.env rather than interpolated into the script, so an input is data and
         # never part of the program.
-        INPUT_REF: ${{ inputs.ref }}
+        INPUT_BRANCH: ${{ inputs.branch }}
         INPUT_VERSION: ${{ inputs.version }}
         INPUT_DATE: ${{ inputs.date }}
         INPUT_PUP_VERSION: ${{ inputs.pup-version }}
@@ -90,7 +90,7 @@ runs:
       env:
         ACTION_PATH: ${{ github.action_path }}
         # The values the prepare step validated, not the raw inputs.
-        INPUT_REF: ${{ steps.prepare.outputs.ref }}
+        INPUT_BRANCH: ${{ steps.prepare.outputs.branch }}
         INPUT_VERSION: ${{ steps.prepare.outputs.version }}
         INPUT_TOKEN: ${{ inputs.token }}
       with:

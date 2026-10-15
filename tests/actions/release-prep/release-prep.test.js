@@ -11,7 +11,7 @@ const {
   runCommit,
   validateVersion,
   resolveDate,
-  validateRef,
+  validateBranch,
   validatePupVersion,
   readPuprc,
   hasChangeloggerConfig,
@@ -64,7 +64,7 @@ function checkoutWith(files = {}) {
  */
 function prepareEnv(overrides = {}) {
   return {
-    INPUT_REF: 'release/M26.jigglypuff',
+    INPUT_BRANCH: 'release/M26.jigglypuff',
     INPUT_VERSION: '4.17.0',
     INPUT_DATE: '',
     INPUT_PUP_VERSION: '2.0.0',
@@ -185,7 +185,7 @@ async function recordedRealExec() {
 function commitEnv(overrides = {}) {
   return {
     ...process.env,
-    INPUT_REF: 'release/M26.jigglypuff',
+    INPUT_BRANCH: 'release/M26.jigglypuff',
     INPUT_VERSION: '4.17.0',
     INPUT_TOKEN: 'ghs_notarealtoken123',
     GITHUB_SERVER_URL: 'https://github.com',
@@ -248,18 +248,18 @@ describe('release-prep', () => {
     })
   })
 
-  describe('validateRef', () => {
+  describe('validateBranch', () => {
     it('accepts a branch name', () => {
-      assert.equal(validateRef('release/M26.jigglypuff'), 'release/M26.jigglypuff')
+      assert.equal(validateBranch('release/M26.jigglypuff'), 'release/M26.jigglypuff')
     })
 
     it('refuses an empty ref', () => {
-      assert.throws(() => validateRef(''), /No ref was given/)
+      assert.throws(() => validateBranch(''), /No branch was given/)
     })
 
     it('refuses a full ref, naming the branch to pass instead', () => {
       assert.throws(
-        () => validateRef('refs/heads/release/M26.jigglypuff'),
+        () => validateBranch('refs/heads/release/M26.jigglypuff'),
         /pass the branch name, e\.g\. 'release\/M26\.jigglypuff'/
       )
     })
@@ -404,7 +404,7 @@ describe('release-prep', () => {
         calls.filter((call) => call.command === 'php').every((call) => call.options.cwd === cwd),
         'pup runs in the checkout'
       )
-      assert.deepEqual(outputs(), { version: '4.17.0', date: TODAY, ref: 'release/M26.jigglypuff' })
+      assert.deepEqual(outputs(), { version: '4.17.0', date: TODAY, branch: 'release/M26.jigglypuff' })
     })
 
     it('hands the changelog step a date it can write, never `today`', async (t) => {
@@ -431,7 +431,7 @@ describe('release-prep', () => {
         [{ INPUT_VERSION: '4.17.0-beta.1' }, /not a version this action can prepare/],
         [{ INPUT_VERSION: '2.1..21' }, /not a version this action can prepare/],
         [{ INPUT_DATE: 'ontem' }, /is not a date/],
-        [{ INPUT_REF: '' }, /No ref was given/],
+        [{ INPUT_BRANCH: '' }, /No branch was given/],
         [{ INPUT_PUP_VERSION: 'latest' }, /pup-version/],
       ]
 
@@ -446,7 +446,7 @@ describe('release-prep', () => {
       }
     })
 
-    it('stops before downloading pup when the ref is not a valid branch name', async (t) => {
+    it('stops before downloading pup when the branch is not a valid name', async (t) => {
       const { core } = await coreWithOutputs(t)
       const { exec, calls } = recordingExec(
         allSucceed([{ command: 'git', args: /^check-ref-format /, exitCode: 1 }])
@@ -454,7 +454,7 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv({ INPUT_REF: 'release/..x' }), cwd }),
+        runPrepare({ core, exec, env: prepareEnv({ INPUT_BRANCH: 'release/..x' }), cwd }),
         /'release\/\.\.x' is not a valid branch name/
       )
       assert.deepEqual(sequence(calls), ['git check-ref-format refs/heads/release/..x'])
@@ -519,7 +519,7 @@ describe('release-prep', () => {
           ])
         )
         const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
-        const env = prepareEnv({ INPUT_VERSION: version, INPUT_REF: `release/${version}` })
+        const env = prepareEnv({ INPUT_VERSION: version, INPUT_BRANCH: `release/${version}` })
         const prepare = runPrepare({ core, exec, env, cwd })
 
         if (accepted) {

@@ -105,17 +105,17 @@ function resolveDate(date, now = new Date()) {
  * Checks the shape of the branch to push to. Whether git accepts the name is checked by git, in
  * runPrepare.
  *
- * @param {string} ref The `ref` input.
+ * @param {string} branch The `branch` input.
  *
  * @throws {Error} When it is empty or a full ref.
  *
  * @returns {string} The branch name, without surrounding whitespace.
  */
-function validateRef(ref) {
-  const trimmed = String(ref ?? '').trim()
+function validateBranch(branch) {
+  const trimmed = String(branch ?? '').trim()
 
   if (trimmed === '') {
-    throw new Error('No ref was given: pass the release branch to prepare, e.g. release/M26.jigglypuff.')
+    throw new Error('No branch was given: pass the release branch to prepare, e.g. release/M26.jigglypuff.')
   }
 
   // The push writes refs/heads/<ref>, so a full ref would create a branch named refs/heads/….
@@ -287,13 +287,13 @@ function pushEnv(token, serverUrl) {
 /**
  * The message of the commit the action pushes.
  *
- * @param {string} ref     The release branch.
+ * @param {string} branch  The release branch.
  * @param {string} version The version prepared.
  *
  * @returns {string} The commit message.
  */
-function commitMessage(ref, version) {
-  return `Prepare ${ref} (${version})`
+function commitMessage(branch, version) {
+  return `Prepare ${branch} (${version})`
 }
 
 /**
@@ -418,19 +418,19 @@ async function runOrFail(exec, command, args, options, what) {
 async function runPrepare({ core, exec, env, cwd = process.cwd() }) {
   const version = validateVersion(env.INPUT_VERSION)
   const date = resolveDate(env.INPUT_DATE)
-  const ref = validateRef(env.INPUT_REF)
+  const branch = validateBranch(env.INPUT_BRANCH)
   const pupVersion = validatePupVersion(env.INPUT_PUP_VERSION)
 
-  const refCheck = await exec.getExecOutput('git', ['check-ref-format', `refs/heads/${ref}`], {
+  const refCheck = await exec.getExecOutput('git', ['check-ref-format', `refs/heads/${branch}`], {
     cwd,
     ignoreReturnCode: true,
     silent: true,
   })
   if (refCheck.exitCode !== 0) {
-    throw new Error(`'${ref}' is not a valid branch name. Nothing was changed.`)
+    throw new Error(`'${branch}' is not a valid branch name. Nothing was changed.`)
   }
 
-  // The push writes HEAD to refs/heads/<ref>. From any other branch that the release branch is an
+  // The push writes HEAD to refs/heads/<branch>. From any other branch that the release branch is an
   // ancestor of, git would accept it as a fast-forward and carry that branch's commits into the
   // release, so the checkout has to be on the release branch itself.
   const head = await exec.getExecOutput('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
@@ -438,12 +438,12 @@ async function runPrepare({ core, exec, env, cwd = process.cwd() }) {
     ignoreReturnCode: true,
     silent: true,
   })
-  const branch = head.exitCode === 0 ? head.stdout.trim() : ''
-  if (branch !== ref) {
+  const headBranch = head.exitCode === 0 ? head.stdout.trim() : ''
+  if (headBranch !== branch) {
     throw new Error(
-      `The checkout is on ${branch ? `'${branch}'` : 'a detached commit'}, not on '${ref}'. Check ` +
-        'out the release branch before this action, e.g. actions/checkout with `ref`. Nothing was ' +
-        'changed.'
+      `The checkout is on ${headBranch ? `'${headBranch}'` : 'a detached commit'}, not on '${branch}'. ` +
+        'Check out the release branch before this action, e.g. actions/checkout with `ref`. Nothing ' +
+        'was changed.'
     )
   }
 
@@ -492,7 +492,7 @@ async function runPrepare({ core, exec, env, cwd = process.cwd() }) {
     )
   } else if (compareVersions(version, current) < 0) {
     throw new Error(
-      `Refusing to prepare ${version}: ${ref} already has ${current}, a later version. Check the ` +
+      `Refusing to prepare ${version}: ${branch} already has ${current}, a later version. Check the ` +
         'version and the release branch. Nothing was changed.'
     )
   }
@@ -503,7 +503,7 @@ async function runPrepare({ core, exec, env, cwd = process.cwd() }) {
 
   core.setOutput('version', version)
   core.setOutput('date', date)
-  core.setOutput('ref', ref)
+  core.setOutput('branch', branch)
 }
 
 /**
@@ -522,9 +522,9 @@ async function runPrepare({ core, exec, env, cwd = process.cwd() }) {
  * @returns {Promise<void>} Resolves once the commit is pushed, or found unnecessary.
  */
 async function runCommit({ core, exec, env, cwd = process.cwd() }) {
-  const ref = validateRef(env.INPUT_REF)
+  const branch = validateBranch(env.INPUT_BRANCH)
   const version = validateVersion(env.INPUT_VERSION)
-  const message = commitMessage(ref, version)
+  const message = commitMessage(branch, version)
   const token = env.INPUT_TOKEN || ''
 
   if (token) {
@@ -544,11 +544,11 @@ async function runCommit({ core, exec, env, cwd = process.cwd() }) {
   const files = staged.split('\n').filter(Boolean)
 
   if (files.length === 0) {
-    core.info(`Nothing changed: ${ref} already holds ${version}. Nothing was committed or pushed.`)
+    core.info(`Nothing changed: ${branch} already holds ${version}. Nothing was committed or pushed.`)
     core.setOutput('commit', '')
     core.setOutput('files', '')
     await core.summary
-      .addRaw(`Nothing to commit: \`${ref}\` already holds ${version}.`, true)
+      .addRaw(`Nothing to commit: \`${branch}\` already holds ${version}.`, true)
       .write()
 
     return
@@ -578,17 +578,17 @@ async function runCommit({ core, exec, env, cwd = process.cwd() }) {
   await runOrFail(
     exec,
     'git',
-    ['push', 'origin', `HEAD:refs/heads/${ref}`],
+    ['push', 'origin', `HEAD:refs/heads/${branch}`],
     { cwd, env: { ...env, ...pushEnv(token, env.GITHUB_SERVER_URL || 'https://github.com') } },
-    `Pushing to ${ref}`
+    `Pushing to ${branch}`
   )
 
-  core.info(`Pushed ${commit} to ${ref}.`)
+  core.info(`Pushed ${commit} to ${branch}.`)
   core.setOutput('commit', commit)
   core.setOutput('files', files.join('\n'))
   // A Markdown list rather than addList, whose HTML list would show the backticks literally.
   await core.summary
-    .addRaw(`Pushed \`${commit.slice(0, 7)}\` "${message}" to \`${ref}\`:\n\n`)
+    .addRaw(`Pushed \`${commit.slice(0, 7)}\` "${message}" to \`${branch}\`:\n\n`)
     .addRaw(files.map((file) => `- \`${file}\``).join('\n'), true)
     .write()
 }
@@ -598,7 +598,7 @@ module.exports = {
   runCommit,
   validateVersion,
   resolveDate,
-  validateRef,
+  validateBranch,
   validatePupVersion,
   readPuprc,
   hasChangeloggerConfig,
