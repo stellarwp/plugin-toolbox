@@ -14,6 +14,8 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 
+const { compareVersions } = require('../../lib/versions.js')
+
 /**
  * Three or four numeric parts. It is what the stellarwp changelog versioning accepts, minus its
  * blind spot: it reads an empty part as 0, so it would take 2.1..21. A version of this shape is
@@ -334,30 +336,6 @@ function pushEnv(token, serverUrl) {
  */
 function commitMessage(branch, version) {
   return `Prepare ${branch} (${version})`
-}
-
-/**
- * Orders two versions by their numeric parts, a missing part counting as 0, so 4.18.0.1 comes after
- * 4.18.0 and 4.10.0 after 4.9.0.
- *
- * @param {string} a A version of numeric dot-separated parts.
- * @param {string} b Another one.
- *
- * @returns {number} -1 when `a` comes first, 1 when `b` does, 0 when they are the same version.
- */
-function compareVersions(a, b) {
-  const left = a.split('.').map(Number)
-  const right = b.split('.').map(Number)
-
-  for (let index = 0; index < Math.max(left.length, right.length); index++) {
-    const difference = (left[index] ?? 0) - (right[index] ?? 0)
-
-    if (difference !== 0) {
-      return difference < 0 ? -1 : 1
-    }
-  }
-
-  return 0
 }
 
 /**
