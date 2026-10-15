@@ -399,6 +399,7 @@ describe('release-prep', () => {
       assert.deepEqual(sequence(calls), [
         'git check-ref-format refs/heads/release/M26.jigglypuff',
         'git symbolic-ref --quiet --short HEAD',
+        'curl -fsSI https://github.com/stellarwp/pup/releases/download/2.0.0/pup.phar',
         `curl -fsSL --retry 3 -o ${phar} https://github.com/stellarwp/pup/releases/download/2.0.0/pup.phar`,
         `php -d display_errors=stderr ${phar} get-version`,
         `php ${phar} replace-version 4.17.0`,
@@ -408,7 +409,12 @@ describe('release-prep', () => {
         calls.filter((call) => call.command === 'php').every((call) => call.options.cwd === cwd),
         'pup runs in the checkout'
       )
-      assert.deepEqual(outputs(), { version: '4.17.0', date: TODAY, branch: 'release/M26.jigglypuff' })
+      assert.deepEqual(outputs(), {
+        version: '4.17.0',
+        date: TODAY,
+        branch: 'release/M26.jigglypuff',
+        distribution: 'phar',
+      })
     })
 
     it('hands the changelog step a date it can write, never `today`', async (t) => {
@@ -505,7 +511,7 @@ describe('release-prep', () => {
         /Refusing to prepare 4\.17\.0: release\/M26\.jigglypuff already has 4\.18\.0.*Nothing was changed/s
       )
       assert.ok(!sequence(calls).some((call) => / replace-(version|tbd) /.test(call)), 'pup changed nothing')
-      assert.deepEqual(outputs(), {})
+      assert.deepEqual(outputs(), { distribution: 'phar' })
     })
 
     it('compares a four-part version by all four parts', async (t) => {
@@ -642,13 +648,15 @@ describe('release-prep', () => {
         /pup replace-version failed.*No version files found/s
       )
       assert.ok(!sequence(calls).some((call) => call.includes('replace-tbd')), 'replace-tbd never ran')
-      assert.deepEqual(outputs(), {})
+      assert.deepEqual(outputs(), { distribution: 'phar' })
     })
 
     it('fails when the pup download fails', async (t) => {
       const { core } = await coreWithOutputs(t)
       const { exec } = recordingExec(
-        allSucceed([{ command: 'curl', exitCode: 22, stderr: 'The requested URL returned error: 404' }])
+        allSucceed([
+          { command: 'curl', args: /fsSL/, exitCode: 22, stderr: 'The requested URL returned error: 404' },
+        ])
       )
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
@@ -698,6 +706,42 @@ describe('release-prep', () => {
       await runPrepare({ core, exec, env: prepareEnv(), cwd, fetchImpl })
 
       assert.equal(called, 0, 'a pinned version downloads straight from the release URL')
+    })
+
+    it('hands the preparation to the release action when the release has no phar', async (t) => {
+      const { core, outputs } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(
+        allSucceed([
+          { command: 'curl', args: /fsSI/, exitCode: 22, stderr: 'The requested URL returned error: 404' },
+        ])
+      )
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+      await runPrepare({ core, exec, env: prepareEnv(), cwd })
+
+      assert.deepEqual(outputs(), {
+        version: '4.17.0',
+        date: TODAY,
+        branch: 'release/M26.jigglypuff',
+        distribution: 'ts',
+      })
+      assert.ok(
+        !sequence(calls).some((call) => /fsSL|php /.test(call)),
+        'no phar is downloaded and no PHP runs without a phar asset'
+      )
+    })
+
+    it('fails loudly when the phar check itself errors', async (t) => {
+      const { core } = await coreWithOutputs(t)
+      const { exec } = recordingExec(
+        allSucceed([{ command: 'curl', args: /fsSI/, exitCode: 28, stderr: 'Connection timed out' }])
+      )
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+      await assert.rejects(
+        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        /Checking the pup 2\.0\.0 release failed.*Connection timed out/s
+      )
     })
   })
 

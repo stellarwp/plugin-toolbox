@@ -267,6 +267,43 @@ function pupDownloadUrl(version) {
 }
 
 /**
+ * Which distribution a pup release carries, decided by looking at the release itself: a `pup.phar`
+ * asset means the PHP build the action has always run, and its absence means the release expects
+ * to run through its own GitHub Action (the TypeScript line, once it publishes one).
+ *
+ * The check is a HEAD request against the asset URL, not the releases API, so a pinned
+ * `pup-version` stays free of API calls and rate limits.
+ *
+ * @param {object}   exec    The @actions/exec toolkit.
+ * @param {string}   release The resolved pup release tag.
+ *
+ * @throws {Error} When the check itself fails; the run cannot tell which path to take.
+ *
+ * @returns {Promise<'phar'|'ts'>} The distribution the release carries.
+ */
+async function resolvePupDistribution({ exec, release }) {
+  const head = await exec.getExecOutput('curl', ['-fsSI', pupDownloadUrl(release)], {
+    ignoreReturnCode: true,
+    silent: true,
+  })
+
+  if (head.exitCode === 0) {
+    return 'phar'
+  }
+
+  // curl -f answers a 404 with exit code 22 and the status in stderr.
+  if (head.exitCode === 22 && /404/.test(head.stderr)) {
+    return 'ts'
+  }
+
+  const output = [head.stdout, head.stderr].map((text) => text.trim()).filter(Boolean)
+  throw new Error(
+    `Checking the pup ${release} release failed (exit code ${head.exitCode}):\n` +
+      output.join('\n')
+  )
+}
+
+/**
  * The pup commands that prepare a version, in the order they run.
  *
  * @param {string} phar    Path to the downloaded pup.phar.
@@ -487,14 +524,51 @@ async function runPrepare({ core, exec, env, cwd = process.cwd(), fetchImpl = gl
     token: env.INPUT_TOKEN || '',
     fetchImpl,
   })
-  const phar = path.join(env.RUNNER_TEMP || os.tmpdir(), `pup-${pupRelease}.phar`)
+  const distribution = await resolvePupDistribution({ exec, release: pupRelease })
+  core.setOutput('distribution', distribution)
+
+  if (distribution === 'phar') {
+    await runPrepareWithPhar({ core, exec, cwd, env, pharRelease: pupRelease, version, branch })
+  } else {
+    // The TypeScript line: the release publishes no phar and runs through its own GitHub
+    // Action instead. The action manifest carries the calls, conditioned on the distribution
+    // output this step sets; here only the inputs are validated. The branch-version check
+    // below is part of the phar path — the TS contract does not define it yet.
+    core.info(
+      `pup ${pupRelease} publishes no .phar asset; the preparation continues with the release's ` +
+        'own GitHub Action (stellarwp/pup@v3). The branch-version check only runs on the phar path.'
+    )
+  }
+
+  core.setOutput('version', version)
+  core.setOutput('date', date)
+  core.setOutput('branch', branch)
+}
+
+/**
+ * Runs the preparation with the phar a pup release publishes: downloads it, checks the version
+ * the branch already has, then bumps the version and replaces the TBDs.
+ *
+ * @param {object}   options
+ * @param {object}   options.core        The @actions/core toolkit.
+ * @param {object}   options.exec        The @actions/exec toolkit.
+ * @param {string}   options.cwd         The checkout.
+ * @param {object}   options.env         The step environment, for RUNNER_TEMP.
+ * @param {string}   options.pharRelease The resolved pup release tag.
+ * @param {string}   options.version     The version to prepare, validated.
+ * @param {string}   options.branch      The release branch, validated.
+ *
+ * @returns {Promise<void>} Resolves once pup has run.
+ */
+async function runPrepareWithPhar({ core, exec, cwd, env, pharRelease, version, branch }) {
+  const phar = path.join(env.RUNNER_TEMP || os.tmpdir(), `pup-${pharRelease}.phar`)
 
   await runOrFail(
     exec,
     'curl',
-    ['-fsSL', '--retry', '3', '-o', phar, pupDownloadUrl(pupRelease)],
+    ['-fsSL', '--retry', '3', '-o', phar, pupDownloadUrl(pharRelease)],
     {},
-    `Downloading pup ${pupRelease}`
+    `Downloading pup ${pharRelease}`
   )
 
   // A version lower than the one the branch already has would bump it backwards: a wrong version, or
@@ -524,10 +598,6 @@ async function runPrepare({ core, exec, env, cwd = process.cwd(), fetchImpl = gl
   for (const { command, args } of pupCommands(phar, version)) {
     await runOrFail(exec, command, args, { cwd }, `pup ${args[1]}`)
   }
-
-  core.setOutput('version', version)
-  core.setOutput('date', date)
-  core.setOutput('branch', branch)
 }
 
 /**
@@ -625,6 +695,7 @@ module.exports = {
   validateBranch,
   validatePupVersion,
   resolvePupRelease,
+  resolvePupDistribution,
   readPuprc,
   hasChangeloggerConfig,
   pupDownloadUrl,

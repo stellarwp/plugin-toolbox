@@ -139,8 +139,26 @@ A pinned release downloads straight from its release page. `latest` reads the ne
 through the GitHub API, authenticated with `token` so the runner's shared unauthenticated
 quota is not spent.
 
-The release's `pup.phar` asset is downloaded into the runner's temp directory and runs on the
-runner's PHP, so it never ends up in the commit.
+Which kind of pup the release carries is decided from the release itself, not from a version
+comparison: the action sends a HEAD request to the release's `pup.phar` asset, and a release
+that answers 404 is the TypeScript line, which runs through its own GitHub Action. Releases up
+to and including 2.0.0 publish a `pup.phar` and run exactly as they always have: the phar
+downloads into the runner's temp directory and runs on the runner's PHP, so it never ends up
+in the commit. While every release carries a phar, the other path never runs; the day one does
+not, the action calls `stellarwp/pup@v3` — the same way the changelog step calls the
+changelogger action — and callers change nothing.
+
+The manifest spells that call out now, as the contract the pup action is expected to ship:
+
+```yaml
+- uses: stellarwp/pup@v3
+  with:
+    command: replace-version --version=4.17.0
+```
+
+`uses:` takes a static ref, so the floating major tag is the moving pin. Until a phar-less
+release exists the branch-version check — the one that refuses to prepare a version lower than
+the branch already has — runs on the phar path only; the TS contract does not define it yet.
 
 ## Running it again
 

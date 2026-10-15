@@ -82,6 +82,23 @@ runs:
           const { runPrepare } = require(`${process.env.ACTION_PATH}/release-prep.js`)
           await runPrepare({ core, exec, env: process.env })
 
+    # The TypeScript line of pup publishes no .phar; its release runs through its own GitHub
+    # Action, called here the way the changelog step calls the changelogger. These steps run
+    # only when the prepare step resolved a release without a phar asset, so they stay inert
+    # until such a release exists — and spell out the interface the pup action is expected to
+    # ship. uses: takes a static ref, so the floating major tag is the moving pin.
+    - name: Bump the version (pup)
+      if: ${{ steps.prepare.outputs.distribution == 'ts' }}
+      uses: stellarwp/pup@v3
+      with:
+        command: replace-version --version=${{ steps.prepare.outputs.version }}
+
+    - name: Replace the TBDs (pup)
+      if: ${{ steps.prepare.outputs.distribution == 'ts' }}
+      uses: stellarwp/pup@v3
+      with:
+        command: replace-tbd --version=${{ steps.prepare.outputs.version }}
+
     # The resolved date, never inputs.date: this action writes the date it is given as it is, so
     # `today` would land in the changelog as the word and an empty value as an empty date.
     - name: Write the changelog
