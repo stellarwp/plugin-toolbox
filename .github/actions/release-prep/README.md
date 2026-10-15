@@ -77,7 +77,7 @@ The action checks the first before running anything, because pup does not: a mis
 is not JSON, and one with no `paths.versions` all make pup change nothing and exit 0, and the branch
 would be pushed with the old version. Each of them fails the job here with the branch untouched.
 
-Two gaps are warnings rather than failures, since the job can still do something useful:
+Two gaps only produce a warning; the run continues and does its work:
 
 - No `checks.tbd.dirs`: pup falls back to its default and replaces TBDs under `src/` only.
 - No `changelogger` section: the changelogger falls back to its defaults and writes a keepachangelog
