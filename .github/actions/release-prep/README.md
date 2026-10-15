@@ -37,8 +37,8 @@ Then everything the working tree changed is committed as `Prepare <ref> (<versio
 `github-actions[bot]` and pushed to `ref`. Everything means everything, so run the action on a clean
 checkout, and put any step that writes tracked files after it.
 
-pup is downloaded from its GitHub release, pinned by `pup-version`, into the runner's temp directory,
-so it never ends up in the commit. It runs on the runner's PHP.
+pup is downloaded from its GitHub release into the runner's temp directory, so it never ends up in
+the commit. It runs on the runner's PHP. See [Which pup runs](#which-pup-runs).
 
 ## What the repository needs
 
@@ -121,7 +121,7 @@ that is not a valid branch name, and a checkout that is not on `branch`.
 | `version` | yes | | The version to prepare, e.g. `4.17.0`. See [Versions it refuses](#versions-it-refuses) |
 | `date` | no | today, in UTC | The changelog date as `YYYY-MM-DD`. Empty or `today` writes today |
 | `token` | no | `github.token` | The token the commit is pushed with. See [Pushing](#pushing) |
-| `pup-version` | no | `2.0.0` | The pup release to run. It needs `replace-version` and `replace-tbd`, which came with 2.0.0 |
+| `pup-version` | no | `latest` | The pup release to run: a number such as `2.0.0`, or `latest` for the newest. See [Which pup runs](#which-pup-runs) |
 
 ## Outputs
 
@@ -131,6 +131,16 @@ that is not a valid branch name, and a checkout that is not on `branch`.
 | `date` | `2026-10-08` | The date written in the changelog |
 | `commit` | `3f2a…` | The commit pushed to the branch. Empty when nothing changed |
 | `files` | `my-plugin.php` | The files the commit changed, one per line. Empty when nothing changed |
+
+## Which pup runs
+
+`pup-version` pins a pup release (`2.0.0`) or tracks the newest one (`latest`, the default).
+A pinned release downloads straight from its release page. `latest` reads the newest release
+through the GitHub API, authenticated with `token` so the runner's shared unauthenticated
+quota is not spent.
+
+The release's `pup.phar` asset is downloaded into the runner's temp directory and runs on the
+runner's PHP, so it never ends up in the commit.
 
 ## Running it again
 

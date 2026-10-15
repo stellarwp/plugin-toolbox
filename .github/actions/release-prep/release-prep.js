@@ -141,11 +141,51 @@ function validateBranch(branch) {
 function validatePupVersion(version) {
   const trimmed = String(version ?? '').trim()
 
-  if (!PUP_VERSION_PATTERN.test(trimmed)) {
-    throw new Error(`pup-version '${trimmed}' is not a pup release number, such as 2.0.0.`)
+  if (trimmed.toLowerCase() !== 'latest' && !PUP_VERSION_PATTERN.test(trimmed)) {
+    throw new Error(`pup-version '${trimmed}' is not a pup release number, such as 2.0.0, or 'latest'.`)
   }
 
   return trimmed
+}
+
+/**
+ * Resolves the `pup-version` input to a concrete pup release.
+ *
+ * A pinned release number is used as it is: the download from the release page fails on its
+ * own when the release does not exist, so there is no API call for the common case. `latest`
+ * asks the GitHub API for the newest release, authenticated with the action token when the
+ * caller passes one, so the runner's shared unauthenticated quota is not spent.
+ *
+ * @param {object}          options
+ * @param {string}          options.version   The validated `pup-version` input.
+ * @param {string}          options.token     The action token, possibly empty.
+ * @param {Function}        options.fetchImpl What `fetch` to use; a test passes a stand-in.
+ *
+ * @throws {Error} When the latest release cannot be read.
+ *
+ * @returns {Promise<string>} The release tag to download from.
+ */
+async function resolvePupRelease({ version, token, fetchImpl }) {
+  if (version.toLowerCase() !== 'latest') {
+    return version
+  }
+
+  const headers = {}
+  if (token) {
+    headers.authorization = `Bearer ${token}`
+  }
+
+  const response = await fetchImpl('https://api.github.com/repos/stellarwp/pup/releases/latest', {
+    headers,
+  })
+
+  if (!response.ok) {
+    throw new Error(
+      `Reading the latest pup release failed (HTTP ${response.status}). Pass a pinned pup-version and run this step again. Nothing was changed.`
+    )
+  }
+
+  return (await response.json()).tag_name
 }
 
 /**
@@ -406,16 +446,17 @@ async function runOrFail(exec, command, args, options, what) {
  * not on the release branch, a repository without a usable .puprc, or a version lower than the one
  * the branch already has, fails with the branch untouched.
  *
- * @param {object} core The @actions/core toolkit, for the log and the outputs.
- * @param {object} exec The @actions/exec toolkit.
- * @param {object} env  The environment the action manifest put its inputs in.
- * @param {string} cwd  The checkout, the working directory by default.
+ * @param {object}   core      The @actions/core toolkit, for the log and the outputs.
+ * @param {object}   exec      The @actions/exec toolkit.
+ * @param {object}   env       The environment the action manifest put its inputs in.
+ * @param {string}   cwd       The checkout, the working directory by default.
+ * @param {Function} fetchImpl What `fetch` to use; a test passes a stand-in.
  *
  * @throws {Error} When an input is wrong, .puprc is unusable, or the download or pup fails.
  *
  * @returns {Promise<void>} Resolves once pup has run and the outputs are set.
  */
-async function runPrepare({ core, exec, env, cwd = process.cwd() }) {
+async function runPrepare({ core, exec, env, cwd = process.cwd(), fetchImpl = globalThis.fetch }) {
   const version = validateVersion(env.INPUT_VERSION)
   const date = resolveDate(env.INPUT_DATE)
   const branch = validateBranch(env.INPUT_BRANCH)
@@ -463,14 +504,19 @@ async function runPrepare({ core, exec, env, cwd = process.cwd() }) {
     )
   }
 
-  const phar = path.join(env.RUNNER_TEMP || os.tmpdir(), `pup-${pupVersion}.phar`)
+  const pupRelease = await resolvePupRelease({
+    version: pupVersion,
+    token: env.INPUT_TOKEN || '',
+    fetchImpl,
+  })
+  const phar = path.join(env.RUNNER_TEMP || os.tmpdir(), `pup-${pupRelease}.phar`)
 
   await runOrFail(
     exec,
     'curl',
-    ['-fsSL', '--retry', '3', '-o', phar, pupDownloadUrl(pupVersion)],
+    ['-fsSL', '--retry', '3', '-o', phar, pupDownloadUrl(pupRelease)],
     {},
-    `Downloading pup ${pupVersion}`
+    `Downloading pup ${pupRelease}`
   )
 
   // A version lower than the one the branch already has would bump it backwards: a wrong version, or
@@ -600,6 +646,7 @@ module.exports = {
   resolveDate,
   validateBranch,
   validatePupVersion,
+  resolvePupRelease,
   readPuprc,
   hasChangeloggerConfig,
   pupDownloadUrl,

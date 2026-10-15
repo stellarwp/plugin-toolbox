@@ -36,9 +36,12 @@ inputs:
     required: false
     default: ${{ github.token }}
   pup-version:
-    description: 'The pup release that bumps the version and replaces the TBDs.'
+    description: >-
+      The pup release that bumps the version and replaces the TBDs: a release number, such as
+      2.0.0, or 'latest' for the newest release. Versions up to 2.0.0 ship as a .phar; once pup
+      publishes a release without one, the action runs that release's own GitHub Action instead.
     required: false
-    default: '2.0.0'
+    default: 'latest'
 
 outputs:
   version:
@@ -71,6 +74,9 @@ runs:
         INPUT_VERSION: ${{ inputs.version }}
         INPUT_DATE: ${{ inputs.date }}
         INPUT_PUP_VERSION: ${{ inputs.pup-version }}
+        # Authenticates the 'latest' lookup against the GitHub API; a pinned pup-version
+        # never calls the API.
+        INPUT_TOKEN: ${{ inputs.token }}
       with:
         script: |
           const { runPrepare } = require(`${process.env.ACTION_PATH}/release-prep.js`)

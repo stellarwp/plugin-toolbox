@@ -270,8 +270,12 @@ describe('release-prep', () => {
       assert.equal(validatePupVersion('2.0.0'), '2.0.0')
     })
 
+    it('accepts latest', () => {
+      assert.equal(validatePupVersion('latest'), 'latest')
+    })
+
     it('refuses anything else', () => {
-      for (const version of ['', 'latest', '2.0.0/../../x', '2.0']) {
+      for (const version of ['', '2.0.0/../../x', '2.0']) {
         assert.throws(() => validatePupVersion(version), /pup-version/)
       }
     })
@@ -432,7 +436,6 @@ describe('release-prep', () => {
         [{ INPUT_VERSION: '2.1..21' }, /not a version this action can prepare/],
         [{ INPUT_DATE: 'ontem' }, /is not a date/],
         [{ INPUT_BRANCH: '' }, /No branch was given/],
-        [{ INPUT_PUP_VERSION: 'latest' }, /pup-version/],
       ]
 
       for (const [overrides, message] of cases) {
@@ -653,6 +656,48 @@ describe('release-prep', () => {
         runPrepare({ core, exec, env: prepareEnv(), cwd }),
         /Downloading pup 2\.0\.0 failed.*404/s
       )
+    })
+
+    it('resolves latest to the newest pup release and downloads that phar', async (t) => {
+      const { core } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed())
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+      const fetched = []
+      const fetchImpl = async (url, options) => {
+        fetched.push([url, options])
+        return { ok: true, json: async () => ({ tag_name: '2.0.0' }) }
+      }
+
+      await runPrepare({
+        core,
+        exec,
+        env: prepareEnv({ INPUT_PUP_VERSION: 'latest', INPUT_TOKEN: 'ghp_example' }),
+        cwd,
+        fetchImpl,
+      })
+
+      assert.deepEqual(fetched, [
+        ['https://api.github.com/repos/stellarwp/pup/releases/latest', { headers: { authorization: 'Bearer ghp_example' } }],
+      ])
+      assert.ok(
+        sequence(calls).some((call) => call.includes('pup/releases/download/2.0.0/pup.phar')),
+        'downloads the phar the resolved release points at'
+      )
+    })
+
+    it('does not call the GitHub API for a pinned pup version', async (t) => {
+      const { core } = await coreWithOutputs(t)
+      const { exec } = recordingExec(allSucceed())
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+      let called = 0
+      const fetchImpl = async () => {
+        called += 1
+        return { ok: true, json: async () => ({}) }
+      }
+
+      await runPrepare({ core, exec, env: prepareEnv(), cwd, fetchImpl })
+
+      assert.equal(called, 0, 'a pinned version downloads straight from the release URL')
     })
   })
 
