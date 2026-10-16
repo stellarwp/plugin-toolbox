@@ -7,17 +7,17 @@ name: Release Prep
 # A file to copy into .github/workflows/ of a plugin repository, not a workflow to call. The
 # repository needs a .puprc and a changelogger config first; see the release-prep action's README.
 #
-# The inputs are the interface a release tool dispatches: `ref` and `version`, and an optional
-# `date` for runs started by hand. Keep `date` optional: a tool that sends only `ref` and `version`
-# refuses a workflow that requires more.
+# The inputs are the interface a release tool dispatches: `branch` and `version`, and an
+# optional `date` for runs started by hand. Keep `date` optional: a tool that sends only `branch`
+# and `version` refuses a workflow that requires more.
 #
 # Run it locally: you cannot, it pushes to a branch. Start it by hand with
-# `gh workflow run release-prep.yml -f ref=release/M26.jigglypuff -f version=4.17.0`.
+# `gh workflow run release-prep.yml -f branch=release/M26.jigglypuff -f version=4.17.0`.
 
 on:
   workflow_dispatch:
     inputs:
-      ref:
+      branch:
         description: 'Release branch to prepare and push to, e.g. release/M26.jigglypuff'
         required: true
         type: string
@@ -34,7 +34,7 @@ on:
 # Two preparations of the same branch would both commit on top of the same checkout, and the second
 # push would be refused. One group per branch makes the second wait for the first.
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.ref }}
+  group: ${{ github.workflow }}-${{ inputs.branch }}
 
 permissions:
   contents: read
@@ -48,7 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.branch }}
           # The action pushes with the token it is given, so the checkout keeps no credentials in
           # .git/config for a later step to find.
           persist-credentials: false
@@ -58,6 +58,6 @@ jobs:
 
       - uses: stellarwp/plugin-toolbox/.github/actions/release-prep@v1
         with:
-          branch: ${{ inputs.ref }}
+          branch: ${{ inputs.branch }}
           version: ${{ inputs.version }}
           date: ${{ inputs.date }}

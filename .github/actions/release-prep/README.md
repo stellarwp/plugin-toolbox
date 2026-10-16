@@ -6,12 +6,12 @@ changelog, then commits and pushes the result to the branch:
 ```yaml
 - uses: actions/checkout@v6
   with:
-    ref: ${{ inputs.ref }}
+    ref: ${{ inputs.branch }}
     persist-credentials: false
 
 - uses: stellarwp/plugin-toolbox/.github/actions/release-prep@v1
   with:
-    branch: ${{ inputs.ref }}
+    branch: ${{ inputs.branch }}
     version: ${{ inputs.version }}
 ```
 
