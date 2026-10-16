@@ -187,7 +187,19 @@ async function resolvePupRelease({ version, token, fetchImpl }) {
     )
   }
 
-  return (await response.json()).tag_name
+  // The tag goes into a download URL and a temp file path, and a missing one would surface
+  // as a 404 on …/download/undefined/pup.phar — which the distribution check reads as "no
+  // phar, this is the TypeScript line". A broken API response must fail here, not misroute
+  // the run, so the tag is validated before it is used.
+  const tag = (await response.json()).tag_name
+  if (typeof tag !== 'string' || !PUP_VERSION_PATTERN.test(tag)) {
+    throw new Error(
+      'The latest pup release has no usable tag. Pass a pinned pup-version and run this step ' +
+        'again. Nothing was changed.'
+    )
+  }
+
+  return tag
 }
 
 /**

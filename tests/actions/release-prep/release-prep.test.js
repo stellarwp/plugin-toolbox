@@ -693,6 +693,22 @@ describe('release-prep', () => {
       )
     })
 
+    it('fails loudly when the latest release reports no usable tag', async (t) => {
+      const { core, outputs } = await coreWithOutputs(t)
+      const { exec } = recordingExec(allSucceed())
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+      const fetchImpl = async () => ({
+        ok: true,
+        json: async () => ({ tag_name: undefined }),
+      })
+
+      await assert.rejects(
+        runPrepare({ core, exec, env: prepareEnv({ INPUT_PUP_VERSION: 'latest' }), cwd, fetchImpl }),
+        /The latest pup release has no usable tag/
+      )
+      assert.deepEqual(outputs(), {}, 'no distribution is decided from a broken response')
+    })
+
     it('does not call the GitHub API for a pinned pup version', async (t) => {
       const { core } = await coreWithOutputs(t)
       const { exec } = recordingExec(allSucceed())
