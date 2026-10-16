@@ -724,7 +724,7 @@ describe('release-prep', () => {
       assert.equal(called, 0, 'a pinned version downloads straight from the release URL')
     })
 
-    it('hands the preparation to the release action when the release has no phar', async (t) => {
+    it('fails loudly when the release has no phar, pointing at the pin', async (t) => {
       const { core, outputs } = await coreWithOutputs(t)
       const { exec, calls } = recordingExec(
         allSucceed([
@@ -733,14 +733,11 @@ describe('release-prep', () => {
       )
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
-      await runPrepare({ core, exec, env: prepareEnv(), cwd })
-
-      assert.deepEqual(outputs(), {
-        version: '4.17.0',
-        date: TODAY,
-        branch: 'release/M26.jigglypuff',
-        distribution: 'ts',
-      })
+      await assert.rejects(
+        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        /pup 2\.0\.0 publishes no \.phar asset.*Pin pup-version to a release that ships a \.phar/s
+      )
+      assert.deepEqual(outputs(), { distribution: 'ts' }, 'the resolved distribution is reported on the failed run')
       assert.ok(
         !sequence(calls).some((call) => /fsSL|php /.test(call)),
         'no phar is downloaded and no PHP runs without a phar asset'

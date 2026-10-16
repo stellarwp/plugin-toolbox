@@ -542,13 +542,16 @@ async function runPrepare({ core, exec, env, cwd = process.cwd(), fetchImpl = gl
   if (distribution === 'phar') {
     await runPrepareWithPhar({ core, exec, cwd, env, pharRelease: pupRelease, version, branch })
   } else {
-    // The TypeScript line: the release publishes no phar and runs through its own GitHub
-    // Action instead. The action manifest carries the calls, conditioned on the distribution
-    // output this step sets; here only the inputs are validated. The branch-version check
-    // below is part of the phar path — the TS contract does not define it yet.
-    core.info(
-      `pup ${pupRelease} publishes no .phar asset; the preparation continues with the release's ` +
-        'own GitHub Action (stellarwp/pup@v3). The branch-version check only runs on the phar path.'
+    // The TypeScript line publishes no phar and would run through its own GitHub Action — but a
+    // composite action's `uses:` references resolve when the JOB is set up, not when the step
+    // runs, so the manifest cannot carry those calls behind a condition: they would break every
+    // run until the pup action exists. Until it does, a phar-less release fails here, loudly,
+    // with the way out. The branch-version check below is part of the phar path — the TS
+    // contract does not define it yet.
+    throw new Error(
+      `pup ${pupRelease} publishes no .phar asset, and the TypeScript distribution is not ` +
+        'callable from this action yet. Pin pup-version to a release that ships a .phar, such ' +
+        'as 2.0.0. Nothing was changed.'
     )
   }
 

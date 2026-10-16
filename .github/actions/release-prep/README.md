@@ -139,11 +139,12 @@ spent.
 The release itself decides which kind of pup runs, not a version comparison: the action sends a
 HEAD request to the release's `pup.phar` asset. Releases up to and including 2.0.0 publish one; the
 phar downloads into the runner's temp directory and runs on the runner's PHP. A release that
-answers 404 is the TypeScript line, which runs through its own GitHub Action — the same way the
-changelog step calls the changelogger action. While every release carries a phar, that path never
-runs, and callers change nothing when it starts to.
-
-The manifest carries the call already, as the contract the pup action is expected to ship:
+answers 404 is the TypeScript line, which is meant to run through its own GitHub Action — and the
+prepare step fails there, saying so and naming the pin to use instead. The manifest cannot carry
+that call behind a condition: a composite action's `uses:` references resolve when the job is set
+up, not when the step runs, so a conditional reference to an action that does not exist yet would
+break every run. When the TypeScript line publishes its action, the call is wired in as the
+changelogger's is — one `uses:` step per pup command, `command:` as the input:
 
 ```yaml
 - uses: stellarwp/pup@v3
