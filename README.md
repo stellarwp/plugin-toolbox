@@ -159,6 +159,7 @@ Each phase ends with something people can actually use.
 - [ ] Port `setup-slic`, `prepare-matrix`, `setup-bun` from LearnDash.
 - [ ] Port `check-php-changes`, `smart-checkout`, `process-changelog`, `add-changelog`, `generate-pot` from TEC.
 - [ ] Add `setup-node` for the npm crowd.
+- [x] Add `release-prep`: version bump, TBD replacement and changelog through pup and the changelogger action, committed and pushed to the release branch. A caller to copy is in `templates/workflows/release-prep.yml`.
 - [ ] Turn every hard-coded repo name, slug, or branch pattern into an input.
 - [ ] Self-checks: actionlint everything, unit test anything with real logic.
 - [ ] Tag `v1.0.0`.
@@ -170,7 +171,7 @@ Each phase ends with something people can actually use.
 - [ ] `tests.yml`: slic suites via `prepare-matrix`, with LD's cheap/expensive split. Review TEC's paused [#51](https://github.com/the-events-calendar/actions/pull/51) first so that work isn't lost.
 - [ ] `changelog.yml`: the changelogger check.
 - [ ] `zip.yml`: reconcile TEC's and LD's versions.
-- [ ] `release-prep.yml`: version bump, changelog, tested-up-to.
+- [ ] `release-prep.yml`: a `workflow_call` wrapper for the `release-prep` action, plus the tested-up-to bump it does not do yet.
 - [ ] `release-tags.yml`: a `workflow_call` wrapper for the floating tag actions, so a repo gets a `uses:` instead of copying the workflow. The actions have to be referenced by full path, not `./`, because a relative path in a called workflow resolves against the caller.
 - [ ] Document each in `docs/continuous-integration.md` with its local command.
 

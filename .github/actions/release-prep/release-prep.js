@@ -1,0 +1,724 @@
+'use strict'
+
+/**
+ * Prepares a release branch: bumps the version, replaces the TBD placeholders, and commits and
+ * pushes what the changelog step wrote alongside them.
+ *
+ * The action runs in two github-script steps with the changelogger action between them, so there
+ * are two entry points. runPrepare validates everything and runs pup; runCommit commits and pushes.
+ * The functions they are built from are pure, apart from the reads of .puprc and package.json and
+ * the commands run through `exec`, so a test can pass a stand-in and assert the calls.
+ */
+
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+
+const { compareVersions } = require('../../lib/versions.js')
+
+/**
+ * Three or four numeric parts. It is what the stellarwp changelog versioning accepts, minus its
+ * blind spot: it reads an empty part as 0, so it would take 2.1..21. A version of this shape is
+ * also always a valid tag name.
+ */
+const VERSION_PATTERN = /^\d+\.\d+\.\d+(\.\d+)?$/
+
+/** A pup release number, which goes into the download URL. */
+const PUP_VERSION_PATTERN = /^\d+\.\d+\.\d+$/
+
+/** A calendar date as the changelog writing strategies expect it. */
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+
+/** The identity of the bot GitHub shows for commits made with the default token. */
+const COMMIT_AUTHOR = {
+  name: 'github-actions[bot]',
+  email: '41898282+github-actions[bot]@users.noreply.github.com',
+}
+
+/**
+ * Checks the version to prepare.
+ *
+ * @param {string} version The `version` input.
+ *
+ * @throws {Error} When it is empty, or not three or four numeric parts.
+ *
+ * @returns {string} The version, without surrounding whitespace.
+ */
+function validateVersion(version) {
+  const trimmed = String(version ?? '').trim()
+
+  if (trimmed === '') {
+    throw new Error(
+      'No version was given. The run was dispatched without one, which is what a release with no ' +
+        "version set sends: set the release's version and run this step again. Nothing was changed."
+    )
+  }
+
+  if (!VERSION_PATTERN.test(trimmed)) {
+    throw new Error(
+      `'${trimmed}' is not a version this action can prepare. It takes three or four numeric ` +
+        'parts, such as 4.17.0 or 4.17.0.1. A pre-release such as 4.17.0-beta.1 is not supported, ' +
+        'because the stellarwp changelog versioning rejects it. Nothing was changed.'
+    )
+  }
+
+  return trimmed
+}
+
+/**
+ * Works out the date to write in the changelog.
+ *
+ * The changelogger action writes the date exactly as it is given: `today` would land in the
+ * changelog as the word, and an empty value as an empty date. So both are resolved here.
+ *
+ * @param {string} date The `date` input: empty, `today`, or YYYY-MM-DD.
+ * @param {Date}   now  The current time, for tests.
+ *
+ * @throws {Error} When it is anything else, or not a real calendar date.
+ *
+ * @returns {string} The date as YYYY-MM-DD, today's in UTC for an empty value or `today`.
+ */
+function resolveDate(date, now = new Date()) {
+  const trimmed = String(date ?? '').trim()
+
+  if (trimmed === '' || trimmed.toLowerCase() === 'today') {
+    return now.toISOString().slice(0, 10)
+  }
+
+  // A real date round-trips through Date unchanged; 2026-02-30 comes back as March 2nd. One out of
+  // range, such as 2026-13-45, is no date at all and would make toISOString throw, so Date.parse
+  // rules it out first.
+  const isRealDate =
+    DATE_PATTERN.test(trimmed) &&
+    !Number.isNaN(Date.parse(trimmed)) &&
+    new Date(`${trimmed}T00:00:00Z`).toISOString().slice(0, 10) === trimmed
+
+  if (!isRealDate) {
+    throw new Error(
+      `'${trimmed}' is not a date. Pass YYYY-MM-DD, or leave it empty or 'today' for today's date ` +
+        'in UTC. Nothing was changed.'
+    )
+  }
+
+  return trimmed
+}
+
+/**
+ * Checks the shape of the branch to push to. Whether git accepts the name is checked by git, in
+ * runPrepare.
+ *
+ * @param {string} branch The `branch` input.
+ *
+ * @throws {Error} When it is empty or a full ref.
+ *
+ * @returns {string} The branch name, without surrounding whitespace.
+ */
+function validateBranch(branch) {
+  const trimmed = String(branch ?? '').trim()
+
+  if (trimmed === '') {
+    throw new Error('No branch was given: pass the release branch to prepare, e.g. release/M26.jigglypuff.')
+  }
+
+  // The push writes refs/heads/<ref>, so a full ref would create a branch named refs/heads/….
+  if (trimmed.startsWith('refs/')) {
+    throw new Error(
+      `Refusing to prepare '${trimmed}': pass the branch name, e.g. ` +
+        `'${trimmed.replace(/^refs\/heads\//, '')}'.`
+    )
+  }
+
+  return trimmed
+}
+
+/**
+ * Checks the pup release to download.
+ *
+ * @param {string} version The `pup-version` input.
+ *
+ * @throws {Error} When it is not a release number.
+ *
+ * @returns {string} The version.
+ */
+function validatePupVersion(version) {
+  const trimmed = String(version ?? '').trim()
+
+  if (trimmed.toLowerCase() !== 'latest' && !PUP_VERSION_PATTERN.test(trimmed)) {
+    throw new Error(`pup-version '${trimmed}' is not a pup release number, such as 2.0.0, or 'latest'.`)
+  }
+
+  return trimmed
+}
+
+/**
+ * Resolves the `pup-version` input to a concrete pup release.
+ *
+ * A pinned release number is used as it is: the download from the release page fails on its
+ * own when the release does not exist, so there is no API call for the common case. `latest`
+ * asks the GitHub API for the newest release, authenticated with the action token when the
+ * caller passes one, so the runner's shared unauthenticated quota is not spent.
+ *
+ * @param {object}          options
+ * @param {string}          options.version   The validated `pup-version` input.
+ * @param {string}          options.token     The action token, possibly empty.
+ * @param {Function}        options.fetchImpl What `fetch` to use; a test passes a stand-in.
+ *
+ * @throws {Error} When the latest release cannot be read.
+ *
+ * @returns {Promise<string>} The release tag to download from.
+ */
+async function resolvePupRelease({ version, token, fetchImpl }) {
+  if (version.toLowerCase() !== 'latest') {
+    return version
+  }
+
+  const headers = {}
+  if (token) {
+    headers.authorization = `Bearer ${token}`
+  }
+
+  const response = await fetchImpl('https://api.github.com/repos/stellarwp/pup/releases/latest', {
+    headers,
+  })
+
+  if (!response.ok) {
+    throw new Error(
+      `Reading the latest pup release failed (HTTP ${response.status}). Pass a pinned pup-version and run this step again. Nothing was changed.`
+    )
+  }
+
+  // The tag goes into a download URL and a temp file path, and a missing one would surface
+  // as a 404 on …/download/undefined/pup.phar — which the distribution check reads as "no
+  // phar, this is the TypeScript line". A broken API response must fail here, not misroute
+  // the run, so the tag is validated before it is used.
+  const tag = (await response.json()).tag_name
+  if (typeof tag !== 'string' || !PUP_VERSION_PATTERN.test(tag)) {
+    throw new Error(
+      'The latest pup release has no usable tag. Pass a pinned pup-version and run this step ' +
+        'again. Nothing was changed.'
+    )
+  }
+
+  return tag
+}
+
+/**
+ * Reads what the action needs from the repository's .puprc.
+ *
+ * pup itself does not fail on a missing or broken .puprc: it reads either as empty, bumps nothing
+ * and exits 0. So the file is checked here, before pup runs, and a release branch is never pushed
+ * with the version left as it was.
+ *
+ * @param {string|null} text The contents of .puprc, or null when there is none.
+ *
+ * @throws {Error} When there is no .puprc, it is not JSON, or it declares no version files.
+ *
+ * @returns {{tbdDirs: string[]|null}} The directories the TBD check declares, or null when it
+ *          declares none and pup falls back to its default.
+ */
+function readPuprc(text) {
+  if (text === null) {
+    throw new Error(
+      'No .puprc in the repository. The version files to bump come from its paths.versions, so ' +
+        "the action needs one; see the action's README. Nothing was changed."
+    )
+  }
+
+  let config
+  try {
+    config = JSON.parse(text)
+  } catch (error) {
+    throw new Error(
+      `.puprc is not valid JSON (${error.message}). pup would read it as empty and bump nothing. ` +
+        'Nothing was changed.'
+    )
+  }
+
+  const versions = config?.paths?.versions
+  if (!Array.isArray(versions) || versions.length === 0) {
+    throw new Error(
+      '.puprc has no paths.versions, so pup has no version to bump. List each file and the regex ' +
+        "that finds its version; see the action's README. Nothing was changed."
+    )
+  }
+
+  const dirs = config?.checks?.tbd?.dirs
+
+  return { tbdDirs: Array.isArray(dirs) ? dirs : null }
+}
+
+/**
+ * Whether package.json configures the changelogger. Without that section the changelogger falls
+ * back to its defaults, which write a keepachangelog `changelog.md` with semver versioning.
+ *
+ * @param {string|null} text The contents of package.json, or null when there is none.
+ *
+ * @returns {boolean} True when it has a `changelogger` section.
+ */
+function hasChangeloggerConfig(text) {
+  if (text === null) {
+    return false
+  }
+
+  try {
+    return Boolean(JSON.parse(text)?.changelogger)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Where a pup release's phar is published.
+ *
+ * @param {string} version A pup release number, already validated.
+ *
+ * @returns {string} The download URL.
+ */
+function pupDownloadUrl(version) {
+  return `https://github.com/stellarwp/pup/releases/download/${version}/pup.phar`
+}
+
+/**
+ * Which distribution a pup release carries, decided by looking at the release itself: a `pup.phar`
+ * asset means the PHP build the action has always run, and its absence means the release expects
+ * to run through its own GitHub Action (the TypeScript line, once it publishes one).
+ *
+ * The check is a HEAD request against the asset URL, not the releases API, so a pinned
+ * `pup-version` stays free of API calls and rate limits.
+ *
+ * @param {object}   exec    The @actions/exec toolkit.
+ * @param {string}   release The resolved pup release tag.
+ *
+ * @throws {Error} When the check itself fails; the run cannot tell which path to take.
+ *
+ * @returns {Promise<'phar'|'ts'>} The distribution the release carries.
+ */
+async function resolvePupDistribution({ exec, release }) {
+  const head = await exec.getExecOutput('curl', ['-fsSI', pupDownloadUrl(release)], {
+    ignoreReturnCode: true,
+    silent: true,
+  })
+
+  if (head.exitCode === 0) {
+    return 'phar'
+  }
+
+  // curl -f answers a 404 with exit code 22 and the status in stderr.
+  if (head.exitCode === 22 && /404/.test(head.stderr)) {
+    return 'ts'
+  }
+
+  const output = [head.stdout, head.stderr].map((text) => text.trim()).filter(Boolean)
+  throw new Error(
+    `Checking the pup ${release} release failed (exit code ${head.exitCode}):\n` +
+      output.join('\n')
+  )
+}
+
+/**
+ * The pup commands that prepare a version, in the order they run.
+ *
+ * @param {string} phar    Path to the downloaded pup.phar.
+ * @param {string} version The version to prepare, already validated.
+ *
+ * @returns {{command: string, args: string[]}[]} The version bump, then the TBD replacement.
+ */
+function pupCommands(phar, version) {
+  return [
+    { command: 'php', args: [phar, 'replace-version', version] },
+    { command: 'php', args: [phar, 'replace-tbd', version] },
+  ]
+}
+
+/**
+ * The basic credential git sends for a token, as actions/checkout builds it.
+ *
+ * @param {string} token The token.
+ *
+ * @returns {string} base64 of `x-access-token:<token>`.
+ */
+function basicCredential(token) {
+  return Buffer.from(`x-access-token:${token}`).toString('base64')
+}
+
+/**
+ * The environment that hands git the token for one push.
+ *
+ * git reads GIT_CONFIG_COUNT and the numbered KEY/VALUE pairs as extra config for that one
+ * process. The token therefore never sits on a command line, which the log echoes, and is never
+ * written to .git/config, where a later step could read it. That is what lets a caller check out
+ * with `persist-credentials: false`.
+ *
+ * A checkout that does persist its credentials puts its own header under the same key, and git
+ * sends every value of it: two Authorization headers, which GitHub refuses with a 400. An empty
+ * value resets the key's list, so the first entry clears whatever the checkout left and only this
+ * token is sent.
+ *
+ * @param {string} token     The token, or empty to leave authentication to the checkout.
+ * @param {string} serverUrl The GitHub server, e.g. https://github.com.
+ *
+ * @returns {object} The variables to add to git's environment; none without a token.
+ */
+function pushEnv(token, serverUrl) {
+  if (!token) {
+    return {}
+  }
+
+  const key = `http.${serverUrl.replace(/\/+$/, '')}/.extraheader`
+
+  return {
+    GIT_CONFIG_COUNT: '2',
+    GIT_CONFIG_KEY_0: key,
+    GIT_CONFIG_VALUE_0: '',
+    GIT_CONFIG_KEY_1: key,
+    GIT_CONFIG_VALUE_1: `AUTHORIZATION: basic ${basicCredential(token)}`,
+  }
+}
+
+/**
+ * The message of the commit the action pushes.
+ *
+ * @param {string} branch  The release branch.
+ * @param {string} version The version prepared.
+ *
+ * @returns {string} The commit message.
+ */
+function commitMessage(branch, version) {
+  return `Prepare ${branch} (${version})`
+}
+
+/**
+ * The last non-empty line of a command's output, where `pup get-version` prints the version after any
+ * PHP notice.
+ *
+ * @param {string} output What the command printed.
+ *
+ * @returns {string} The line, trimmed, or an empty string.
+ */
+function lastLine(output) {
+  return (
+    String(output ?? '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .at(-1) ?? ''
+  )
+}
+
+/**
+ * Reads the version `pup get-version` printed: the numeric part of its last line, so a suffix such as
+ * -beta.1 is ignored and a PHP notice printed before it is skipped.
+ *
+ * @param {string} output What pup printed.
+ *
+ * @returns {string|null} The version, or null when the line holds no numeric version, such as `dev`.
+ */
+function readCurrentVersion(output) {
+  const match = /^\d+(\.\d+)*/.exec(lastLine(output))
+
+  return match ? match[0] : null
+}
+
+/**
+ * Reads a file of the checkout.
+ *
+ * @param {string} cwd  The checkout.
+ * @param {string} name The file, relative to it.
+ *
+ * @throws {Error} When it exists but cannot be read.
+ *
+ * @returns {string|null} The contents, or null when the file does not exist.
+ */
+function readCheckoutFile(cwd, name) {
+  try {
+    return fs.readFileSync(path.join(cwd, name), 'utf8')
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return null
+    }
+
+    throw error
+  }
+}
+
+/**
+ * Runs a command and fails with its output when it exits non-zero.
+ *
+ * @param {object}   exec    The @actions/exec toolkit.
+ * @param {string}   command The program.
+ * @param {string[]} args    Its arguments.
+ * @param {object}   options Options for @actions/exec.
+ * @param {string}   what    What the command does, to open the error message.
+ *
+ * @throws {Error} When the command exits non-zero, holding what it printed.
+ *
+ * @returns {Promise<string>} What the command printed to stdout.
+ */
+async function runOrFail(exec, command, args, options, what) {
+  const result = await exec.getExecOutput(command, args, { ...options, ignoreReturnCode: true })
+
+  if (result.exitCode !== 0) {
+    const output = [result.stdout, result.stderr].map((text) => text.trim()).filter(Boolean)
+
+    throw new Error(`${what} failed (exit code ${result.exitCode}):\n${output.join('\n')}`)
+  }
+
+  return result.stdout
+}
+
+/**
+ * Validates the inputs, then bumps the version and replaces the TBDs with pup.
+ *
+ * Every check runs before anything is written, so a wrong version, date or ref, a checkout that is
+ * not on the release branch, a repository without a usable .puprc, or a version lower than the one
+ * the branch already has, fails with the branch untouched.
+ *
+ * @param {object}   core      The @actions/core toolkit, for the log and the outputs.
+ * @param {object}   exec      The @actions/exec toolkit.
+ * @param {object}   env       The environment the action manifest put its inputs in.
+ * @param {string}   cwd       The checkout, the working directory by default.
+ * @param {Function} fetchImpl What `fetch` to use; a test passes a stand-in.
+ *
+ * @throws {Error} When an input is wrong, .puprc is unusable, or the download or pup fails.
+ *
+ * @returns {Promise<void>} Resolves once pup has run and the outputs are set.
+ */
+async function runPrepare({ core, exec, env, cwd = process.cwd(), fetchImpl = globalThis.fetch }) {
+  const version = validateVersion(env.INPUT_VERSION)
+  const date = resolveDate(env.INPUT_DATE)
+  const branch = validateBranch(env.INPUT_BRANCH)
+  const pupVersion = validatePupVersion(env.INPUT_PUP_VERSION)
+
+  const refCheck = await exec.getExecOutput('git', ['check-ref-format', `refs/heads/${branch}`], {
+    cwd,
+    ignoreReturnCode: true,
+    silent: true,
+  })
+  if (refCheck.exitCode !== 0) {
+    throw new Error(`'${branch}' is not a valid branch name. Nothing was changed.`)
+  }
+
+  // The push writes HEAD to refs/heads/<branch>. From any other branch that the release branch is an
+  // ancestor of, git would accept it as a fast-forward and carry that branch's commits into the
+  // release, so the checkout has to be on the release branch itself.
+  const head = await exec.getExecOutput('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
+    cwd,
+    ignoreReturnCode: true,
+    silent: true,
+  })
+  const headBranch = head.exitCode === 0 ? head.stdout.trim() : ''
+  if (headBranch !== branch) {
+    throw new Error(
+      `The checkout is on ${headBranch ? `'${headBranch}'` : 'a detached commit'}, not on '${branch}'. ` +
+        'Check out the release branch before this action, e.g. actions/checkout with `ref`. Nothing ' +
+        'was changed.'
+    )
+  }
+
+  const { tbdDirs } = readPuprc(readCheckoutFile(cwd, '.puprc'))
+
+  if (!tbdDirs) {
+    core.warning(
+      '.puprc declares no checks.tbd.dirs, so pup replaces TBDs under src/ only, its default. ' +
+        'Declare the directories that hold @since TBD tags to cover the rest.'
+    )
+  }
+
+  if (!hasChangeloggerConfig(readCheckoutFile(cwd, 'package.json'))) {
+    core.warning(
+      'package.json has no changelogger section, so the changelog step uses the changelogger ' +
+        'defaults: a keepachangelog changelog.md with semver versioning.'
+    )
+  }
+
+  const pupRelease = await resolvePupRelease({
+    version: pupVersion,
+    token: env.INPUT_TOKEN || '',
+    fetchImpl,
+  })
+  const distribution = await resolvePupDistribution({ exec, release: pupRelease })
+  core.setOutput('distribution', distribution)
+
+  if (distribution === 'phar') {
+    await runPrepareWithPhar({ core, exec, cwd, env, pharRelease: pupRelease, version, branch })
+  } else {
+    // The TypeScript line publishes no phar and would run through its own GitHub Action — but a
+    // composite action's `uses:` references resolve when the JOB is set up, not when the step
+    // runs, so the manifest cannot carry those calls behind a condition: they would break every
+    // run until the pup action exists. Until it does, a phar-less release fails here, loudly,
+    // with the way out. The branch-version check below is part of the phar path — the TS
+    // contract does not define it yet.
+    throw new Error(
+      `pup ${pupRelease} publishes no .phar asset, and the TypeScript distribution is not ` +
+        'callable from this action yet. Pin pup-version to a release that ships a .phar, such ' +
+        'as 2.0.0. Nothing was changed.'
+    )
+  }
+
+  core.setOutput('version', version)
+  core.setOutput('date', date)
+  core.setOutput('branch', branch)
+}
+
+/**
+ * Runs the preparation with the phar a pup release publishes: downloads it, checks the version
+ * the branch already has, then bumps the version and replaces the TBDs.
+ *
+ * @param {object}   options
+ * @param {object}   options.core        The @actions/core toolkit.
+ * @param {object}   options.exec        The @actions/exec toolkit.
+ * @param {string}   options.cwd         The checkout.
+ * @param {object}   options.env         The step environment, for RUNNER_TEMP.
+ * @param {string}   options.pharRelease The resolved pup release tag.
+ * @param {string}   options.version     The version to prepare, validated.
+ * @param {string}   options.branch      The release branch, validated.
+ *
+ * @returns {Promise<void>} Resolves once pup has run.
+ */
+async function runPrepareWithPhar({ core, exec, cwd, env, pharRelease, version, branch }) {
+  const phar = path.join(env.RUNNER_TEMP || os.tmpdir(), `pup-${pharRelease}.phar`)
+
+  await runOrFail(
+    exec,
+    'curl',
+    ['-fsSL', '--retry', '3', '-o', phar, pupDownloadUrl(pharRelease)],
+    {},
+    `Downloading pup ${pharRelease}`
+  )
+
+  // A version lower than the one the branch already has would bump it backwards: a wrong version, or
+  // the wrong branch. The same version is fine, it is what re-running a preparation finds. When pup
+  // finds no version at all it exits non-zero, which fails here as replace-version would.
+  const printed = await runOrFail(
+    exec,
+    'php',
+    ['-d', 'display_errors=stderr', phar, 'get-version'],
+    { cwd, silent: true },
+    'pup get-version'
+  )
+  const current = readCurrentVersion(printed)
+
+  if (current === null) {
+    core.warning(
+      `The version files hold \`${lastLine(printed)}\`, which is not a numeric version, so ` +
+        `${version} was not checked against it.`
+    )
+  } else if (compareVersions(version, current) < 0) {
+    throw new Error(
+      `Refusing to prepare ${version}: ${branch} already has ${current}, a later version. Check the ` +
+        'version and the release branch. Nothing was changed.'
+    )
+  }
+
+  for (const { command, args } of pupCommands(phar, version)) {
+    await runOrFail(exec, command, args, { cwd }, `pup ${args[1]}`)
+  }
+}
+
+/**
+ * Commits whatever the preparation changed and pushes it to the release branch.
+ *
+ * When nothing changed, which is what re-preparing a version that is already on the branch finds,
+ * it neither commits nor pushes, and succeeds.
+ *
+ * @param {object} core The @actions/core toolkit, for the log, the outputs and the summary.
+ * @param {object} exec The @actions/exec toolkit.
+ * @param {object} env  The environment the action manifest put its inputs in.
+ * @param {string} cwd  The checkout, the working directory by default.
+ *
+ * @throws {Error} When a git command fails, the push included.
+ *
+ * @returns {Promise<void>} Resolves once the commit is pushed, or found unnecessary.
+ */
+async function runCommit({ core, exec, env, cwd = process.cwd() }) {
+  const branch = validateBranch(env.INPUT_BRANCH)
+  const version = validateVersion(env.INPUT_VERSION)
+  const message = commitMessage(branch, version)
+  const token = env.INPUT_TOKEN || ''
+
+  if (token) {
+    core.setSecret(token)
+    core.setSecret(basicCredential(token))
+  }
+
+  await runOrFail(exec, 'git', ['add', '--all'], { cwd }, 'Staging the changes')
+
+  const staged = await runOrFail(
+    exec,
+    'git',
+    ['diff', '--cached', '--name-only'],
+    { cwd, silent: true },
+    'Listing the changes'
+  )
+  const files = staged.split('\n').filter(Boolean)
+
+  if (files.length === 0) {
+    core.info(`Nothing changed: ${branch} already holds ${version}. Nothing was committed or pushed.`)
+    core.setOutput('commit', '')
+    core.setOutput('files', '')
+    await core.summary
+      .addRaw(`Nothing to commit: \`${branch}\` already holds ${version}.`, true)
+      .write()
+
+    return
+  }
+
+  await runOrFail(
+    exec,
+    'git',
+    [
+      '-c',
+      `user.name=${COMMIT_AUTHOR.name}`,
+      '-c',
+      `user.email=${COMMIT_AUTHOR.email}`,
+      'commit',
+      '--quiet',
+      '-m',
+      message,
+    ],
+    { cwd },
+    'Committing the changes'
+  )
+
+  const commit = (
+    await runOrFail(exec, 'git', ['rev-parse', 'HEAD'], { cwd, silent: true }, 'Reading the commit')
+  ).trim()
+
+  await runOrFail(
+    exec,
+    'git',
+    ['push', 'origin', `HEAD:refs/heads/${branch}`],
+    { cwd, env: { ...env, ...pushEnv(token, env.GITHUB_SERVER_URL || 'https://github.com') } },
+    `Pushing to ${branch}`
+  )
+
+  core.info(`Pushed ${commit} to ${branch}.`)
+  core.setOutput('commit', commit)
+  core.setOutput('files', files.join('\n'))
+  // A Markdown list rather than addList, whose HTML list would show the backticks literally.
+  await core.summary
+    .addRaw(`Pushed \`${commit.slice(0, 7)}\` "${message}" to \`${branch}\`:\n\n`)
+    .addRaw(files.map((file) => `- \`${file}\``).join('\n'), true)
+    .write()
+}
+
+module.exports = {
+  runPrepare,
+  runCommit,
+  validateVersion,
+  resolveDate,
+  validateBranch,
+  validatePupVersion,
+  resolvePupRelease,
+  resolvePupDistribution,
+  readPuprc,
+  hasChangeloggerConfig,
+  pupDownloadUrl,
+  pupCommands,
+  basicCredential,
+  pushEnv,
+  commitMessage,
+  compareVersions,
+  readCurrentVersion,
+  VERSION_PATTERN,
+}
