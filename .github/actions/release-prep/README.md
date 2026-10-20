@@ -136,15 +136,16 @@ pinned release downloads straight from its release page. `latest` reads the newe
 the GitHub API, authenticated with `token` so the runner's shared unauthenticated quota is not
 spent.
 
-The release itself decides which kind of pup runs, not a version comparison: the action sends a
-HEAD request to the release's `pup.phar` asset. Releases up to and including 2.0.0 publish one; the
-phar downloads into the runner's temp directory and runs on the runner's PHP. A release that
-answers 404 is the TypeScript line, which is meant to run through its own GitHub Action — and the
-prepare step fails there, saying so and naming the pin to use instead. The manifest cannot carry
-that call behind a condition: a composite action's `uses:` references resolve when the job is set
-up, not when the step runs, so a conditional reference to an action that does not exist yet would
-break every run. When the TypeScript line publishes its action, the call is wired in as the
-changelogger's is — one `uses:` step per pup command, `command:` as the input:
+The release itself decides whether the action can run it, not a version comparison: the action
+sends a HEAD request to the release's `pup.phar` asset. Every release from 1.2.4 to 2.0.0
+publishes one; the phar downloads into the runner's temp directory and runs on the runner's PHP.
+A release without one is not supported yet: the prepare step fails, saying so and naming a pin
+to use instead. The TypeScript line of pup publishes no phar and is meant to run through its own
+GitHub Action. The manifest cannot carry that call behind a condition: a composite action's
+`uses:` references resolve when the job is set up, not when the step runs, so a conditional
+reference to an action that does not exist yet would break every run. When the TypeScript line
+publishes its action, the call is wired in as the changelogger's is — one `uses:` step per pup
+command, `command:` as the input:
 
 ```yaml
 - uses: stellarwp/pup@v3

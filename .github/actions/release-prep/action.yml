@@ -38,8 +38,9 @@ inputs:
   pup-version:
     description: >-
       The pup release that bumps the version and replaces the TBDs: a release number, such as
-      2.0.0, or 'latest' for the newest release. Versions up to 2.0.0 ship as a .phar; once pup
-      publishes a release without one, the action runs that release's own GitHub Action instead.
+      2.0.0, or 'latest' for the newest release. It has to ship a pup.phar asset, which every
+      release from 1.2.4 to 2.0.0 does. A release without one is not supported yet: the action
+      fails and names a pin to use instead.
     required: false
     default: 'latest'
 

@@ -280,8 +280,8 @@ function pupDownloadUrl(version) {
 
 /**
  * Which distribution a pup release carries, decided by looking at the release itself: a `pup.phar`
- * asset means the PHP build the action has always run, and its absence means the release expects
- * to run through its own GitHub Action (the TypeScript line, once it publishes one).
+ * asset means the PHP build the action runs. A release without one (1.2.3 and 0.0.1 among the
+ * published ones, and the TypeScript line once it ships) cannot be run from here yet.
  *
  * The check is a HEAD request against the asset URL, not the releases API, so a pinned
  * `pup-version` stays free of API calls and rate limits.
