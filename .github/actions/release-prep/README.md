@@ -79,33 +79,43 @@ Two gaps only produce a warning; the run continues:
 
 - No `checks.tbd.dirs`: pup falls back to its default and replaces TBDs under `src/` only.
 - No `changelogger` section: the changelogger uses its defaults — a keepachangelog `changelog.md`
-  with semver versioning.
+  with semver versioning — and the action validates the version as semver.
 
 A writing strategy given as a `.js` file is loaded from the checkout; it has to be there before the
 action runs. One written in TypeScript has to be built in an earlier step.
 
 ## Versions it refuses
 
-The version has to be three or four numeric parts, such as `4.17.0` or `4.17.0.1`. That is the shape
-the changelogger's default `stellarwp` versioning accepts. A repository with a custom changelogger
-version strategy may accept other shapes, but this action still takes three or four numeric parts.
-The changelog step would fail on anything else, so the action refuses it before pup has touched
-anything.
+The version is checked against the versioning strategy the repository's changelogger configures,
+`changelogger.versioning` in `package.json`, so the action refuses what the changelog step would
+refuse, before pup has touched anything:
+
+- `stellarwp`: three or four numeric parts, such as `4.17.0` or `4.17.0.1`. A pre-release such as
+  `4.17.0-beta.1` is refused, even though it is a valid tag name.
+- `semver`, or no `changelogger` section: `MAJOR.MINOR.PATCH` with an optional pre-release, such as
+  `4.17.0` or `4.17.0-beta.1`. A fourth part, `4.17.0.1`, is refused. So is a leading `v`: the
+  changelogger's semver check would take `v4.17.0`, but the version goes into the version files
+  and the tag as it is given.
+- A custom strategy, `versioning` set to a `.js` or `.ts` file: no shape check. The changelog step
+  validates the version with that strategy, and the action warns that it did not.
+- Any other `versioning` value fails the action, because the changelog step would fail on it.
+
+The changelog step validates the version only when `changelog/` holds entries to write; without
+any, it writes nothing and accepts any version. The action's check does not depend on that.
 
 - **An empty version is refused.** A tool that dispatches the workflow for a release with no version
   set sends an empty one. When the workflow declares `version` as required, as the template does,
   GitHub refuses the dispatch itself with HTTP 422 and no run starts. When the workflow declares it
   optional, the run starts and the action fails it with "No version was given". Either way the
   release needs a version before the step runs again.
-- **A pre-release is refused.** `4.17.0-beta.1` is rejected by the `stellarwp` versioning, so the
-  action cannot prepare one, even though it is a valid tag name. A custom version strategy that
-  accepts pre-releases does not change this.
 - **A version lower than the branch's is refused.** pup reads the version the branch already has
   (`pup get-version`, the first file in `paths.versions`), and preparing `4.17.0` on a branch at
   `4.18.0` would bump the plugin backwards: either the version or the branch is wrong. The same
-  version is accepted; that is what re-running a preparation finds. When the version files hold
-  something that is not a numeric version, such as `dev`, the job only warns. When pup cannot find a
-  version at all, it fails, as `replace-version` would.
+  version is accepted; that is what re-running a preparation finds. Only the numeric start of the
+  version is compared: `4.17.0-beta.1` counts as `4.17.0`, so it is accepted on a branch at `4.17.0`
+  and refused on one at `4.18.0`. When the version files hold something that is not a numeric
+  version, such as `dev`, or the version itself does not start with a number, the job only warns.
+  When pup cannot find a version at all, it fails, as `replace-version` would.
 
 Each refusal happens before anything is changed. So do a `date` that is not `YYYY-MM-DD`, a `branch`
 that is not a valid branch name, and a checkout that is not on `branch`.

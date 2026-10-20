@@ -14,7 +14,8 @@ const {
   validateBranch,
   validatePupVersion,
   readPuprc,
-  hasChangeloggerConfig,
+  readChangeloggerStrategy,
+  readVersion,
   pupDownloadUrl,
   pupReleaseUrl,
   pupCommands,
@@ -196,33 +197,57 @@ function commitEnv(overrides = {}) {
 
 describe('release-prep', () => {
   describe('validateVersion', () => {
-    it('accepts three or four numeric parts', () => {
-      assert.equal(validateVersion('4.17.0'), '4.17.0')
-      assert.equal(validateVersion('4.17.0.1'), '4.17.0.1')
+    it('accepts three or four numeric parts under the stellarwp strategy', () => {
+      assert.equal(validateVersion('4.17.0', 'stellarwp'), '4.17.0')
+      assert.equal(validateVersion('4.17.0.1', 'stellarwp'), '4.17.0.1')
     })
 
     it('reads the version without surrounding whitespace', () => {
-      assert.equal(validateVersion(' 4.17.0\n'), '4.17.0')
+      assert.equal(validateVersion(' 4.17.0\n', 'stellarwp'), '4.17.0')
+      assert.equal(readVersion(' 4.17.0\n'), '4.17.0')
     })
 
     it('refuses an empty version, saying the run was dispatched without one', () => {
       // A release dispatcher that has no version for the release sends an empty one.
       for (const empty of ['', '   ', undefined]) {
-        assert.throws(() => validateVersion(empty), /No version was given.*Nothing was changed/s)
+        for (const strategy of ['stellarwp', 'semver', 'custom']) {
+          assert.throws(() => validateVersion(empty, strategy), /No version was given.*Nothing was changed/s)
+        }
+        assert.throws(() => readVersion(empty), /No version was given.*Nothing was changed/s)
       }
     })
 
-    it('refuses a pre-release, which the stellarwp changelog versioning rejects', () => {
+    it('refuses a pre-release under stellarwp, which that versioning rejects', () => {
       assert.throws(
-        () => validateVersion('4.17.0-beta.1'),
+        () => validateVersion('4.17.0-beta.1', 'stellarwp'),
         /'4\.17\.0-beta\.1' is not a version this action can prepare.*pre-release/s
       )
     })
 
-    it('refuses anything but three or four numeric parts', () => {
+    it('refuses anything but three or four numeric parts under stellarwp', () => {
       // 2.1..21 matters most: the changelogger reads the empty part as 0 and would accept it.
       for (const version of ['4.17', '4.17.0.1.2', '2.1..21', 'v4.17.0', '4.17.x', '4.17.0.']) {
-        assert.throws(() => validateVersion(version), /not a version this action can prepare/)
+        assert.throws(() => validateVersion(version, 'stellarwp'), /not a version this action can prepare/)
+      }
+    })
+
+    it('accepts a semver version, pre-release and build included, under semver', () => {
+      for (const version of ['4.17.0', '4.17.0-beta.1', '4.17.0-rc.1+build.5', '0.1.0']) {
+        assert.equal(validateVersion(version, 'semver'), version)
+      }
+    })
+
+    it('refuses a fourth part, a leading v and an empty part under semver', () => {
+      // The semver package behind the changelogger takes v4.17.0; the version goes into the
+      // version files and the tag as given, so the action does not.
+      for (const version of ['4.17.0.1', 'v4.17.0', '2.1..21', '04.17.0', '4.17', '4.17.0-']) {
+        assert.throws(() => validateVersion(version, 'semver'), /not a version this action can prepare.*semver/s)
+      }
+    })
+
+    it('checks only that the version is not empty under a custom strategy', () => {
+      for (const version of ['M26.1', '4.17.0.1', '4.17.0-beta.1']) {
+        assert.equal(validateVersion(version, 'custom'), version)
       }
     })
   })
@@ -307,12 +332,55 @@ describe('release-prep', () => {
     })
   })
 
-  describe('hasChangeloggerConfig', () => {
-    it('is true only for a package.json with a changelogger section', () => {
-      assert.equal(hasChangeloggerConfig(JSON.stringify(PACKAGE_JSON)), true)
-      assert.equal(hasChangeloggerConfig('{"name":"x"}'), false)
-      assert.equal(hasChangeloggerConfig(null), false)
-      assert.equal(hasChangeloggerConfig('not json'), false)
+  describe('readChangeloggerStrategy', () => {
+    it('reads the strategy the changelogger section configures', () => {
+      assert.deepEqual(readChangeloggerStrategy(JSON.stringify(PACKAGE_JSON)), {
+        strategy: 'stellarwp',
+        versioning: 'stellarwp',
+        configured: true,
+      })
+      assert.deepEqual(readChangeloggerStrategy('{"changelogger":{"versioning":"semver"}}'), {
+        strategy: 'semver',
+        versioning: 'semver',
+        configured: true,
+      })
+    })
+
+    it('falls back to semver without a section, a file or valid JSON, as the changelogger does', () => {
+      for (const text of ['{"name":"x"}', null, 'not json']) {
+        assert.deepEqual(readChangeloggerStrategy(text), {
+          strategy: 'semver',
+          versioning: 'semver',
+          configured: false,
+        })
+      }
+    })
+
+    it('reads a section without a versioning key as semver, the changelogger default', () => {
+      assert.deepEqual(readChangeloggerStrategy('{"changelogger":{"changesDir":"changelog"}}'), {
+        strategy: 'semver',
+        versioning: 'semver',
+        configured: true,
+      })
+    })
+
+    it('reads a .js or .ts file as a custom strategy', () => {
+      for (const file of ['bin/versioning.js', 'bin/versioning.ts']) {
+        assert.deepEqual(readChangeloggerStrategy(`{"changelogger":{"versioning":"${file}"}}`), {
+          strategy: 'custom',
+          versioning: file,
+          configured: true,
+        })
+      }
+    })
+
+    it('refuses a strategy the changelogger does not know, which would fail the changelog step', () => {
+      for (const versioning of ['foo', '']) {
+        assert.throws(
+          () => readChangeloggerStrategy(`{"changelogger":{"versioning":"${versioning}"}}`),
+          /is not a versioning strategy the changelogger knows.*Nothing was changed/s
+        )
+      }
     })
   })
 
@@ -632,6 +700,82 @@ describe('release-prep', () => {
       await runPrepare({ core, exec, env: prepareEnv(), cwd })
 
       assert.match(logged(), /::warning::.*changelogger/)
+    })
+
+    it('validates the version with the strategy package.json configures', async (t) => {
+      const semver = { changelogger: { versioning: 'semver', changesDir: 'changelog' } }
+
+      const accepted = await coreWithOutputs(t)
+      const run = recordingExec(allSucceed())
+      await runPrepare({
+        core: accepted.core,
+        exec: run.exec,
+        env: prepareEnv({ INPUT_VERSION: '4.17.0-beta.1' }),
+        cwd: checkoutWith({ '.puprc': PUPRC, 'package.json': semver }),
+      })
+      assert.ok(sequence(run.calls).some((call) => call.endsWith('replace-version 4.17.0-beta.1')))
+      assert.equal(accepted.outputs().version, '4.17.0-beta.1')
+
+      const refused = await coreWithOutputs(t)
+      const stopped = recordingExec(allSucceed())
+      await assert.rejects(
+        runPrepare({
+          core: refused.core,
+          exec: stopped.exec,
+          env: prepareEnv({ INPUT_VERSION: '4.17.0.1' }),
+          cwd: checkoutWith({ '.puprc': PUPRC, 'package.json': semver }),
+        }),
+        /'4\.17\.0\.1' is not a version this action can prepare.*semver/s
+      )
+      assert.deepEqual(stopped.calls, [], 'nothing ran for a version the changelog step would refuse')
+    })
+
+    it('leaves the shape check to a custom strategy, and says so', async (t) => {
+      const { core, logged } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed())
+      const custom = { changelogger: { versioning: 'bin/versioning.js' } }
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': custom })
+
+      await runPrepare({ core, exec, env: prepareEnv({ INPUT_VERSION: 'M26.1' }), cwd })
+
+      assert.match(logged(), /::warning::.*custom versioning strategy \(bin\/versioning\.js\)/)
+      assert.match(logged(), /::warning::.*M26\.1 holds no numeric version/)
+      assert.ok(sequence(calls).some((call) => call.endsWith('replace-version M26.1')))
+    })
+
+    it('stops before running anything when package.json names a strategy the changelogger does not know', async (t) => {
+      const { core, outputs } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed())
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': { changelogger: { versioning: 'foo' } } })
+
+      await assert.rejects(
+        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        /changelogger\.versioning to 'foo', which is not a versioning strategy the changelogger knows/
+      )
+      assert.deepEqual(calls, [])
+      assert.deepEqual(outputs(), {})
+    })
+
+    it('compares a pre-release by its numeric start against the branch', async (t) => {
+      const semver = { changelogger: { versioning: 'semver' } }
+
+      for (const [current, accepted] of [
+        ['4.18.0', false],
+        ['4.17.0', true],
+      ]) {
+        const { core } = await coreWithOutputs(t)
+        const { exec } = recordingExec(
+          allSucceed([{ command: 'php', args: /get-version$/, stdout: `${current}\n` }])
+        )
+        const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': semver })
+        const prepare = runPrepare({ core, exec, env: prepareEnv({ INPUT_VERSION: '4.17.0-beta.1' }), cwd })
+
+        if (accepted) {
+          await prepare
+        } else {
+          await assert.rejects(prepare, /Refusing to prepare 4\.17\.0-beta\.1: .* already has 4\.18\.0/)
+        }
+      }
     })
 
     it('fails with pup output when pup fails, and stops there', async (t) => {

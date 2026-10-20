@@ -17,11 +17,23 @@ const path = require('node:path')
 const { compareVersions } = require('../../lib/versions.js')
 
 /**
- * Three or four numeric parts. It is what the stellarwp changelog versioning accepts, minus its
- * blind spot: it reads an empty part as 0, so it would take 2.1..21. A version of this shape is
- * also always a valid tag name.
+ * Three or four numeric parts, the shape the stellarwp changelog versioning accepts. That strategy
+ * also accepts an empty part (it reads it as 0, so it would take 2.1..21); this pattern rejects
+ * that. A version of this shape is also always a valid tag name.
  */
-const VERSION_PATTERN = /^\d+\.\d+\.\d+(\.\d+)?$/
+const STELLARWP_VERSION_PATTERN = /^\d+\.\d+\.\d+(\.\d+)?$/
+
+/**
+ * A semver version as semver.org defines it: MAJOR.MINOR.PATCH, an optional pre-release and
+ * optional build metadata. The changelogger's semver strategy validates with the semver package,
+ * which also takes a leading `v`; this pattern does not, because the version goes into the version
+ * files and the tag as it is given.
+ */
+const SEMVER_PATTERN =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+(?:[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/
+
+/** The numeric start of a version, which is what the branch-version comparison reads. */
+const NUMERIC_PREFIX = /^\d+(\.\d+)*/
 
 /** A pup release number, which goes into the download URL. */
 const PUP_VERSION_PATTERN = /^\d+\.\d+\.\d+$/
@@ -36,15 +48,15 @@ const COMMIT_AUTHOR = {
 }
 
 /**
- * Checks the version to prepare.
+ * Reads the version input, refusing an empty one.
  *
  * @param {string} version The `version` input.
  *
- * @throws {Error} When it is empty, or not three or four numeric parts.
+ * @throws {Error} When it is empty.
  *
  * @returns {string} The version, without surrounding whitespace.
  */
-function validateVersion(version) {
+function readVersion(version) {
   const trimmed = String(version ?? '').trim()
 
   if (trimmed === '') {
@@ -54,11 +66,37 @@ function validateVersion(version) {
     )
   }
 
-  if (!VERSION_PATTERN.test(trimmed)) {
+  return trimmed
+}
+
+/**
+ * Checks the version to prepare against the versioning strategy the repository's changelogger
+ * configures, so the action refuses what the changelog step would refuse, before pup has run.
+ *
+ * @param {string}                           version  The `version` input.
+ * @param {'stellarwp'|'semver'|'custom'}    strategy The strategy readChangeloggerStrategy read.
+ *
+ * @throws {Error} When it is empty, or not a version the strategy accepts. A custom strategy
+ *                 validates on its own, in the changelog step.
+ *
+ * @returns {string} The version, without surrounding whitespace.
+ */
+function validateVersion(version, strategy) {
+  const trimmed = readVersion(version)
+
+  if (strategy === 'stellarwp' && !STELLARWP_VERSION_PATTERN.test(trimmed)) {
     throw new Error(
       `'${trimmed}' is not a version this action can prepare. It takes three or four numeric ` +
         'parts, such as 4.17.0 or 4.17.0.1. A pre-release such as 4.17.0-beta.1 is not supported, ' +
         'because the stellarwp changelog versioning rejects it. Nothing was changed.'
+    )
+  }
+
+  if (strategy === 'semver' && !SEMVER_PATTERN.test(trimmed)) {
+    throw new Error(
+      `'${trimmed}' is not a version this action can prepare. The changelogger validates it as ` +
+        'semver: MAJOR.MINOR.PATCH with an optional pre-release, such as 4.17.0 or 4.17.0-beta.1, ' +
+        'and no leading v. Nothing was changed.'
     )
   }
 
@@ -248,23 +286,51 @@ function readPuprc(text) {
 }
 
 /**
- * Whether package.json configures the changelogger. Without that section the changelogger falls
- * back to its defaults, which write a keepachangelog `changelog.md` with semver versioning.
+ * Reads which versioning strategy the changelogger will validate the version with.
+ *
+ * The changelogger reads `changelogger.versioning` from package.json and falls back to `semver`
+ * without the section, without the file, or when the file is not JSON; it loads a `.js` or `.ts`
+ * value as a custom strategy with its own validation, and fails on any other value before it looks
+ * at the changes, so that case fails here, before pup has run.
  *
  * @param {string|null} text The contents of package.json, or null when there is none.
  *
- * @returns {boolean} True when it has a `changelogger` section.
+ * @throws {Error} When `versioning` is a value the changelogger does not know.
+ *
+ * @returns {{strategy: 'stellarwp'|'semver'|'custom', versioning: string, configured: boolean}}
+ *          The strategy, the `versioning` value it came from, and whether package.json has a
+ *          `changelogger` section at all.
  */
-function hasChangeloggerConfig(text) {
-  if (text === null) {
-    return false
+function readChangeloggerStrategy(text) {
+  let section = null
+
+  if (text !== null) {
+    try {
+      section = JSON.parse(text)?.changelogger ?? null
+    } catch {
+      section = null
+    }
   }
 
-  try {
-    return Boolean(JSON.parse(text)?.changelogger)
-  } catch {
-    return false
+  if (!section) {
+    return { strategy: 'semver', versioning: 'semver', configured: false }
   }
+
+  const versioning = (typeof section === 'object' ? section.versioning : undefined) ?? 'semver'
+
+  if (versioning === 'stellarwp' || versioning === 'semver') {
+    return { strategy: versioning, versioning, configured: true }
+  }
+
+  if (typeof versioning === 'string' && /\.(js|ts)$/.test(versioning)) {
+    return { strategy: 'custom', versioning, configured: true }
+  }
+
+  throw new Error(
+    `package.json sets changelogger.versioning to '${versioning}', which is not a versioning ` +
+      'strategy the changelogger knows: use stellarwp, semver, or a .js or .ts file. The changelog ' +
+      'step would fail on it. Nothing was changed.'
+  )
 }
 
 /**
@@ -469,7 +535,18 @@ function lastLine(output) {
  * @returns {string|null} The version, or null when the line holds no numeric version, such as `dev`.
  */
 function readCurrentVersion(output) {
-  const match = /^\d+(\.\d+)*/.exec(lastLine(output))
+  return numericPrefix(lastLine(output))
+}
+
+/**
+ * The numeric start of a version: 4.17.0 for 4.17.0-beta.1, the whole of 4.17.0.1.
+ *
+ * @param {string} version A version.
+ *
+ * @returns {string|null} The numeric start, or null when the version does not start with a number.
+ */
+function numericPrefix(version) {
+  const match = NUMERIC_PREFIX.exec(version)
 
   return match ? match[0] : null
 }
@@ -525,8 +602,10 @@ async function runOrFail(exec, command, args, options, what) {
  * Validates the inputs, then bumps the version and replaces the TBDs with pup.
  *
  * Every check runs before anything is written, so a wrong version, date or ref, a checkout that is
- * not on the release branch, a repository without a usable .puprc, or a version lower than the one
- * the branch already has, fails with the branch untouched.
+ * not on the release branch, a repository without a usable .puprc or with a changelogger versioning
+ * the changelogger does not know, or a version lower than the one the branch already has, fails
+ * with the branch untouched. The version is checked the way the changelog step will check it: by
+ * the versioning strategy package.json configures.
  *
  * @param {object}   core      The @actions/core toolkit, for the log and the outputs.
  * @param {object}   exec      The @actions/exec toolkit.
@@ -539,7 +618,8 @@ async function runOrFail(exec, command, args, options, what) {
  * @returns {Promise<void>} Resolves once pup has run and the outputs are set.
  */
 async function runPrepare({ core, exec, env, cwd = process.cwd(), fetchImpl = globalThis.fetch }) {
-  const version = validateVersion(env.INPUT_VERSION)
+  const changelogger = readChangeloggerStrategy(readCheckoutFile(cwd, 'package.json'))
+  const version = validateVersion(env.INPUT_VERSION, changelogger.strategy)
   const date = resolveDate(env.INPUT_DATE)
   const branch = validateBranch(env.INPUT_BRANCH)
   const pupVersion = validatePupVersion(env.INPUT_PUP_VERSION)
@@ -579,10 +659,15 @@ async function runPrepare({ core, exec, env, cwd = process.cwd(), fetchImpl = gl
     )
   }
 
-  if (!hasChangeloggerConfig(readCheckoutFile(cwd, 'package.json'))) {
+  if (!changelogger.configured) {
     core.warning(
       'package.json has no changelogger section, so the changelog step uses the changelogger ' +
         'defaults: a keepachangelog changelog.md with semver versioning.'
+    )
+  } else if (changelogger.strategy === 'custom') {
+    core.warning(
+      `package.json names a custom versioning strategy (${changelogger.versioning}), so the ` +
+        "action did not check the version's shape. The changelog step validates it with that strategy."
     )
   }
 
@@ -651,13 +736,21 @@ async function runPrepareWithPhar({ core, exec, cwd, env, pharRelease, version, 
     'pup get-version'
   )
   const current = readCurrentVersion(printed)
+  // Only the numeric start is compared: 4.17.0-beta.1 counts as 4.17.0, which compareVersions
+  // reads; a pre-release of the version the branch holds is still that version.
+  const numeric = numericPrefix(version)
 
   if (current === null) {
     core.warning(
       `The version files hold \`${lastLine(printed)}\`, which is not a numeric version, so ` +
         `${version} was not checked against it.`
     )
-  } else if (compareVersions(version, current) < 0) {
+  } else if (numeric === null) {
+    core.warning(
+      `${version} holds no numeric version, so it was not checked against the ${current} the ` +
+        'branch has.'
+    )
+  } else if (compareVersions(numeric, current) < 0) {
     throw new Error(
       `Refusing to prepare ${version}: ${branch} already has ${current}, a later version. Check the ` +
         'version and the release branch. Nothing was changed.'
@@ -686,7 +779,9 @@ async function runPrepareWithPhar({ core, exec, cwd, env, pharRelease, version, 
  */
 async function runCommit({ core, exec, env, cwd = process.cwd() }) {
   const branch = validateBranch(env.INPUT_BRANCH)
-  const version = validateVersion(env.INPUT_VERSION)
+  // The prepare step validated the version against the changelogger strategy; its output is
+  // what the manifest hands this step, so only an empty value is checked here.
+  const version = readVersion(env.INPUT_VERSION)
   const message = commitMessage(branch, version)
   const token = env.INPUT_TOKEN || ''
 
@@ -759,6 +854,7 @@ async function runCommit({ core, exec, env, cwd = process.cwd() }) {
 module.exports = {
   runPrepare,
   runCommit,
+  readVersion,
   validateVersion,
   resolveDate,
   validateBranch,
@@ -766,7 +862,7 @@ module.exports = {
   resolvePupRelease,
   resolvePupDistribution,
   readPuprc,
-  hasChangeloggerConfig,
+  readChangeloggerStrategy,
   pupDownloadUrl,
   pupReleaseUrl,
   pupCommands,
@@ -775,5 +871,6 @@ module.exports = {
   commitMessage,
   compareVersions,
   readCurrentVersion,
-  VERSION_PATTERN,
+  STELLARWP_VERSION_PATTERN,
+  SEMVER_PATTERN,
 }
