@@ -152,9 +152,9 @@ changelogger's is — one `uses:` step per pup command, `command:` as the input:
     command: replace-version --version=4.17.0
 ```
 
-`uses:` takes a static ref, so the floating major tag is the moving pin. The branch-version check
-— the refusal of a version lower than the branch already has — runs on the phar path only; the TS
-contract does not define it yet.
+`uses:` takes a static ref, so `@v3` always resolves to the newest v3.x release of pup. The
+branch-version check — the refusal of a version lower than the branch already has — runs on the
+phar path only; the TS contract does not define it yet.
 
 ## Running it again
 
