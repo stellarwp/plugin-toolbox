@@ -188,9 +188,9 @@ async function resolvePupRelease({ version, token, fetchImpl }) {
   }
 
   // The tag goes into a download URL and a temp file path, and a missing one would surface
-  // as a 404 on …/download/undefined/pup.phar — which the distribution check reads as "no
-  // phar, this is the TypeScript line". A broken API response must fail here, not misroute
-  // the run, so the tag is validated before it is used.
+  // as a 404 on …/download/undefined/pup.phar, which the distribution check would report as
+  // a release that does not exist. A broken API response must fail here, naming the API, so
+  // the tag is validated before it is used.
   const tag = (await response.json()).tag_name
   if (typeof tag !== 'string' || !PUP_VERSION_PATTERN.test(tag)) {
     throw new Error(
@@ -279,39 +279,94 @@ function pupDownloadUrl(version) {
 }
 
 /**
- * Which distribution a pup release carries, decided by looking at the release itself: a `pup.phar`
- * asset means the PHP build the action runs. A release without one (1.2.3 and 0.0.1 among the
- * published ones, and the TypeScript line once it ships) cannot be run from here yet.
+ * The page of a pup release, which answers 404 when the release does not exist.
  *
- * The check is a HEAD request against the asset URL, not the releases API, so a pinned
- * `pup-version` stays free of API calls and rate limits.
+ * @param {string} version A pup release number, already validated.
  *
- * @param {object}   exec    The @actions/exec toolkit.
- * @param {string}   release The resolved pup release tag.
- *
- * @throws {Error} When the check itself fails; the run cannot tell which path to take.
- *
- * @returns {Promise<'phar'|'ts'>} The distribution the release carries.
+ * @returns {string} The release page URL.
  */
-async function resolvePupDistribution({ exec, release }) {
-  const head = await exec.getExecOutput('curl', ['-fsSI', pupDownloadUrl(release)], {
+function pupReleaseUrl(version) {
+  return `https://github.com/stellarwp/pup/releases/tag/${version}`
+}
+
+/**
+ * Sends a HEAD request and reports whether the URL exists.
+ *
+ * @param {object} exec The @actions/exec toolkit.
+ * @param {string} url  The URL to check.
+ *
+ * @returns {Promise<{exists: boolean, missing: boolean, result: object}>} Whether it answered
+ *          200, whether it answered 404, and curl's result for anything else.
+ */
+async function headExists(exec, url) {
+  const result = await exec.getExecOutput('curl', ['-fsSI', url], {
     ignoreReturnCode: true,
     silent: true,
   })
 
-  if (head.exitCode === 0) {
+  // curl -f answers a 404 with exit code 22 and the status in stderr.
+  return {
+    exists: result.exitCode === 0,
+    missing: result.exitCode === 22 && /404/.test(result.stderr),
+    result,
+  }
+}
+
+/**
+ * Which distribution a pup release carries, decided by looking at the release itself: a `pup.phar`
+ * asset means the PHP build the action runs. A release without one (1.2.3 and 0.0.1 among the
+ * published ones, and the TypeScript line once it ships) cannot be run from here yet.
+ *
+ * The checks are HEAD requests against the asset URL and, when that is missing, the release page,
+ * not the releases API, so a pinned `pup-version` stays free of API calls and rate limits. The
+ * second request tells a release without a phar from a release that does not exist, which a
+ * mistyped pin produces.
+ *
+ * @param {object}   exec    The @actions/exec toolkit.
+ * @param {string}   release The resolved pup release tag.
+ *
+ * @throws {Error} When the release does not exist, or a check itself fails and the run cannot
+ *                 tell which path to take.
+ *
+ * @returns {Promise<'phar'|'ts'>} The distribution the release carries.
+ */
+async function resolvePupDistribution({ exec, release }) {
+  const asset = await headExists(exec, pupDownloadUrl(release))
+
+  if (asset.exists) {
     return 'phar'
   }
 
-  // curl -f answers a 404 with exit code 22 and the status in stderr.
-  if (head.exitCode === 22 && /404/.test(head.stderr)) {
-    return 'ts'
+  if (asset.missing) {
+    const page = await headExists(exec, pupReleaseUrl(release))
+
+    if (page.exists) {
+      return 'ts'
+    }
+
+    if (page.missing) {
+      throw new Error(`pup ${release} is not a release: check pup-version for a typo. Nothing was changed.`)
+    }
+
+    throw checkFailed(release, page.result)
   }
 
-  const output = [head.stdout, head.stderr].map((text) => text.trim()).filter(Boolean)
-  throw new Error(
-    `Checking the pup ${release} release failed (exit code ${head.exitCode}):\n` +
-      output.join('\n')
+  throw checkFailed(release, asset.result)
+}
+
+/**
+ * The error for a release check that neither succeeded nor answered 404.
+ *
+ * @param {string} release The pup release tag.
+ * @param {object} result  What curl returned.
+ *
+ * @returns {Error} The error, holding what curl printed.
+ */
+function checkFailed(release, result) {
+  const output = [result.stdout, result.stderr].map((text) => text.trim()).filter(Boolean)
+
+  return new Error(
+    `Checking the pup ${release} release failed (exit code ${result.exitCode}):\n` + output.join('\n')
   )
 }
 
@@ -549,9 +604,8 @@ async function runPrepare({ core, exec, env, cwd = process.cwd(), fetchImpl = gl
     // error naming the pin to use instead. The branch-version check below is part of the phar
     // path — the TS contract does not define it yet.
     throw new Error(
-      `pup ${pupRelease} publishes no .phar asset, and the TypeScript distribution is not ` +
-        'callable from this action yet. Pin pup-version to a release that ships a .phar, such ' +
-        'as 2.0.0. Nothing was changed.'
+      `pup ${pupRelease} publishes no pup.phar asset, so this action cannot run it. Pin ` +
+        'pup-version to a release that ships one, such as 2.0.0. Nothing was changed.'
     )
   }
 
@@ -714,6 +768,7 @@ module.exports = {
   readPuprc,
   hasChangeloggerConfig,
   pupDownloadUrl,
+  pupReleaseUrl,
   pupCommands,
   basicCredential,
   pushEnv,

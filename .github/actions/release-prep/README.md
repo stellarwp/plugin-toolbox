@@ -128,6 +128,7 @@ that is not a valid branch name, and a checkout that is not on `branch`.
 | `date` | `2026-10-08` | The date written in the changelog |
 | `commit` | `3f2a…` | The commit pushed to the branch. Empty when nothing changed |
 | `files` | `my-plugin.php` | The files the commit changed, one per line. Empty when nothing changed |
+| `distribution` | `phar` | Which pup distribution the release carries. `phar` on every run that succeeds, the only distribution the action runs today |
 
 ## Which pup runs
 
@@ -140,7 +141,9 @@ The release itself decides whether the action can run it, not a version comparis
 sends a HEAD request to the release's `pup.phar` asset. Every release from 1.2.4 to 2.0.0
 publishes one; the phar downloads into the runner's temp directory and runs on the runner's PHP.
 A release without one is not supported yet: the prepare step fails, saying so and naming a pin
-to use instead. The TypeScript line of pup publishes no phar and is meant to run through its own
+to use instead. A pinned release that does not exist, such as a mistyped number, fails the step
+with "is not a release"; the action tells the two apart with a second HEAD request, to the
+release's page. The TypeScript line of pup publishes no phar and is meant to run through its own
 GitHub Action. The manifest cannot carry that call behind a condition: a composite action's
 `uses:` references resolve when the job is set up, not when the step runs, so a conditional
 reference to an action that does not exist yet would break every run. When the TypeScript line

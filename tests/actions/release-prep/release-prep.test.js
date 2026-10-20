@@ -16,6 +16,7 @@ const {
   readPuprc,
   hasChangeloggerConfig,
   pupDownloadUrl,
+  pupReleaseUrl,
   pupCommands,
   basicCredential,
   pushEnv,
@@ -321,6 +322,10 @@ describe('release-prep', () => {
         pupDownloadUrl('2.0.0'),
         'https://github.com/stellarwp/pup/releases/download/2.0.0/pup.phar'
       )
+    })
+
+    it('checks the release page when the phar is missing', () => {
+      assert.equal(pupReleaseUrl('2.0.0'), 'https://github.com/stellarwp/pup/releases/tag/2.0.0')
     })
 
     it('bumps the version files, then replaces the TBDs', () => {
@@ -724,7 +729,38 @@ describe('release-prep', () => {
       assert.equal(called, 0, 'a pinned version downloads straight from the release URL')
     })
 
-    it('fails loudly when the release has no phar, pointing at the pin', async (t) => {
+    it('fails loudly when the release exists but has no phar, pointing at the pin', async (t) => {
+      // pup 1.2.3 is such a release today; the TypeScript line will be another.
+      const { core, outputs } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(
+        allSucceed([
+          { command: 'curl', args: /fsSI .*\/download\//, exitCode: 22, stderr: 'The requested URL returned error: 404' },
+          { command: 'curl', args: /fsSI .*\/releases\/tag\// },
+        ])
+      )
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+      await assert.rejects(
+        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        /pup 2\.0\.0 publishes no pup\.phar asset.*Pin pup-version to a release that ships one, such as 2\.0\.0/s
+      )
+      assert.deepEqual(outputs(), { distribution: 'ts' }, 'the resolved distribution is reported on the failed run')
+      assert.deepEqual(
+        sequence(calls).filter((call) => call.startsWith('curl')),
+        [
+          'curl -fsSI https://github.com/stellarwp/pup/releases/download/2.0.0/pup.phar',
+          'curl -fsSI https://github.com/stellarwp/pup/releases/tag/2.0.0',
+        ],
+        'the release page is checked once the asset is missing'
+      )
+      assert.ok(
+        !sequence(calls).some((call) => /fsSL|php /.test(call)),
+        'no phar is downloaded and no PHP runs without a phar asset'
+      )
+    })
+
+    it('fails when the pinned release does not exist, naming the pin', async (t) => {
+      // A typo in pup-version gets a 404 on the asset too; the release page tells the two apart.
       const { core, outputs } = await coreWithOutputs(t)
       const { exec, calls } = recordingExec(
         allSucceed([
@@ -734,13 +770,26 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv(), cwd }),
-        /pup 2\.0\.0 publishes no \.phar asset.*Pin pup-version to a release that ships a \.phar/s
+        runPrepare({ core, exec, env: prepareEnv({ INPUT_PUP_VERSION: '2.0.9' }), cwd }),
+        /pup 2\.0\.9 is not a release: check pup-version for a typo\. Nothing was changed\./
       )
-      assert.deepEqual(outputs(), { distribution: 'ts' }, 'the resolved distribution is reported on the failed run')
-      assert.ok(
-        !sequence(calls).some((call) => /fsSL|php /.test(call)),
-        'no phar is downloaded and no PHP runs without a phar asset'
+      assert.deepEqual(outputs(), {}, 'no distribution is reported for a release that does not exist')
+      assert.ok(!sequence(calls).some((call) => /fsSL|php /.test(call)))
+    })
+
+    it('fails loudly when the release page check itself errors', async (t) => {
+      const { core } = await coreWithOutputs(t)
+      const { exec } = recordingExec(
+        allSucceed([
+          { command: 'curl', args: /fsSI .*\/download\//, exitCode: 22, stderr: 'The requested URL returned error: 404' },
+          { command: 'curl', args: /fsSI .*\/releases\/tag\//, exitCode: 28, stderr: 'Connection timed out' },
+        ])
+      )
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+      await assert.rejects(
+        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        /Checking the pup 2\.0\.0 release failed.*Connection timed out/s
       )
     })
 

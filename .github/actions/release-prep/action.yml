@@ -57,6 +57,11 @@ outputs:
   files:
     description: 'The files the commit changed, one per line. Empty when nothing changed.'
     value: ${{ steps.commit.outputs.files }}
+  distribution:
+    description: >-
+      Which pup distribution the release carries. On a run that succeeds it is `phar`, the only
+      distribution the action runs today.
+    value: ${{ steps.prepare.outputs.distribution }}
 
 runs:
   using: 'composite'
