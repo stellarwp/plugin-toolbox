@@ -1,7 +1,7 @@
 # release-prep
 
 Prepares a release branch: bumps the version, replaces the `@since TBD` placeholders, writes the
-changelog, then commits and pushes the result to the branch:
+changelog, then commits the result to the branch through the GitHub API:
 
 ```yaml
 - uses: actions/checkout@v6
@@ -31,9 +31,10 @@ Three tools run, in this order, from the root of the checkout:
 3. The [changelogger action](https://github.com/stellarwp/changelogger) writes the pending entries in
    `changelog/` into the changelog files and deletes them, with the version and the date.
 
-Everything the working tree changed is then committed as `Prepare <branch> (<version>)` by
-`github-actions[bot]` and pushed to `branch`. Run the action on a clean checkout, and put any step
-that writes tracked files after it: the commit includes every change in the working tree.
+Everything the working tree changed is then committed to `branch` as `Prepare <branch> (<version>)`,
+through the GitHub API, by the identity of `token`: `github-actions[bot]` for the default token. Run
+the action on a clean checkout, and put any step that writes tracked files after it: the commit
+includes every change in the working tree. See [Committing](#committing).
 
 pup is downloaded from its GitHub release into the runner's temp directory, so it never ends up in
 the commit. See [Which pup runs](#which-pup-runs).
@@ -124,10 +125,10 @@ that is not a valid branch name, and a checkout that is not on `branch`.
 
 | Input | Required | Default | What it does |
 |---|---|---|---|
-| `branch` | yes | | The release branch to push to, e.g. `release/M26.jigglypuff`. A branch name, not `refs/heads/…`. The checkout has to be on it; see [Pushing](#pushing) |
+| `branch` | yes | | The release branch to commit to, e.g. `release/M26.jigglypuff`. A branch name, not `refs/heads/…`. The checkout has to be on it; see [Committing](#committing) |
 | `version` | yes | | The version to prepare, e.g. `4.17.0`. See [Versions it refuses](#versions-it-refuses) |
 | `date` | no | today, in UTC | The changelog date as `YYYY-MM-DD`. Empty or `today` writes today |
-| `token` | no | `github.token` | The token the commit is pushed with. See [Pushing](#pushing) |
+| `token` | no | `github.token` | The token the commit is created with. See [Committing](#committing) |
 | `pup-version` | no | `latest` | The pup release to run: a number such as `2.0.0`, or `latest` for the newest. See [Which pup runs](#which-pup-runs) |
 
 ## Outputs
@@ -136,7 +137,7 @@ that is not a valid branch name, and a checkout that is not on `branch`.
 |---|---|---|
 | `version` | `4.17.0` | The version prepared |
 | `date` | `2026-10-08` | The date written in the changelog |
-| `commit` | `3f2a…` | The commit pushed to the branch. Empty when nothing changed |
+| `commit` | `3f2a…` | The commit created on the branch. Empty when nothing changed |
 | `files` | `my-plugin.php` | The files the commit changed, one per line. Empty when nothing changed |
 | `distribution` | `phar` | Which pup distribution the release carries. `phar` on every run that succeeds, the only distribution the action runs today |
 
@@ -173,7 +174,7 @@ phar path only; the TS contract does not define it yet.
 ## Running it again
 
 Preparing a version the branch already holds changes nothing: the versions match, no TBDs are left
-and `changelog/` is empty. The action commits and pushes nothing and succeeds, so a retry of a
+and `changelog/` is empty. The action commits nothing, calls no API, and succeeds, so a retry of a
 finished preparation is safe.
 
 ## The date
@@ -182,7 +183,7 @@ The changelogger action writes the date exactly as it is given: `today` would la
 as the word, and an empty value as an empty date. The action resolves both to today's date, in UTC,
 before the changelog step runs, and that is the date the `date` output reports.
 
-## Pushing
+## Committing
 
 The job needs `contents: write`:
 
@@ -193,33 +194,39 @@ jobs:
       contents: write
 ```
 
-The action pushes with `token` itself, to `HEAD:refs/heads/<branch>`, so the checkout can use
-`persist-credentials: false`. The token reaches git through the environment of that one push —
-never on its command line, which the log would echo, and never in `.git/config`, where a later
-step could read it. The token and the base64 credential built from it are masked in the log.
+The commit is created through the GitHub API with `token`, not pushed with git. The action lists
+the changes with git (`git add --all`, then `git diff --cached --raw`), uploads each changed file
+as a blob, builds a tree on the checkout's own tree, creates a commit whose parent is the
+checkout's own head, and points `branch` at it. Nothing is pushed, so the checkout can use
+`persist-credentials: false`, and no token reaches git or the log. GitHub signs commits created
+this way, so they show as verified.
 
-When the checkout keeps its own credentials, git would send two Authorization headers — its own
-and the action's — and GitHub refuses the push with a 400. The action clears the
-`http.<server>/.extraheader` key before adding its own header, so only `token` is sent.
+The ref update is not forced. If the branch moved after the checkout, GitHub refuses the update
+as it would refuse a push, the job fails saying so, and the files of the checkout are never
+written over newer ones.
 
-The push is a fast-forward. If the branch moved after the checkout, the push is refused and the
-job fails with git's output.
+The checkout itself is left as it was: its HEAD stays on the commit it had, with the prepared
+files in the working tree. A later step that reads the branch with git sees the commit before the
+preparation; the `commit` output holds the new one.
+
+The commit goes to the repository the workflow runs in (`GITHUB_REPOSITORY`). Only regular files
+are uploaded; a changed symlink or submodule fails the step, naming the path.
 
 The checkout has to be on `branch` itself, and the action checks that before changing anything.
-Pushing from another branch would also fast-forward whenever the release branch is an ancestor of
-it — for instance a run started from `main` whose checkout was given no `ref` — and the release
-would pick up every commit of that branch. A detached checkout is refused for the same reason.
+Committing from another branch would carry that branch's commits into the release whenever the
+release branch is an ancestor of it — for instance a run started from `main` whose checkout was
+given no `ref`. A detached checkout is refused for the same reason.
 
 Pass a PAT or app token as `token` when a ruleset on the release branches blocks `github.token`,
-or when a workflow in the repository has to run on the push. GitHub creates no workflow run for a
-push made with `GITHUB_TOKEN`.
+or when a workflow in the repository has to run on the commit. GitHub creates no workflow run for
+a commit made with `GITHUB_TOKEN`.
 
 ## How it runs
 
 Two [actions/github-script](https://github.com/actions/github-script) steps run `release-prep.js`,
 with the changelogger action between them. The first validates the inputs and the `.puprc`, then
-runs pup. The second commits and pushes. github-script supplies the Node runtime and `exec`; there
-is no dependency to install and no bundle to build.
+runs pup. The second commits through the API. github-script supplies the Node runtime, `exec` and
+the `github` client, built from `token`; there is no dependency to install and no bundle to build.
 
 The script is loaded by path rather than inlined in the manifest because github-script's `require`
 resolves against the workspace of the repository being built, not this action's directory. The
@@ -230,5 +237,6 @@ or a branch name is data and cannot become part of the program. The commands run
 arguments as a list, without a shell.
 
 `tests/actions/release-prep/release-prep.test.js` covers the rules above. The pup steps run
-against a stand-in for `exec`; the commit and push run real git against a local repository. Run
-`npm install` once, then `node --test`.
+against a stand-in for `exec`; the commit step runs real git against a local checkout to list the
+changes, and sends the commit to an Octokit whose network is a stand-in that records every
+request. Run `npm install` once, then `node --test`.

@@ -1,13 +1,14 @@
 'use strict'
 
 /**
- * Prepares a release branch: bumps the version, replaces the TBD placeholders, and commits and
- * pushes what the changelog step wrote alongside them.
+ * Prepares a release branch: bumps the version, replaces the TBD placeholders, and commits what the
+ * changelog step wrote alongside them to the branch, through the GitHub API.
  *
  * The action runs in two github-script steps with the changelogger action between them, so there
- * are two entry points. runPrepare validates everything and runs pup; runCommit commits and pushes.
- * The functions they are built from are pure, apart from the reads of .puprc and package.json and
- * the commands run through `exec`, so a test can pass a stand-in and assert the calls.
+ * are two entry points. runPrepare validates everything and runs pup; runCommit lists the changes
+ * with git and creates the commit with the Octokit github-script supplies. The functions they are
+ * built from are pure, apart from the reads of the checkout, the commands run through `exec` and
+ * the API calls, so a test can pass stand-ins and assert the calls and the requests.
  */
 
 const fs = require('node:fs')
@@ -41,11 +42,8 @@ const PUP_VERSION_PATTERN = /^\d+\.\d+\.\d+$/
 /** A calendar date as the changelog writing strategies expect it. */
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 
-/** The identity of the bot GitHub shows for commits made with the default token. */
-const COMMIT_AUTHOR = {
-  name: 'github-actions[bot]',
-  email: '41898282+github-actions[bot]@users.noreply.github.com',
-}
+/** The git modes of a regular file, the only kind of change the action uploads. */
+const BLOB_MODES = new Set(['100644', '100755'])
 
 /**
  * Reads the version input, refusing an empty one.
@@ -142,7 +140,7 @@ function resolveDate(date, now = new Date()) {
 }
 
 /**
- * Checks the shape of the branch to push to. Whether git accepts the name is checked by git, in
+ * Checks the shape of the branch to commit to. Whether git accepts the name is checked by git, in
  * runPrepare.
  *
  * @param {string} branch The `branch` input.
@@ -158,7 +156,7 @@ function validateBranch(branch) {
     throw new Error('No branch was given: pass the release branch to prepare, e.g. release/M26.jigglypuff.')
   }
 
-  // The push writes refs/heads/<ref>, so a full ref would create a branch named refs/heads/….
+  // The commit updates refs/heads/<branch>, so a full ref would name a branch refs/heads/….
   if (trimmed.startsWith('refs/')) {
     throw new Error(
       `Refusing to prepare '${trimmed}': pass the branch name, e.g. ` +
@@ -244,7 +242,7 @@ async function resolvePupRelease({ version, token, fetchImpl }) {
  * Reads what the action needs from the repository's .puprc.
  *
  * pup itself does not fail on a missing or broken .puprc: it reads either as empty, bumps nothing
- * and exits 0. So the file is checked here, before pup runs, and a release branch is never pushed
+ * and exits 0. So the file is checked here, before pup runs, and a release branch never gets a commit
  * with the version left as it was.
  *
  * @param {string|null} text The contents of .puprc, or null when there is none.
@@ -452,52 +450,37 @@ function pupCommands(phar, version) {
 }
 
 /**
- * The basic credential git sends for a token, as actions/checkout builds it.
+ * Reads the changes `git diff --cached --raw --no-renames -z` lists.
  *
- * @param {string} token The token.
+ * Each entry is `:<previous mode> <mode> <previous sha> <sha> <status>`, NUL, the path, NUL. The
+ * raw format carries the modes, which the tree entries need and `--name-status` drops;
+ * `--no-renames` keeps a rename as its deletion and addition, since the tree takes one entry per
+ * path; `-z` keeps a path with a space or a quote intact.
  *
- * @returns {string} base64 of `x-access-token:<token>`.
+ * @param {string} output What git printed.
+ *
+ * @returns {{path: string, status: string, mode: string, previousMode: string}[]} The changes, in
+ *          the order git lists them.
  */
-function basicCredential(token) {
-  return Buffer.from(`x-access-token:${token}`).toString('base64')
+function parseRawDiff(output) {
+  const fields = String(output ?? '').split('\0')
+  const changes = []
+
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    const header = fields[i]
+    if (!header.startsWith(':')) {
+      continue
+    }
+
+    const [previousMode, mode, , , status] = header.slice(1).split(' ')
+    changes.push({ path: fields[i + 1], status, mode, previousMode })
+  }
+
+  return changes
 }
 
 /**
- * The environment that hands git the token for one push.
- *
- * git reads GIT_CONFIG_COUNT and the numbered KEY/VALUE pairs as extra config for that one
- * process. The token therefore never sits on a command line, which the log echoes, and is never
- * written to .git/config, where a later step could read it. That is what lets a caller check out
- * with `persist-credentials: false`.
- *
- * A checkout that does persist its credentials puts its own header under the same key, and git
- * sends every value of it: two Authorization headers, which GitHub refuses with a 400. An empty
- * value resets the key's list, so the first entry clears whatever the checkout left and only this
- * token is sent.
- *
- * @param {string} token     The token, or empty to leave authentication to the checkout.
- * @param {string} serverUrl The GitHub server, e.g. https://github.com.
- *
- * @returns {object} The variables to add to git's environment; none without a token.
- */
-function pushEnv(token, serverUrl) {
-  if (!token) {
-    return {}
-  }
-
-  const key = `http.${serverUrl.replace(/\/+$/, '')}/.extraheader`
-
-  return {
-    GIT_CONFIG_COUNT: '2',
-    GIT_CONFIG_KEY_0: key,
-    GIT_CONFIG_VALUE_0: '',
-    GIT_CONFIG_KEY_1: key,
-    GIT_CONFIG_VALUE_1: `AUTHORIZATION: basic ${basicCredential(token)}`,
-  }
-}
-
-/**
- * The message of the commit the action pushes.
+ * The message of the commit the action creates.
  *
  * @param {string} branch  The release branch.
  * @param {string} version The version prepared.
@@ -633,9 +616,9 @@ async function runPrepare({ core, exec, env, cwd = process.cwd(), fetchImpl = gl
     throw new Error(`'${branch}' is not a valid branch name. Nothing was changed.`)
   }
 
-  // The push writes HEAD to refs/heads/<branch>. From any other branch that the release branch is an
-  // ancestor of, git would accept it as a fast-forward and carry that branch's commits into the
-  // release, so the checkout has to be on the release branch itself.
+  // The commit's parent is the checkout's HEAD and it lands on refs/heads/<branch>. From any other
+  // branch that the release branch is an ancestor of, GitHub would accept it as a fast-forward and
+  // carry that branch's commits into the release, so the checkout has to be on the release branch.
   const head = await exec.getExecOutput('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
     cwd,
     ignoreReturnCode: true,
@@ -763,46 +746,58 @@ async function runPrepareWithPhar({ core, exec, cwd, env, pharRelease, version, 
 }
 
 /**
- * Commits whatever the preparation changed and pushes it to the release branch.
+ * Commits whatever the preparation changed to the release branch, through the GitHub API.
+ *
+ * The changes are listed with git, then sent as blobs and a tree built on the checkout's own tree,
+ * a commit whose parent is the checkout's own head, and a ref update that is not forced: when the
+ * branch moved after the checkout, GitHub refuses the update as it would refuse a push, and the
+ * checkout's files are never written over newer ones. The checkout itself is left as it was: its
+ * HEAD stays on the commit it had, with the changes in the working tree.
  *
  * When nothing changed, which is what re-preparing a version that is already on the branch finds,
- * it neither commits nor pushes, and succeeds.
+ * it calls nothing and succeeds.
  *
- * @param {object} core The @actions/core toolkit, for the log, the outputs and the summary.
- * @param {object} exec The @actions/exec toolkit.
- * @param {object} env  The environment the action manifest put its inputs in.
- * @param {string} cwd  The checkout, the working directory by default.
+ * @param {object} github An Octokit, as actions/github-script supplies it, authenticated with the
+ *                        action's token.
+ * @param {object} core   The @actions/core toolkit, for the log, the outputs and the summary.
+ * @param {object} exec   The @actions/exec toolkit.
+ * @param {object} env    The environment the action manifest put its inputs in.
+ * @param {string} cwd    The checkout, the working directory by default.
  *
- * @throws {Error} When a git command fails, the push included.
+ * @throws {Error} When a git command or an API call fails, a change is not a regular file, or
+ *                 the branch moved after the checkout.
  *
- * @returns {Promise<void>} Resolves once the commit is pushed, or found unnecessary.
+ * @returns {Promise<void>} Resolves once the commit is on the branch, or found unnecessary.
  */
-async function runCommit({ core, exec, env, cwd = process.cwd() }) {
+async function runCommit({ github, core, exec, env, cwd = process.cwd() }) {
   const branch = validateBranch(env.INPUT_BRANCH)
   // The prepare step validated the version against the changelogger strategy; its output is
   // what the manifest hands this step, so only an empty value is checked here.
   const version = readVersion(env.INPUT_VERSION)
   const message = commitMessage(branch, version)
-  const token = env.INPUT_TOKEN || ''
+  const [owner, repo] = String(env.GITHUB_REPOSITORY || '').split('/')
 
-  if (token) {
-    core.setSecret(token)
-    core.setSecret(basicCredential(token))
+  if (!owner || !repo) {
+    throw new Error(
+      'GITHUB_REPOSITORY is not set, so the action does not know which repository to commit to. ' +
+        'Nothing was committed.'
+    )
   }
 
   await runOrFail(exec, 'git', ['add', '--all'], { cwd }, 'Staging the changes')
 
-  const staged = await runOrFail(
+  const raw = await runOrFail(
     exec,
     'git',
-    ['diff', '--cached', '--name-only'],
+    ['diff', '--cached', '--raw', '--no-renames', '-z'],
     { cwd, silent: true },
     'Listing the changes'
   )
-  const files = staged.split('\n').filter(Boolean)
+  const changes = parseRawDiff(raw)
+  const files = changes.map((change) => change.path)
 
-  if (files.length === 0) {
-    core.info(`Nothing changed: ${branch} already holds ${version}. Nothing was committed or pushed.`)
+  if (changes.length === 0) {
+    core.info(`Nothing changed: ${branch} already holds ${version}. Nothing was committed.`)
     core.setOutput('commit', '')
     core.setOutput('files', '')
     await core.summary
@@ -812,41 +807,75 @@ async function runCommit({ core, exec, env, cwd = process.cwd() }) {
     return
   }
 
-  await runOrFail(
-    exec,
-    'git',
-    [
-      '-c',
-      `user.name=${COMMIT_AUTHOR.name}`,
-      '-c',
-      `user.email=${COMMIT_AUTHOR.email}`,
-      'commit',
-      '--quiet',
-      '-m',
-      message,
-    ],
-    { cwd },
-    'Committing the changes'
+  for (const change of changes) {
+    if (change.status !== 'D' && !BLOB_MODES.has(change.mode)) {
+      throw new Error(
+        `${change.path} has mode ${change.mode}, which this action does not commit: only regular ` +
+          'files are uploaded. Nothing was committed.'
+      )
+    }
+  }
+
+  const [head, baseTree] = (
+    await runOrFail(
+      exec,
+      'git',
+      ['rev-parse', 'HEAD', 'HEAD^{tree}'],
+      { cwd, silent: true },
+      'Reading the checkout head'
+    )
   )
+    .trim()
+    .split('\n')
 
-  const commit = (
-    await runOrFail(exec, 'git', ['rev-parse', 'HEAD'], { cwd, silent: true }, 'Reading the commit')
-  ).trim()
+  const tree = []
+  for (const change of changes) {
+    if (change.status === 'D') {
+      tree.push({ path: change.path, mode: change.previousMode, type: 'blob', sha: null })
+      continue
+    }
 
-  await runOrFail(
-    exec,
-    'git',
-    ['push', 'origin', `HEAD:refs/heads/${branch}`],
-    { cwd, env: { ...env, ...pushEnv(token, env.GITHUB_SERVER_URL || 'https://github.com') } },
-    `Pushing to ${branch}`
-  )
+    // Every file goes up as base64, so a binary arrives byte for byte.
+    const { data: blob } = await github.rest.git.createBlob({
+      owner,
+      repo,
+      content: fs.readFileSync(path.join(cwd, change.path)).toString('base64'),
+      encoding: 'base64',
+    })
+    tree.push({ path: change.path, mode: change.mode, type: 'blob', sha: blob.sha })
+  }
 
-  core.info(`Pushed ${commit} to ${branch}.`)
-  core.setOutput('commit', commit)
+  const { data: newTree } = await github.rest.git.createTree({ owner, repo, base_tree: baseTree, tree })
+  // No author or committer: the commit belongs to the token's identity, github-actions[bot] for the
+  // default token, and GitHub signs it.
+  const { data: commit } = await github.rest.git.createCommit({
+    owner,
+    repo,
+    message,
+    tree: newTree.sha,
+    parents: [head],
+  })
+
+  try {
+    await github.rest.git.updateRef({ owner, repo, ref: `heads/${branch}`, sha: commit.sha })
+  } catch (error) {
+    if (error.status === 422) {
+      throw new Error(
+        `${branch} moved after the checkout, so the commit would not be a fast-forward ` +
+          `(${error.message}). Run the step again on a fresh checkout. Nothing was committed to ` +
+          'the branch.'
+      )
+    }
+
+    throw error
+  }
+
+  core.info(`Committed ${commit.sha} to ${branch}.`)
+  core.setOutput('commit', commit.sha)
   core.setOutput('files', files.join('\n'))
   // A Markdown list rather than addList, whose HTML list would show the backticks literally.
   await core.summary
-    .addRaw(`Pushed \`${commit.slice(0, 7)}\` "${message}" to \`${branch}\`:\n\n`)
+    .addRaw(`Committed \`${commit.sha.slice(0, 7)}\` "${message}" to \`${branch}\`:\n\n`)
     .addRaw(files.map((file) => `- \`${file}\``).join('\n'), true)
     .write()
 }
@@ -866,8 +895,7 @@ module.exports = {
   pupDownloadUrl,
   pupReleaseUrl,
   pupCommands,
-  basicCredential,
-  pushEnv,
+  parseRawDiff,
   commitMessage,
   compareVersions,
   readCurrentVersion,

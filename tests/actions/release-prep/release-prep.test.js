@@ -19,13 +19,12 @@ const {
   pupDownloadUrl,
   pupReleaseUrl,
   pupCommands,
-  basicCredential,
-  pushEnv,
+  parseRawDiff,
   commitMessage,
   compareVersions,
   readCurrentVersion,
 } = require('../../../.github/actions/release-prep/release-prep.js')
-const { coreWithOutputs, recordingExec } = require('../../support/actions.js')
+const { coreWithOutputs, recordingExec, octokitFor } = require('../../support/actions.js')
 
 /** A .puprc that bumps the plugin header and replaces TBDs under src/. */
 const PUPRC = {
@@ -118,32 +117,76 @@ function git(dir, ...args) {
   return execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim()
 }
 
-/**
- * A working copy of a repository whose `origin` is a local bare repository holding `branch`.
- *
- * The commit step then runs real git against it: a push goes to the bare repository, so a test can
- * read back what landed on the branch.
- *
- * @param {string} branch The release branch the working copy has checked out.
- *
- * @returns {{work: string, remote: string}} The two directories.
- */
-function repositoryOn(branch) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-prep-git-'))
-  const remote = path.join(root, 'remote.git')
-  const work = path.join(root, 'work')
+/** The bytes of a small binary file, which a text upload would corrupt. */
+const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff])
 
-  git(root, 'init', '--quiet', '--bare', remote)
-  git(root, 'init', '--quiet', '-b', branch, work)
+/**
+ * A checkout of a release branch: one commit holding a version file, an executable, a binary and a
+ * pending changelog entry.
+ *
+ * The commit step runs real git against it to list the changes, and sends the commit itself to an
+ * Octokit whose network is a stand-in, so a test asserts the requests the API would have received.
+ *
+ * @param {string} branch The release branch the checkout is on.
+ *
+ * @returns {string} The checkout.
+ */
+function checkoutOn(branch) {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'release-prep-git-'))
+
+  git(work, 'init', '--quiet', '-b', branch)
   git(work, 'config', 'user.name', 'Test')
   git(work, 'config', 'user.email', 'test@example.com')
+  fs.mkdirSync(path.join(work, 'bin'))
+  fs.mkdirSync(path.join(work, 'changelog'))
   fs.writeFileSync(path.join(work, 'plugin.php'), 'Version: 4.16.0\n')
+  fs.writeFileSync(path.join(work, 'bin', 'tool.sh'), '#!/bin/sh\n', { mode: 0o755 })
+  fs.writeFileSync(path.join(work, 'logo.png'), PNG_BYTES)
+  fs.writeFileSync(path.join(work, 'changelog', 'entry.yaml'), 'type: fix\n')
   git(work, 'add', '-A')
   git(work, 'commit', '--quiet', '-m', 'Initial')
-  git(work, 'remote', 'add', 'origin', remote)
-  git(work, 'push', '--quiet', 'origin', `HEAD:refs/heads/${branch}`)
 
-  return { work, remote }
+  return work
+}
+
+/** The repository paths the commit step writes, as a real Octokit spells them. */
+const API = {
+  blobs: '/repos/stellarwp/plugin/git/blobs',
+  trees: '/repos/stellarwp/plugin/git/trees',
+  commits: '/repos/stellarwp/plugin/git/commits',
+  ref: '/repos/stellarwp/plugin/git/refs/heads%2Frelease%2FM26.jigglypuff',
+}
+
+/**
+ * Rules under which every API write succeeds, each blob getting a sha of its own.
+ *
+ * @param {object[]} before Rules that take precedence, to make one write fail.
+ *
+ * @returns {object[]} Rules for recordingFetch.
+ */
+function apiAccepts(before = []) {
+  return [
+    ...before,
+    {
+      method: 'POST',
+      path: API.blobs,
+      responses: [1, 2, 3, 4, 5].map((n) => ({ body: { sha: `blob-${n}` } })),
+    },
+    { method: 'POST', path: API.trees, body: { sha: 'tree-new' } },
+    { method: 'POST', path: API.commits, body: { sha: 'commit-new' } },
+    { method: 'PATCH', path: API.ref, body: { object: { sha: 'commit-new' } } },
+  ]
+}
+
+/**
+ * Each request as `METHOD path`, for asserting the order the commit step worked in.
+ *
+ * @param {object[]} requests The requests recordingFetch recorded.
+ *
+ * @returns {string[]} One line per request.
+ */
+function requested(requests) {
+  return requests.map((request) => `${request.method} ${request.path}`)
 }
 
 /**
@@ -189,8 +232,7 @@ function commitEnv(overrides = {}) {
     ...process.env,
     INPUT_BRANCH: 'release/M26.jigglypuff',
     INPUT_VERSION: '4.17.0',
-    INPUT_TOKEN: 'ghs_notarealtoken123',
-    GITHUB_SERVER_URL: 'https://github.com',
+    GITHUB_REPOSITORY: 'stellarwp/plugin',
     ...overrides,
   }
 }
@@ -404,26 +446,24 @@ describe('release-prep', () => {
     })
   })
 
-  describe('the push credential', () => {
-    it('is the basic credential git uses for a token', () => {
-      const credential = basicCredential('ghs_abc')
+  describe('parseRawDiff', () => {
+    it('reads each change with its modes, status and path from the NUL-separated raw diff', () => {
+      const raw =
+        ':100644 100644 1111111 2222222 M\0plugin.php\0' +
+        ':000000 100644 0000000 3333333 A\0changelog.txt\0' +
+        ':100644 000000 4444444 0000000 D\0changelog/entry.yaml\0' +
+        ':100644 100755 5555555 5555555 M\0bin/tool.sh\0'
 
-      assert.equal(Buffer.from(credential, 'base64').toString(), 'x-access-token:ghs_abc')
+      assert.deepEqual(parseRawDiff(raw), [
+        { path: 'plugin.php', status: 'M', mode: '100644', previousMode: '100644' },
+        { path: 'changelog.txt', status: 'A', mode: '100644', previousMode: '000000' },
+        { path: 'changelog/entry.yaml', status: 'D', mode: '000000', previousMode: '100644' },
+        { path: 'bin/tool.sh', status: 'M', mode: '100755', previousMode: '100644' },
+      ])
     })
 
-    it('reaches git through its environment, scoped to the server, after clearing the key', () => {
-      // The empty first value resets the list, dropping a header the checkout persisted.
-      assert.deepEqual(pushEnv('ghs_abc', 'https://github.com'), {
-        GIT_CONFIG_COUNT: '2',
-        GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader',
-        GIT_CONFIG_VALUE_0: '',
-        GIT_CONFIG_KEY_1: 'http.https://github.com/.extraheader',
-        GIT_CONFIG_VALUE_1: `AUTHORIZATION: basic ${basicCredential('ghs_abc')}`,
-      })
-    })
-
-    it('adds nothing without a token, leaving the checkout credentials to git', () => {
-      assert.deepEqual(pushEnv('', 'https://github.com'), {})
+    it('reads an empty diff as no changes', () => {
+      assert.deepEqual(parseRawDiff(''), [])
     })
   })
 
@@ -952,118 +992,134 @@ describe('release-prep', () => {
   })
 
   describe('runCommit', () => {
-    it('commits every change and pushes it to the release branch', async (t) => {
+    it("commits every change to the branch through the API, on the checkout's own head", async (t) => {
       const { core, outputs, summary } = await coreWithOutputs(t)
       const { exec } = await recordedRealExec()
-      const { work, remote } = repositoryOn('release/M26.jigglypuff')
+      const { github, requests } = await octokitFor(apiAccepts())
+      const work = checkoutOn('release/M26.jigglypuff')
+      const head = git(work, 'rev-parse', 'HEAD')
+      const baseTree = git(work, 'rev-parse', 'HEAD^{tree}')
       fs.writeFileSync(path.join(work, 'plugin.php'), 'Version: 4.17.0\n')
       fs.writeFileSync(path.join(work, 'changelog.txt'), '= 4.17.0 =\n')
+      fs.unlinkSync(path.join(work, 'changelog', 'entry.yaml'))
+      fs.writeFileSync(path.join(work, 'bin', 'tool.sh'), '#!/bin/sh\necho\n', { mode: 0o755 })
+      fs.writeFileSync(path.join(work, 'logo.png'), Buffer.concat([PNG_BYTES, Buffer.from([0x01])]))
 
-      await runCommit({ core, exec, env: commitEnv(), cwd: work })
+      await runCommit({ github, core, exec, env: commitEnv(), cwd: work })
 
-      const pushed = git(remote, 'rev-parse', 'refs/heads/release/M26.jigglypuff')
-      assert.equal(pushed, git(work, 'rev-parse', 'HEAD'))
-      assert.equal(git(remote, 'log', '-1', '--format=%s', pushed), 'Prepare release/M26.jigglypuff (4.17.0)')
-      assert.equal(
-        git(remote, 'log', '-1', '--format=%an <%ae>', pushed),
-        'github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>'
+      assert.deepEqual(requested(requests), [
+        `POST ${API.blobs}`,
+        `POST ${API.blobs}`,
+        `POST ${API.blobs}`,
+        `POST ${API.blobs}`,
+        `POST ${API.trees}`,
+        `POST ${API.commits}`,
+        `PATCH ${API.ref}`,
+      ])
+
+      const blobs = requests.filter((request) => request.path === API.blobs).map((request) => request.body)
+      assert.ok(
+        blobs.every((blob) => blob.encoding === 'base64'),
+        'every file is uploaded as base64, so a binary survives'
       )
-      assert.deepEqual(outputs(), { commit: pushed, files: 'changelog.txt\nplugin.php' })
-      assert.match(summary(), /Prepare release\/M26\.jigglypuff \(4\.17\.0\)/)
-      assert.match(summary(), /^- `changelog\.txt`\n- `plugin\.php`$/m)
-    })
+      const logo = Buffer.concat([PNG_BYTES, Buffer.from([0x01])]).toString('base64')
+      assert.ok(blobs.some((blob) => blob.content === logo), 'the binary is uploaded byte for byte')
 
-    it('never puts the token on a command line, in the log or in the git config', async (t) => {
-      const { core, logged } = await coreWithOutputs(t)
-      const { exec, calls, printed } = await recordedRealExec()
-      const { work } = repositoryOn('release/M26.jigglypuff')
-      fs.writeFileSync(path.join(work, 'plugin.php'), 'Version: 4.17.0\n')
-      const token = commitEnv().INPUT_TOKEN
-      const credential = basicCredential(token)
+      const tree = requests.find((request) => request.path === API.trees).body
+      assert.equal(tree.base_tree, baseTree, "the tree builds on the checkout's own tree")
+      assert.deepEqual(tree.tree, [
+        { path: 'bin/tool.sh', mode: '100755', type: 'blob', sha: 'blob-1' },
+        { path: 'changelog.txt', mode: '100644', type: 'blob', sha: 'blob-2' },
+        { path: 'changelog/entry.yaml', mode: '100644', type: 'blob', sha: null },
+        { path: 'logo.png', mode: '100644', type: 'blob', sha: 'blob-3' },
+        { path: 'plugin.php', mode: '100644', type: 'blob', sha: 'blob-4' },
+      ])
 
-      await runCommit({ core, exec, env: commitEnv(), cwd: work })
-
-      assert.match(printed(), /\[command\].*git push origin HEAD:refs\/heads\/release\/M26\.jigglypuff/)
-      const log = `${logged()}\n${printed()}`
-      assert.match(log, new RegExp(`::add-mask::${token}`))
-      assert.match(log, new RegExp(`::add-mask::${credential}`))
-
-      const unmasked = log.split('\n').filter((line) => !line.startsWith('::add-mask::'))
-      assert.ok(!unmasked.some((line) => line.includes(token) || line.includes(credential)))
-      assert.ok(!calls.some((call) => call.args.join(' ').includes(credential)))
-      assert.ok(!fs.readFileSync(path.join(work, '.git', 'config'), 'utf8').includes(credential))
-
-      const push = calls.find((call) => call.args[0] === 'push')
-      assert.deepEqual(push.args, ['push', 'origin', 'HEAD:refs/heads/release/M26.jigglypuff'])
-      assert.equal(push.options.env.GIT_CONFIG_VALUE_1, `AUTHORIZATION: basic ${credential}`)
-    })
-
-    it('sends only its own credential when the checkout persisted another', async (t) => {
-      // actions/checkout persists its token under the same http.<server>/.extraheader key, and git
-      // sends every value of that key. Two Authorization headers make GitHub answer 400.
-      const http = require('node:http')
-      const seen = []
-      const server = http.createServer((request, response) => {
-        const { rawHeaders } = request
-        seen.push(
-          rawHeaders.filter((value, index) => index % 2 === 1 && /^authorization$/i.test(rawHeaders[index - 1]))
-        )
-        response.writeHead(404).end()
+      const commit = requests.find((request) => request.path === API.commits).body
+      assert.deepEqual(commit, {
+        message: 'Prepare release/M26.jigglypuff (4.17.0)',
+        tree: 'tree-new',
+        parents: [head],
       })
-      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-      t.after(() => server.close())
 
-      const serverUrl = `http://127.0.0.1:${server.address().port}`
-      const { core } = await coreWithOutputs(t)
-      const { exec } = await recordedRealExec()
-      const { work } = repositoryOn('release/M26.jigglypuff')
-      git(work, 'remote', 'set-url', 'origin', `${serverUrl}/stellarwp/plugin.git`)
-      git(work, 'config', `http.${serverUrl}/.extraheader`, 'AUTHORIZATION: basic cGVyc2lzdGVk')
-      fs.writeFileSync(path.join(work, 'plugin.php'), 'Version: 4.17.0\n')
-      const env = commitEnv({ GITHUB_SERVER_URL: serverUrl, GIT_TERMINAL_PROMPT: '0' })
+      const ref = requests.find((request) => request.path === API.ref).body
+      assert.deepEqual(ref, { sha: 'commit-new' }, 'the ref update is not forced')
 
-      // The server has no repository, so the push fails once git has sent its first request.
-      await assert.rejects(runCommit({ core, exec, env, cwd: work }), /Pushing to release\/M26\.jigglypuff failed/)
-
-      assert.ok(seen.length > 0, 'git reached the server')
-      for (const headers of seen) {
-        assert.deepEqual(headers, [`basic ${basicCredential(env.INPUT_TOKEN)}`])
-      }
+      assert.deepEqual(outputs(), {
+        commit: 'commit-new',
+        files: 'bin/tool.sh\nchangelog.txt\nchangelog/entry.yaml\nlogo.png\nplugin.php',
+      })
+      assert.match(summary(), /Committed `commit-` "Prepare release\/M26\.jigglypuff \(4\.17\.0\)" to `release\/M26\.jigglypuff`/)
+      assert.match(summary(), /^- `bin\/tool\.sh`\n- `changelog\.txt`\n- `changelog\/entry\.yaml`\n- `logo\.png`\n- `plugin\.php`$/m)
+      assert.equal(git(work, 'rev-parse', 'HEAD'), head, 'the checkout itself stays where it was')
     })
 
-    it('neither commits nor pushes when nothing changed, and still succeeds', async (t) => {
+    it('neither commits nor calls the API when nothing changed, and still succeeds', async (t) => {
       // A retry of the same version finds the branch already prepared.
       const { core, outputs } = await coreWithOutputs(t)
-      const { exec, calls } = await recordedRealExec()
-      const { work, remote } = repositoryOn('release/M26.jigglypuff')
-      const before = git(remote, 'rev-parse', 'refs/heads/release/M26.jigglypuff')
+      const { exec } = await recordedRealExec()
+      const { github, requests } = await octokitFor(apiAccepts())
+      const work = checkoutOn('release/M26.jigglypuff')
 
-      await runCommit({ core, exec, env: commitEnv(), cwd: work })
+      await runCommit({ github, core, exec, env: commitEnv(), cwd: work })
 
-      assert.equal(git(remote, 'rev-parse', 'refs/heads/release/M26.jigglypuff'), before)
-      assert.ok(!calls.some((call) => call.args.includes('commit') || call.args.includes('push')))
+      assert.deepEqual(requests, [])
       assert.deepEqual(outputs(), { commit: '', files: '' })
     })
 
-    it('fails with git output when the push is refused', async (t) => {
+    it('fails when the branch moved after the checkout, without forcing the ref', async (t) => {
+      // GitHub refuses a ref update that is not a fast-forward with 422, as a push would.
       const { core } = await coreWithOutputs(t)
       const { exec } = await recordedRealExec()
-      const { work, remote } = repositoryOn('release/M26.jigglypuff')
-
-      // Someone else pushed to the branch after the checkout, so the push is not a fast-forward.
-      const other = path.join(path.dirname(remote), 'other')
-      git(path.dirname(remote), 'clone', '--quiet', '-b', 'release/M26.jigglypuff', remote, other)
-      git(other, 'config', 'user.name', 'Other')
-      git(other, 'config', 'user.email', 'other@example.com')
-      git(other, 'commit', '--quiet', '--allow-empty', '-m', 'Elsewhere')
-      git(other, 'push', '--quiet', 'origin', 'HEAD:refs/heads/release/M26.jigglypuff')
-
+      const { github, requests } = await octokitFor(
+        apiAccepts([{ method: 'PATCH', path: API.ref, status: 422, body: { message: 'Update is not a fast forward' } }])
+      )
+      const work = checkoutOn('release/M26.jigglypuff')
       fs.writeFileSync(path.join(work, 'plugin.php'), 'Version: 4.17.0\n')
 
       await assert.rejects(
-        runCommit({ core, exec, env: commitEnv(), cwd: work }),
-        /Pushing to release\/M26\.jigglypuff failed.*rejected/s
+        runCommit({ github, core, exec, env: commitEnv(), cwd: work }),
+        /release\/M26\.jigglypuff moved after the checkout.*Update is not a fast forward.*Nothing was committed/s
       )
+      assert.ok(!requests.some((request) => request.body?.force), 'no ref update is forced')
+    })
+
+    it('fails with the API error when a write fails', async (t) => {
+      const { core } = await coreWithOutputs(t)
+      const { exec } = await recordedRealExec()
+      const { github } = await octokitFor(
+        apiAccepts([{ method: 'POST', path: API.trees, status: 500, body: { message: 'boom' } }])
+      )
+      const work = checkoutOn('release/M26.jigglypuff')
+      fs.writeFileSync(path.join(work, 'plugin.php'), 'Version: 4.17.0\n')
+
+      await assert.rejects(runCommit({ github, core, exec, env: commitEnv(), cwd: work }), /boom/)
+    })
+
+    it('refuses a change that is not a regular file, naming it', async (t) => {
+      const { core } = await coreWithOutputs(t)
+      const { exec } = await recordedRealExec()
+      const { github, requests } = await octokitFor(apiAccepts())
+      const work = checkoutOn('release/M26.jigglypuff')
+      fs.symlinkSync('plugin.php', path.join(work, 'link.php'))
+
+      await assert.rejects(
+        runCommit({ github, core, exec, env: commitEnv(), cwd: work }),
+        /link\.php has mode 120000, which this action does not commit/
+      )
+      assert.deepEqual(requests, [], 'nothing is uploaded')
+    })
+
+    it('fails before listing anything when the repository is unknown', async (t) => {
+      const { core } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec([])
+      const { github } = await octokitFor(apiAccepts())
+
+      await assert.rejects(
+        runCommit({ github, core, exec, env: commitEnv({ GITHUB_REPOSITORY: '' }), cwd: '/nowhere' }),
+        /GITHUB_REPOSITORY/
+      )
+      assert.deepEqual(calls, [])
     })
   })
 })
