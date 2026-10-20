@@ -76,11 +76,13 @@ The action checks the `.puprc` before running anything, because pup does not: a 
 that is not JSON, or one with no `paths.versions` makes pup change nothing and exit 0. The job
 fails on any of the three, with the branch untouched.
 
-Two gaps only produce a warning; the run continues:
+Three cases only produce a warning; the run continues:
 
 - No `checks.tbd.dirs`: pup falls back to its default and replaces TBDs under `src/` only.
 - No `changelogger` section: the changelogger uses its defaults — a keepachangelog `changelog.md`
   with semver versioning — and the action validates the version as semver.
+- A custom versioning strategy, `versioning` set to a `.js` or `.ts` file: the action does not
+  check the version's shape. See [Versions it refuses](#versions-it-refuses).
 
 A writing strategy given as a `.js` file is loaded from the checkout; it has to be there before the
 action runs. One written in TypeScript has to be built in an earlier step.
@@ -154,22 +156,16 @@ publishes one; the phar downloads into the runner's temp directory and runs on t
 A release without one is not supported yet: the prepare step fails, saying so and naming a pin
 to use instead. A pinned release that does not exist, such as a mistyped number, fails the step
 with "is not a release"; the action tells the two apart with a second HEAD request, to the
-release's page. The TypeScript line of pup publishes no phar and is meant to run through its own
-GitHub Action. The manifest cannot carry that call behind a condition: a composite action's
-`uses:` references resolve when the job is set up, not when the step runs, so a conditional
-reference to an action that does not exist yet would break every run. When the TypeScript line
-publishes its action, the call is wired in as the changelogger's is — one `uses:` step per pup
-command, `command:` as the input:
+release's page.
 
-```yaml
-- uses: stellarwp/pup@v3
-  with:
-    command: replace-version --version=4.17.0
-```
-
-`uses:` takes a static ref, so `@v3` always resolves to the newest v3.x release of pup. The
-branch-version check — the refusal of a version lower than the branch already has — runs on the
-phar path only; the TS contract does not define it yet.
+The TypeScript line of pup publishes no phar. How the action will call it is open until that
+line ships a distribution: through pup's own GitHub Action, or straight from the script with the
+arguments the phar takes. The manifest cannot carry the first behind a condition today, because a
+composite action's `uses:` references resolve when the job is set up, not when the step runs, so
+a reference to an action that does not exist yet breaks every run; the second needs something
+published to call. Either way the change is local to the script, and the action's inputs and
+outputs stay as they are. The branch-version check — the refusal of a version lower than the
+branch already has — runs on the phar path only; the TS contract does not define it yet.
 
 ## Running it again
 
@@ -224,8 +220,8 @@ a commit made with `GITHUB_TOKEN`.
 ## How it runs
 
 Two [actions/github-script](https://github.com/actions/github-script) steps run `release-prep.js`,
-with the changelogger action between them. The first validates the inputs and the `.puprc`, then
-runs pup. The second commits through the API. github-script supplies the Node runtime, `exec` and
+with the changelogger action between them. The first validates the inputs, the `.puprc` and the
+changelogger strategy, then runs pup. The second commits through the API. github-script supplies the Node runtime, `exec` and
 the `github` client, built from `token`; there is no dependency to install and no bundle to build.
 
 The script is loaded by path rather than inlined in the manifest because github-script's `require`

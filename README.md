@@ -159,7 +159,7 @@ Each phase ends with something people can actually use.
 - [ ] Port `setup-slic`, `prepare-matrix`, `setup-bun` from LearnDash.
 - [ ] Port `check-php-changes`, `smart-checkout`, `process-changelog`, `add-changelog`, `generate-pot` from TEC.
 - [ ] Add `setup-node` for the npm crowd.
-- [x] Add `release-prep`: version bump, TBD replacement and changelog through pup and the changelogger action, committed and pushed to the release branch. A caller to copy is in `templates/workflows/release-prep.yml`.
+- [x] Add `release-prep`: version bump, TBD replacement and changelog through pup and the changelogger action, committed to the release branch through the GitHub API. A caller to copy is in `templates/workflows/release-prep.yml`.
 - [ ] Turn every hard-coded repo name, slug, or branch pattern into an input.
 - [ ] Self-checks: actionlint everything, unit test anything with real logic.
 - [ ] Tag `v1.0.0`.

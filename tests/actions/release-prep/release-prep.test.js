@@ -583,8 +583,8 @@ describe('release-prep', () => {
     })
 
     it('stops before downloading pup when the checkout is on another branch', async (t) => {
-      // The push writes HEAD to refs/heads/<ref>. From another branch that the release branch is an
-      // ancestor of, it would be accepted as a fast-forward and carry that branch's commits along.
+      // The commit's parent is the checkout's HEAD. From another branch that the release branch is
+      // an ancestor of, the ref update would be a fast-forward and carry that branch's commits along.
       const { core } = await coreWithOutputs(t)
       const { exec, calls } = recordingExec(
         allSucceed([{ command: 'git', args: /^symbolic-ref /, stdout: 'main\n' }])
@@ -1079,7 +1079,7 @@ describe('release-prep', () => {
 
       await assert.rejects(
         runCommit({ github, core, exec, env: commitEnv(), cwd: work }),
-        /release\/M26\.jigglypuff moved after the checkout.*Update is not a fast forward.*Nothing was committed/s
+        /GitHub refused to update release\/M26\.jigglypuff \(Update is not a fast forward\): the branch moved after the checkout.*Nothing was committed/s
       )
       assert.ok(!requests.some((request) => request.body?.force), 'no ref update is forced')
     })

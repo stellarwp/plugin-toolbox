@@ -189,10 +189,10 @@ function validatePupVersion(version) {
 /**
  * Resolves the `pup-version` input to a concrete pup release.
  *
- * A pinned release number is used as it is: the download from the release page fails on its
- * own when the release does not exist, so there is no API call for the common case. `latest`
- * asks the GitHub API for the newest release, authenticated with the action token when the
- * caller passes one, so the runner's shared unauthenticated quota is not spent.
+ * A pinned release number is used as it is: resolvePupDistribution checks it against the
+ * release page, so there is no API call for the common case. `latest` asks the GitHub API for
+ * the newest release, authenticated with the action token when the caller passes one, so the
+ * runner's shared unauthenticated quota is not spent.
  *
  * @param {object}          options
  * @param {string}          options.version   The validated `pup-version` input.
@@ -392,7 +392,8 @@ async function headExists(exec, url) {
  * @throws {Error} When the release does not exist, or a check itself fails and the run cannot
  *                 tell which path to take.
  *
- * @returns {Promise<'phar'|'ts'>} The distribution the release carries.
+ * @returns {Promise<'phar'|'ts'>} The distribution the release carries: `ts` for any release
+ *          without a phar, the old ones included, since that is the path they take.
  */
 async function resolvePupDistribution({ exec, release }) {
   const asset = await headExists(exec, pupDownloadUrl(release))
@@ -596,7 +597,8 @@ async function runOrFail(exec, command, args, options, what) {
  * @param {string}   cwd       The checkout, the working directory by default.
  * @param {Function} fetchImpl What `fetch` to use; a test passes a stand-in.
  *
- * @throws {Error} When an input is wrong, .puprc is unusable, or the download or pup fails.
+ * @throws {Error} When an input is wrong, .puprc or the changelogger versioning is unusable, the
+ *                 pup release does not exist, or the download or pup fails.
  *
  * @returns {Promise<void>} Resolves once pup has run and the outputs are set.
  */
@@ -665,12 +667,12 @@ async function runPrepare({ core, exec, env, cwd = process.cwd(), fetchImpl = gl
   if (distribution === 'phar') {
     await runPrepareWithPhar({ core, exec, cwd, env, pharRelease: pupRelease, version, branch })
   } else {
-    // The TypeScript line publishes no phar and would run through its own GitHub Action — but a
-    // composite action's `uses:` references resolve when the JOB is set up, not when the step
-    // runs, so the manifest cannot carry those calls behind a condition: they would break every
-    // run until the pup action exists. Until it does, a phar-less release fails here with an
-    // error naming the pin to use instead. The branch-version check below is part of the phar
-    // path — the TS contract does not define it yet.
+    // The TypeScript line publishes no phar, and nothing can call it yet: a composite action's
+    // `uses:` references resolve when the JOB is set up, not when the step runs, so the manifest
+    // cannot carry its action behind a condition, and calling it straight from the script needs
+    // a published distribution first. Until one exists, a phar-less release fails here with an
+    // error naming the pin to use instead. The branch-version check in runPrepareWithPhar is
+    // part of the phar path — the TS contract does not define it yet.
     throw new Error(
       `pup ${pupRelease} publishes no pup.phar asset, so this action cannot run it. Pin ` +
         'pup-version to a release that ships one, such as 2.0.0. Nothing was changed.'
@@ -765,7 +767,7 @@ async function runPrepareWithPhar({ core, exec, cwd, env, pharRelease, version, 
  * @param {string} cwd    The checkout, the working directory by default.
  *
  * @throws {Error} When a git command or an API call fails, a change is not a regular file, or
- *                 the branch moved after the checkout.
+ *                 GitHub refuses the ref update.
  *
  * @returns {Promise<void>} Resolves once the commit is on the branch, or found unnecessary.
  */
@@ -861,9 +863,9 @@ async function runCommit({ github, core, exec, env, cwd = process.cwd() }) {
   } catch (error) {
     if (error.status === 422) {
       throw new Error(
-        `${branch} moved after the checkout, so the commit would not be a fast-forward ` +
-          `(${error.message}). Run the step again on a fresh checkout. Nothing was committed to ` +
-          'the branch.'
+        `GitHub refused to update ${branch} (${error.message}): the branch moved after the ` +
+          'checkout, or no longer exists. Run the step again on a fresh checkout. Nothing was ' +
+          'committed to the branch.'
       )
     }
 
