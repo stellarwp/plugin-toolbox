@@ -221,8 +221,9 @@ a commit made with `GITHUB_TOKEN`.
 
 Two [actions/github-script](https://github.com/actions/github-script) steps run `release-prep.js`,
 with the changelogger action between them. The first validates the inputs, the `.puprc` and the
-changelogger strategy, then runs pup. The second commits through the API. github-script supplies the Node runtime, `exec` and
-the `github` client, built from `token`; there is no dependency to install and no bundle to build.
+changelogger strategy, then runs pup. The second commits through the API. github-script supplies
+the Node runtime, `exec` and the `github` client, built from `token`; there is no dependency
+to install and no bundle to build.
 
 The script is loaded by path rather than inlined in the manifest because github-script's `require`
 resolves against the workspace of the repository being built, not this action's directory. The
