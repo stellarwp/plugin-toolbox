@@ -447,7 +447,7 @@ describe('release-prep', () => {
   })
 
   describe('parseRawDiff', () => {
-    it('reads each change with its modes, status and path from the NUL-separated raw diff', () => {
+    it('reads each change with its modes, status, blob and path from the NUL-separated raw diff', () => {
       const raw =
         ':100644 100644 1111111 2222222 M\0plugin.php\0' +
         ':000000 100644 0000000 3333333 A\0changelog.txt\0' +
@@ -455,10 +455,10 @@ describe('release-prep', () => {
         ':100644 100755 5555555 5555555 M\0bin/tool.sh\0'
 
       assert.deepEqual(parseRawDiff(raw), [
-        { path: 'plugin.php', status: 'M', mode: '100644', previousMode: '100644' },
-        { path: 'changelog.txt', status: 'A', mode: '100644', previousMode: '000000' },
-        { path: 'changelog/entry.yaml', status: 'D', mode: '000000', previousMode: '100644' },
-        { path: 'bin/tool.sh', status: 'M', mode: '100755', previousMode: '100644' },
+        { path: 'plugin.php', status: 'M', mode: '100644', previousMode: '100644', blob: '2222222' },
+        { path: 'changelog.txt', status: 'A', mode: '100644', previousMode: '000000', blob: '3333333' },
+        { path: 'changelog/entry.yaml', status: 'D', mode: '000000', previousMode: '100644', blob: '0000000' },
+        { path: 'bin/tool.sh', status: 'M', mode: '100755', previousMode: '100644', blob: '5555555' },
       ])
     })
 
@@ -1052,6 +1052,25 @@ describe('release-prep', () => {
       assert.match(summary(), /Committed `commit-` "Prepare release\/M26\.jigglypuff \(4\.17\.0\)" to `release\/M26\.jigglypuff`/)
       assert.match(summary(), /^- `bin\/tool\.sh`\n- `changelog\.txt`\n- `changelog\/entry\.yaml`\n- `logo\.png`\n- `plugin\.php`$/m)
       assert.equal(git(work, 'rev-parse', 'HEAD'), head, 'the checkout itself stays where it was')
+    })
+
+    it('uploads the staged content, not the file on disk', async (t) => {
+      // .gitattributes normalization (here CRLF to LF) makes the staged blob differ from what is
+      // on disk; the commit has to carry what git staged.
+      const { core } = await coreWithOutputs(t)
+      const { exec } = await recordedRealExec()
+      const { github, requests } = await octokitFor(apiAccepts())
+      const work = checkoutOn('release/M26.jigglypuff')
+      fs.writeFileSync(path.join(work, '.gitattributes'), '* text eol=lf\n')
+      fs.writeFileSync(path.join(work, 'notes.txt'), 'first line\r\nsecond line\r\n')
+
+      await runCommit({ github, core, exec, env: commitEnv(), cwd: work })
+
+      const staged = requests
+        .filter((request) => request.path === API.blobs)
+        .map((request) => request.body)
+        .find((blob) => Buffer.from(blob.content, 'base64').toString() === 'first line\nsecond line\n')
+      assert.ok(staged, 'the blob is the staged content, with CRLF normalized to LF')
     })
 
     it('neither commits nor calls the API when nothing changed, and still succeeds', async (t) => {

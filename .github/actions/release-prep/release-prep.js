@@ -14,6 +14,7 @@
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const { execFileSync } = require('node:child_process')
 
 const { compareVersions } = require('../../lib/versions.js')
 
@@ -454,14 +455,15 @@ function pupCommands(phar, version) {
  * Reads the changes `git diff --cached --raw --no-renames -z` lists.
  *
  * Each entry is `:<previous mode> <mode> <previous sha> <sha> <status>`, NUL, the path, NUL. The
- * raw format carries the modes, which the tree entries need and `--name-status` drops;
+ * raw format carries the modes, which the tree entries need and `--name-status` drops, and the
+ * staged blob's sha, which the upload reads the content from; `--no-abbrev` keeps that sha full.
  * `--no-renames` keeps a rename as its deletion and addition, since the tree takes one entry per
  * path; `-z` keeps a path with a space or a quote intact.
  *
  * @param {string} output What git printed.
  *
- * @returns {{path: string, status: string, mode: string, previousMode: string}[]} The changes, in
- *          the order git lists them.
+ * @returns {{path: string, status: string, mode: string, previousMode: string, blob: string}[]}
+ *          The changes, in the order git lists them.
  */
 function parseRawDiff(output) {
   const fields = String(output ?? '').split('\0')
@@ -473,8 +475,8 @@ function parseRawDiff(output) {
       continue
     }
 
-    const [previousMode, mode, , , status] = header.slice(1).split(' ')
-    changes.push({ path: fields[i + 1], status, mode, previousMode })
+    const [previousMode, mode, , blob, status] = header.slice(1).split(' ')
+    changes.push({ path: fields[i + 1], status, mode, previousMode, blob })
   }
 
   return changes
@@ -791,7 +793,7 @@ async function runCommit({ github, core, exec, env, cwd = process.cwd() }) {
   const raw = await runOrFail(
     exec,
     'git',
-    ['diff', '--cached', '--raw', '--no-renames', '-z'],
+    ['diff', '--cached', '--raw', '--no-renames', '--no-abbrev', '-z'],
     { cwd, silent: true },
     'Listing the changes'
   )
@@ -837,11 +839,13 @@ async function runCommit({ github, core, exec, env, cwd = process.cwd() }) {
       continue
     }
 
-    // Every file goes up as base64, so a binary arrives byte for byte.
+    // The content comes from the staged blob, not the file on disk: what git staged is what a
+    // local commit would carry, and filters (.gitattributes normalization, an LFS pointer) can
+    // make the two differ. cat-file reads the blob as bytes, so a binary arrives byte for byte.
     const { data: blob } = await github.rest.git.createBlob({
       owner,
       repo,
-      content: fs.readFileSync(path.join(cwd, change.path)).toString('base64'),
+      content: execFileSync('git', ['cat-file', 'blob', change.blob], { cwd }).toString('base64'),
       encoding: 'base64',
     })
     tree.push({ path: change.path, mode: change.mode, type: 'blob', sha: blob.sha })
