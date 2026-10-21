@@ -81,7 +81,7 @@ Three cases only produce a warning; the run continues:
 - No `checks.tbd.dirs`: pup falls back to its default and replaces TBDs under `src/` only.
 - No `changelogger` section: the changelogger uses its defaults — a keepachangelog `changelog.md`
   with semver versioning — and the action validates the version as semver.
-- A custom versioning strategy, `versioning` set to a `.js` or `.ts` file: the action does not
+- A custom versioning strategy, `versioning` set to a `.js`: the action does not
   check the version's shape. See [Versions it refuses](#versions-it-refuses).
 
 A writing strategy given as a `.js` file is loaded from the checkout; it has to be there before the
