@@ -1,0 +1,3 @@
+#!/bin/sh
+# Test-only: route svn through the write guard.
+exec python3 "$(dirname "$0")/../write_guard.py" svn "$@"
