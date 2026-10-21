@@ -845,7 +845,7 @@ async function runCommit({ github, core, exec, env, cwd = process.cwd() }) {
     const { data: blob } = await github.rest.git.createBlob({
       owner,
       repo,
-      content: execFileSync('git', ['cat-file', 'blob', change.blob], { cwd }).toString('base64'),
+      content: execFileSync('git', ['cat-file', 'blob', change.blob], { cwd, maxBuffer: Infinity }).toString('base64'),
       encoding: 'base64',
     })
     tree.push({ path: change.path, mode: change.mode, type: 'blob', sha: blob.sha })

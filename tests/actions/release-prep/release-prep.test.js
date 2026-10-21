@@ -1056,7 +1056,7 @@ describe('release-prep', () => {
 
     it('uploads the staged content, not the file on disk', async (t) => {
       // .gitattributes normalization (here CRLF to LF) makes the staged blob differ from what is
-      // on disk; the commit has to carry what git staged.
+      // on the disk; the commit has to carry what git staged.
       const { core } = await coreWithOutputs(t)
       const { exec } = await recordedRealExec()
       const { github, requests } = await octokitFor(apiAccepts())
@@ -1071,6 +1071,21 @@ describe('release-prep', () => {
         .map((request) => request.body)
         .find((blob) => Buffer.from(blob.content, 'base64').toString() === 'first line\nsecond line\n')
       assert.ok(staged, 'the blob is the staged content, with CRLF normalized to LF')
+    })
+
+    it('uploads a file larger than the exec output buffer', async (t) => {
+      // execFileSync caps stdout at 1 MiB by default; a long changelog or readme passes that.
+      const { core } = await coreWithOutputs(t)
+      const { exec } = await recordedRealExec()
+      const { github, requests } = await octokitFor(apiAccepts())
+      const work = checkoutOn('release/M26.jigglypuff')
+      const big = `${'line of the long changelog\n'.repeat(45000)}tail\n`
+      fs.writeFileSync(path.join(work, 'changelog.txt'), big)
+
+      await runCommit({ github, core, exec, env: commitEnv(), cwd: work })
+
+      const blob = requests.find((request) => request.path === API.blobs).body
+      assert.equal(Buffer.from(blob.content, 'base64').toString(), big, 'the whole file uploads')
     })
 
     it('neither commits nor calls the API when nothing changed, and still succeeds', async (t) => {
