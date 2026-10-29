@@ -344,7 +344,7 @@ describe('release-prep', () => {
     it('refuses a branch outside the prefixes, naming the branch and the list', () => {
       assert.throws(
         () => validateBranch('develop', ['release/', 'hotfix/']),
-        /Refusing to prepare 'develop': it does not start with release\/ or hotfix\/.*set branch-prefixes.*Nothing was changed/s
+        /Refusing to prepare 'develop': it does not start with release\/ or hotfix\/.*set branch-prefixes to a JSON array.*Nothing was changed/s
       )
       assert.throws(
         () => validateBranch('release/4.20.0', ['bucket/']),

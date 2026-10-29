@@ -223,8 +223,8 @@ function validateBranch(branch, prefixes = []) {
 
     throw new Error(
       `Refusing to prepare '${trimmed}': it does not start with ${accepted}. The action only ` +
-        'commits to a release branch; pass the branch to prepare, or set branch-prefixes if the ' +
-        'repository names them differently. Nothing was changed.'
+        'commits to a release branch; pass the branch to prepare, or set branch-prefixes to a JSON ' +
+        'array of the prefixes the repository uses. Nothing was changed.'
     )
   }
 

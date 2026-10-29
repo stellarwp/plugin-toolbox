@@ -132,8 +132,8 @@ default, or the action fails before anything runs, naming the branch it got and 
 
 ```
 Refusing to prepare 'develop': it does not start with release/, hotfix/, or bucket/. The action only
-commits to a release branch; pass the branch to prepare, or set branch-prefixes if the repository
-names them differently. Nothing was changed.
+commits to a release branch; pass the branch to prepare, or set branch-prefixes to a JSON array of
+the prefixes the repository uses. Nothing was changed.
 ```
 
 A repository that names its release branches some other way passes its own list, as a JSON array
