@@ -121,13 +121,53 @@ any, it writes nothing and accepts any version. The action's check does not depe
   When pup cannot find a version at all, it fails, as `replace-version` would.
 
 Each refusal happens before anything is changed. So do a `date` that is not `YYYY-MM-DD`, a `branch`
-that is not a valid branch name, and a checkout that is not on `branch`.
+outside `branch-prefixes` or not a valid branch name, and a checkout that is not on `branch`.
+
+## Branches it refuses
+
+The action commits to the branch it is given, and the job that runs it has write access, so a
+dispatch by hand with the wrong name would put a version bump and a changelog on `develop`. `branch`
+has to start with one of the prefixes `branch-prefixes` lists, `release/,hotfix/` by default, or the
+action fails before anything runs, naming the branch it got and the list:
+
+```
+Refusing to prepare 'develop': it does not start with release/ or hotfix/. The action only commits
+to a release branch; pass the branch to prepare, or set branch-prefixes if the repository names
+them differently. Nothing was changed.
+```
+
+A repository that names its release branches some other way passes its own list, comma-separated,
+with any whitespace around an entry ignored:
+
+```yaml
+- uses: stellarwp/plugin-toolbox/.github/actions/release-prep@v1
+  with:
+    branch: ${{ inputs.branch }}
+    branch-prefixes: 'bucket/, rc-'
+    version: ${{ inputs.version }}
+```
+
+An empty value keeps the default list, so a dispatch input left blank and passed through keeps the
+check on. Turning it off takes the word `any`, on its own:
+
+```yaml
+    branch-prefixes: any
+```
+
+With it, any branch name git accepts is prepared. `any` inside a list, such as `release/, any`, is
+a prefix like the others.
+
+A prefix is matched literally, from the start of the branch name, with no wildcards: `release/`
+takes `release/4.20.0`; `release`, without the slash, also takes `release-4.x` and `releases/x`. The
+check runs with the other input checks, before `git check-ref-format`, the `.puprc` read and the pup
+download.
 
 ## Inputs
 
 | Input | Required | Default | What it does |
 |---|---|---|---|
 | `branch` | yes | | The release branch to commit to, e.g. `release/M26.jigglypuff`. A branch name, not `refs/heads/…`. The checkout has to be on it; see [Committing](#committing) |
+| `branch-prefixes` | no | `release/,hotfix/` | The prefixes `branch` has to start with, comma-separated. Empty keeps the default; `any` turns the check off. See [Branches it refuses](#branches-it-refuses) |
 | `version` | yes | | The version to prepare, e.g. `4.17.0`. See [Versions it refuses](#versions-it-refuses) |
 | `date` | no | today, in UTC | The changelog date as `YYYY-MM-DD`. Empty or `today` writes today |
 | `token` | no | `github.token` | The token the commit is created with. See [Committing](#committing) |
