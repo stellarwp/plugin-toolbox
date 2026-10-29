@@ -141,16 +141,53 @@ function resolveDate(date, now = new Date()) {
 }
 
 /**
- * Checks the shape of the branch to commit to. Whether git accepts the name is checked by git, in
- * runPrepare.
+ * The prefixes a branch has to start with when `branch-prefixes` is not set: the names the
+ * consumers give their release branches.
+ */
+const DEFAULT_BRANCH_PREFIXES = ['release/', 'hotfix/']
+
+/**
+ * Reads the `branch-prefixes` input: the branch names the action agrees to commit to.
  *
- * @param {string} branch The `branch` input.
+ * An empty value keeps the default list, so a dispatch input left blank and passed through keeps
+ * the check on. Turning it off takes the word `any`, on its own.
  *
- * @throws {Error} When it is empty or a full ref.
+ * @param {string} input The input: prefixes separated by commas, `any`, or empty.
+ *
+ * @returns {string[]} The prefixes, without surrounding whitespace or empty entries; the default
+ *                     list for an empty input. Empty for `any`, which turns the check off.
+ */
+function readBranchPrefixes(input) {
+  const trimmed = String(input ?? '').trim()
+
+  if (trimmed.toLowerCase() === 'any') {
+    return []
+  }
+
+  const prefixes = trimmed
+    .split(',')
+    .map((prefix) => prefix.trim())
+    .filter((prefix) => prefix !== '')
+
+  return prefixes.length > 0 ? prefixes : DEFAULT_BRANCH_PREFIXES
+}
+
+/**
+ * Checks the branch to commit to: its shape, and that it is one of the branches the action agrees
+ * to commit to. Whether git accepts the name is checked by git, in runPrepare.
+ *
+ * The action commits to the branch it is given, with write access, so a dispatch by hand with the
+ * wrong name would put a version bump on develop. A prefix is matched literally: `release/` takes
+ * `release/4.20.0`, and `release` takes `release-4.x` and `releases/x` as well.
+ *
+ * @param {string}   branch   The `branch` input.
+ * @param {string[]} prefixes The prefixes `branch` may start with. An empty list checks nothing.
+ *
+ * @throws {Error} When it is empty, a full ref, or outside the prefixes.
  *
  * @returns {string} The branch name, without surrounding whitespace.
  */
-function validateBranch(branch) {
+function validateBranch(branch, prefixes = []) {
   const trimmed = String(branch ?? '').trim()
 
   if (trimmed === '') {
@@ -162,6 +199,16 @@ function validateBranch(branch) {
     throw new Error(
       `Refusing to prepare '${trimmed}': pass the branch name, e.g. ` +
         `'${trimmed.replace(/^refs\/heads\//, '')}'.`
+    )
+  }
+
+  if (prefixes.length > 0 && !prefixes.some((prefix) => trimmed.startsWith(prefix))) {
+    const accepted = new Intl.ListFormat('en', { type: 'disjunction' }).format(prefixes)
+
+    throw new Error(
+      `Refusing to prepare '${trimmed}': it does not start with ${accepted}. The action only ` +
+        'commits to a release branch; pass the branch to prepare, or set branch-prefixes if the ' +
+        'repository names them differently. Nothing was changed.'
     )
   }
 
@@ -608,7 +655,7 @@ async function runPrepare({ core, exec, env, cwd = process.cwd(), fetchImpl = gl
   const changelogger = readChangeloggerStrategy(readCheckoutFile(cwd, 'package.json'))
   const version = validateVersion(env.INPUT_VERSION, changelogger.strategy)
   const date = resolveDate(env.INPUT_DATE)
-  const branch = validateBranch(env.INPUT_BRANCH)
+  const branch = validateBranch(env.INPUT_BRANCH, readBranchPrefixes(env.INPUT_BRANCH_PREFIXES))
   const pupVersion = validatePupVersion(env.INPUT_PUP_VERSION)
 
   const refCheck = await exec.getExecOutput('git', ['check-ref-format', `refs/heads/${branch}`], {
@@ -774,9 +821,10 @@ async function runPrepareWithPhar({ core, exec, cwd, env, pharRelease, version, 
  * @returns {Promise<void>} Resolves once the commit is on the branch, or found unnecessary.
  */
 async function runCommit({ github, core, exec, env, cwd = process.cwd() }) {
+  // The prepare step validated the branch against branch-prefixes and the version against the
+  // changelogger strategy; its outputs are what the manifest hands this step, so only the shape
+  // of the branch and an empty version are checked here.
   const branch = validateBranch(env.INPUT_BRANCH)
-  // The prepare step validated the version against the changelogger strategy; its output is
-  // what the manifest hands this step, so only an empty value is checked here.
   const version = readVersion(env.INPUT_VERSION)
   const message = commitMessage(branch, version)
   const [owner, repo] = String(env.GITHUB_REPOSITORY || '').split('/')
@@ -892,6 +940,7 @@ module.exports = {
   readVersion,
   validateVersion,
   resolveDate,
+  readBranchPrefixes,
   validateBranch,
   validatePupVersion,
   resolvePupRelease,

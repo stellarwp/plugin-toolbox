@@ -15,6 +15,13 @@ inputs:
       any git ref. The action does not check it out: the caller's checkout has to be on it, and the
       action refuses to run when it is not.
     required: true
+  branch-prefixes:
+    description: >-
+      The branch names the action agrees to commit to, as a comma-separated list of prefixes.
+      `branch` has to start with one of them, or the action fails before anything runs. Empty uses
+      `release/,hotfix/`. The word `any` turns the check off.
+    required: false
+    default: ''
   version:
     description: >-
       The version to prepare. It is validated against the versioning strategy the repository's
@@ -77,6 +84,7 @@ runs:
         # Read from process.env rather than interpolated into the script, so an input is data and
         # never part of the program.
         INPUT_BRANCH: ${{ inputs.branch }}
+        INPUT_BRANCH_PREFIXES: ${{ inputs.branch-prefixes }}
         INPUT_VERSION: ${{ inputs.version }}
         INPUT_DATE: ${{ inputs.date }}
         INPUT_PUP_VERSION: ${{ inputs.pup-version }}
