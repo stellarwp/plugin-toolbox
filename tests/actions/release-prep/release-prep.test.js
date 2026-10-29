@@ -375,9 +375,9 @@ describe('release-prep', () => {
     })
 
     it('reads an empty or blank input as the default list, so a blank input keeps the check on', () => {
-      assert.deepEqual(readBranchPrefixes(''), ['release/', 'hotfix/'])
-      assert.deepEqual(readBranchPrefixes('  '), ['release/', 'hotfix/'])
-      assert.deepEqual(readBranchPrefixes(undefined), ['release/', 'hotfix/'])
+      assert.deepEqual(readBranchPrefixes(''), ['release/', 'hotfix/', 'bucket/'])
+      assert.deepEqual(readBranchPrefixes('  '), ['release/', 'hotfix/', 'bucket/'])
+      assert.deepEqual(readBranchPrefixes(undefined), ['release/', 'hotfix/', 'bucket/'])
     })
 
     it('reads an empty array as no prefixes, which turns the check off', () => {
@@ -630,8 +630,8 @@ describe('release-prep', () => {
       }
     })
 
-    it('prepares a release or a hotfix branch by default', async (t) => {
-      for (const branch of ['release/M26.jigglypuff', 'hotfix/4.19.2']) {
+    it('prepares a release, a hotfix or a bucket branch by default', async (t) => {
+      for (const branch of ['release/M26.jigglypuff', 'hotfix/4.19.2', 'bucket/4.20']) {
         const { core } = await coreWithOutputs(t)
         const { exec, calls } = recordingExec(
           allSucceed([{ command: 'git', args: /^symbolic-ref /, stdout: `${branch}\n` }])
@@ -651,7 +651,7 @@ describe('release-prep', () => {
 
         await assert.rejects(
           runPrepare({ core, exec, env: prepareEnv({ INPUT_BRANCH: branch }), cwd }),
-          new RegExp(`Refusing to prepare '${branch}': it does not start with release/ or hotfix/`)
+          new RegExp(`Refusing to prepare '${branch}': it does not start with release/, hotfix/, or bucket/`)
         )
         assert.deepEqual(calls, [], `nothing ran for ${branch}`)
         assert.deepEqual(outputs(), {})
@@ -719,7 +719,7 @@ describe('release-prep', () => {
 
       await assert.rejects(
         runPrepare({ core, exec, env: prepareEnv({ INPUT_BRANCH: 'develop', INPUT_BRANCH_PREFIXES: '' }), cwd }),
-        /does not start with release\/ or hotfix\//
+        /does not start with release\/, hotfix\/, or bucket\//
       )
       assert.deepEqual(calls, [])
     })

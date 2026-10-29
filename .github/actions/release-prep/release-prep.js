@@ -142,9 +142,9 @@ function resolveDate(date, now = new Date()) {
 
 /**
  * The prefixes a branch has to start with when `branch-prefixes` is not set: the names the
- * consumers give their release branches.
+ * consumers give their release branches (`bucket/` is LearnDash's).
  */
-const DEFAULT_BRANCH_PREFIXES = ['release/', 'hotfix/']
+const DEFAULT_BRANCH_PREFIXES = ['release/', 'hotfix/', 'bucket/']
 
 /**
  * Reads the `branch-prefixes` input: the branch names the action agrees to commit to.

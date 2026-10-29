@@ -127,13 +127,13 @@ outside `branch-prefixes` or not a valid branch name, and a checkout that is not
 
 The action commits to the branch it is given, and the job that runs it has write access, so a
 dispatch by hand with the wrong name would put a version bump and a changelog on `develop`. `branch`
-has to start with one of the prefixes `branch-prefixes` lists, `release/` or `hotfix/` by default, or
-the action fails before anything runs, naming the branch it got and the list:
+has to start with one of the prefixes `branch-prefixes` lists, `release/`, `hotfix/` or `bucket/` by
+default, or the action fails before anything runs, naming the branch it got and the list:
 
 ```
-Refusing to prepare 'develop': it does not start with release/ or hotfix/. The action only commits
-to a release branch; pass the branch to prepare, or set branch-prefixes if the repository names
-them differently. Nothing was changed.
+Refusing to prepare 'develop': it does not start with release/, hotfix/, or bucket/. The action only
+commits to a release branch; pass the branch to prepare, or set branch-prefixes if the repository
+names them differently. Nothing was changed.
 ```
 
 A repository that names its release branches some other way passes its own list, as a JSON array
@@ -167,7 +167,7 @@ download.
 | Input | Required | Default | What it does |
 |---|---|---|---|
 | `branch` | yes | | The release branch to commit to, e.g. `release/M26.jigglypuff`. A branch name, not `refs/heads/…`. The checkout has to be on it; see [Committing](#committing) |
-| `branch-prefixes` | no | `["release/", "hotfix/"]` | The prefixes `branch` has to start with, as a JSON array. Empty keeps the default; `[]` turns the check off. See [Branches it refuses](#branches-it-refuses) |
+| `branch-prefixes` | no | `["release/", "hotfix/", "bucket/"]` | The prefixes `branch` has to start with, as a JSON array. Empty keeps the default; `[]` turns the check off. See [Branches it refuses](#branches-it-refuses) |
 | `version` | yes | | The version to prepare, e.g. `4.17.0`. See [Versions it refuses](#versions-it-refuses) |
 | `date` | no | today, in UTC | The changelog date as `YYYY-MM-DD`. Empty or `today` writes today |
 | `token` | no | `github.token` | The token the commit is created with. See [Committing](#committing) |
