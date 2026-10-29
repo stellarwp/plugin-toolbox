@@ -127,8 +127,8 @@ outside `branch-prefixes` or not a valid branch name, and a checkout that is not
 
 The action commits to the branch it is given, and the job that runs it has write access, so a
 dispatch by hand with the wrong name would put a version bump and a changelog on `develop`. `branch`
-has to start with one of the prefixes `branch-prefixes` lists, `release/,hotfix/` by default, or the
-action fails before anything runs, naming the branch it got and the list:
+has to start with one of the prefixes `branch-prefixes` lists, `release/` or `hotfix/` by default, or
+the action fails before anything runs, naming the branch it got and the list:
 
 ```
 Refusing to prepare 'develop': it does not start with release/ or hotfix/. The action only commits
@@ -136,26 +136,26 @@ to a release branch; pass the branch to prepare, or set branch-prefixes if the r
 them differently. Nothing was changed.
 ```
 
-A repository that names its release branches some other way passes its own list, comma-separated,
-with any whitespace around an entry ignored:
+A repository that names its release branches some other way passes its own list, as a JSON array
+in a string (an action input is always a string), with any whitespace around an entry ignored:
 
 ```yaml
 - uses: stellarwp/plugin-toolbox/.github/actions/release-prep@v1
   with:
     branch: ${{ inputs.branch }}
-    branch-prefixes: 'bucket/, rc-'
+    branch-prefixes: '["rc/", "release-"]'
     version: ${{ inputs.version }}
 ```
 
 An empty value keeps the default list, so a dispatch input left blank and passed through keeps the
-check on. Turning it off takes the word `any`, on its own:
+check on. An empty array turns the check off:
 
 ```yaml
-    branch-prefixes: any
+    branch-prefixes: '[]'
 ```
 
-With it, any branch name git accepts is prepared. `any` inside a list, such as `release/, any`, is
-a prefix like the others.
+With it, any branch name git accepts is prepared. A value that is not a JSON array of prefixes,
+such as `release/,hotfix/`, fails the action before anything runs.
 
 A prefix is matched literally, from the start of the branch name, with no wildcards: `release/`
 takes `release/4.20.0`; `release`, without the slash, also takes `release-4.x` and `releases/x`. The
@@ -167,7 +167,7 @@ download.
 | Input | Required | Default | What it does |
 |---|---|---|---|
 | `branch` | yes | | The release branch to commit to, e.g. `release/M26.jigglypuff`. A branch name, not `refs/heads/…`. The checkout has to be on it; see [Committing](#committing) |
-| `branch-prefixes` | no | `release/,hotfix/` | The prefixes `branch` has to start with, comma-separated. Empty keeps the default; `any` turns the check off. See [Branches it refuses](#branches-it-refuses) |
+| `branch-prefixes` | no | `["release/", "hotfix/"]` | The prefixes `branch` has to start with, as a JSON array. Empty keeps the default; `[]` turns the check off. See [Branches it refuses](#branches-it-refuses) |
 | `version` | yes | | The version to prepare, e.g. `4.17.0`. See [Versions it refuses](#versions-it-refuses) |
 | `date` | no | today, in UTC | The changelog date as `YYYY-MM-DD`. Empty or `today` writes today |
 | `token` | no | `github.token` | The token the commit is created with. See [Committing](#committing) |

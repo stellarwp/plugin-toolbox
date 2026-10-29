@@ -149,27 +149,43 @@ const DEFAULT_BRANCH_PREFIXES = ['release/', 'hotfix/']
 /**
  * Reads the `branch-prefixes` input: the branch names the action agrees to commit to.
  *
- * An empty value keeps the default list, so a dispatch input left blank and passed through keeps
- * the check on. Turning it off takes the word `any`, on its own.
+ * The input is a JSON array in a string, `'["release/", "hotfix/"]'`, because an action input is
+ * always a string. An empty input keeps the default list, so a dispatch input left blank and
+ * passed through keeps the check on. An empty array turns the check off.
  *
- * @param {string} input The input: prefixes separated by commas, `any`, or empty.
+ * @param {string} input The input: a JSON array of prefixes, or empty.
  *
- * @returns {string[]} The prefixes, without surrounding whitespace or empty entries; the default
- *                     list for an empty input. Empty for `any`, which turns the check off.
+ * @throws {Error} When it is anything but a JSON array of non-empty strings.
+ *
+ * @returns {string[]} The prefixes, without surrounding whitespace; the default list for an empty
+ *                     input. Empty for `[]`, which turns the check off.
  */
 function readBranchPrefixes(input) {
   const trimmed = String(input ?? '').trim()
 
-  if (trimmed.toLowerCase() === 'any') {
-    return []
+  if (trimmed === '') {
+    return DEFAULT_BRANCH_PREFIXES
   }
 
-  const prefixes = trimmed
-    .split(',')
-    .map((prefix) => prefix.trim())
-    .filter((prefix) => prefix !== '')
+  let parsed
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    parsed = undefined
+  }
 
-  return prefixes.length > 0 ? prefixes : DEFAULT_BRANCH_PREFIXES
+  const prefixes = Array.isArray(parsed)
+    ? parsed.map((prefix) => (typeof prefix === 'string' ? prefix.trim() : ''))
+    : null
+
+  if (prefixes === null || prefixes.includes('')) {
+    throw new Error(
+      `branch-prefixes '${trimmed}' is not a JSON array of prefixes, such as '["release/", "hotfix/"]'. ` +
+        'Pass [] to turn the check off. Nothing was changed.'
+    )
+  }
+
+  return prefixes
 }
 
 /**

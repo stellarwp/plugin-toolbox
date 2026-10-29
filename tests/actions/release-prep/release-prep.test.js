@@ -369,24 +369,29 @@ describe('release-prep', () => {
   })
 
   describe('readBranchPrefixes', () => {
-    it('splits the input on commas, ignoring the whitespace around each prefix', () => {
-      assert.deepEqual(readBranchPrefixes('release/,hotfix/'), ['release/', 'hotfix/'])
-      assert.deepEqual(readBranchPrefixes(' bucket/ , rc- '), ['bucket/', 'rc-'])
+    it('reads a JSON array of prefixes, ignoring the whitespace around each one', () => {
+      assert.deepEqual(readBranchPrefixes('["release/", "hotfix/"]'), ['release/', 'hotfix/'])
+      assert.deepEqual(readBranchPrefixes(' [" rc/ ", "release-"] '), ['rc/', 'release-'])
     })
 
     it('reads an empty or blank input as the default list, so a blank input keeps the check on', () => {
       assert.deepEqual(readBranchPrefixes(''), ['release/', 'hotfix/'])
-      assert.deepEqual(readBranchPrefixes(' , '), ['release/', 'hotfix/'])
+      assert.deepEqual(readBranchPrefixes('  '), ['release/', 'hotfix/'])
       assert.deepEqual(readBranchPrefixes(undefined), ['release/', 'hotfix/'])
     })
 
-    it('reads `any` on its own as no prefixes, which turns the check off', () => {
-      assert.deepEqual(readBranchPrefixes('any'), [])
-      assert.deepEqual(readBranchPrefixes(' ANY '), [])
+    it('reads an empty array as no prefixes, which turns the check off', () => {
+      assert.deepEqual(readBranchPrefixes('[]'), [])
     })
 
-    it('reads `any` in a list as a prefix, so only the word alone turns the check off', () => {
-      assert.deepEqual(readBranchPrefixes('release/, any'), ['release/', 'any'])
+    it('refuses anything that is not a JSON array of prefixes, showing the shape to pass', () => {
+      for (const input of ['release/,hotfix/', 'any', '{}', '"release/"', '["release/", 1]', '[""]', '[" "]']) {
+        assert.throws(
+          () => readBranchPrefixes(input),
+          /is not a JSON array of prefixes, such as '\["release\/", "hotfix\/"\]'.*Nothing was changed/s,
+          input
+        )
+      }
     })
   })
 
@@ -654,9 +659,9 @@ describe('release-prep', () => {
     })
 
     it('takes the prefixes branch-prefixes lists instead of the default', async (t) => {
-      const prefixes = { INPUT_BRANCH_PREFIXES: 'bucket/, rc-' }
+      const prefixes = { INPUT_BRANCH_PREFIXES: '["rc/", "release-"]' }
 
-      for (const branch of ['bucket/2026.11', 'rc-4.20.0']) {
+      for (const branch of ['rc/2026.11', 'release-4.20.0']) {
         const { core } = await coreWithOutputs(t)
         const { exec, calls } = recordingExec(
           allSucceed([{ command: 'git', args: /^symbolic-ref /, stdout: `${branch}\n` }])
@@ -673,12 +678,12 @@ describe('release-prep', () => {
 
       await assert.rejects(
         runPrepare({ core, exec, env: prepareEnv({ ...prefixes, INPUT_BRANCH: 'release/4.20.0' }), cwd }),
-        /'release\/4\.20\.0': it does not start with bucket\/ or rc-/
+        /'release\/4\.20\.0': it does not start with rc\/ or release-/
       )
       assert.deepEqual(calls, [])
     })
 
-    it('checks no prefix when branch-prefixes is any', async (t) => {
+    it('checks no prefix when branch-prefixes is an empty array', async (t) => {
       const { core } = await coreWithOutputs(t)
       const { exec, calls } = recordingExec(
         allSucceed([{ command: 'git', args: /^symbolic-ref /, stdout: 'develop\n' }])
@@ -688,10 +693,23 @@ describe('release-prep', () => {
       await runPrepare({
         core,
         exec,
-        env: prepareEnv({ INPUT_BRANCH: 'develop', INPUT_BRANCH_PREFIXES: 'any' }),
+        env: prepareEnv({ INPUT_BRANCH: 'develop', INPUT_BRANCH_PREFIXES: '[]' }),
         cwd,
       })
       assert.equal(sequence(calls)[0], 'git check-ref-format refs/heads/develop')
+    })
+
+    it('stops before running anything when branch-prefixes is not a JSON array', async (t) => {
+      const { core, outputs } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed())
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+      await assert.rejects(
+        runPrepare({ core, exec, env: prepareEnv({ INPUT_BRANCH_PREFIXES: 'release/,hotfix/' }), cwd }),
+        /branch-prefixes 'release\/,hotfix\/' is not a JSON array of prefixes/
+      )
+      assert.deepEqual(calls, [])
+      assert.deepEqual(outputs(), {})
     })
 
     it('keeps the default list when branch-prefixes is left empty', async (t) => {

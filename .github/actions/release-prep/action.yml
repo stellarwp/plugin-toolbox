@@ -17,9 +17,9 @@ inputs:
     required: true
   branch-prefixes:
     description: >-
-      The branch names the action agrees to commit to, as a comma-separated list of prefixes.
-      `branch` has to start with one of them, or the action fails before anything runs. Empty uses
-      `release/,hotfix/`. The word `any` turns the check off.
+      The branch names the action agrees to commit to, as a JSON array of prefixes in a string,
+      e.g. `'["release/", "hotfix/"]'`. `branch` has to start with one of them, or the action fails
+      before anything runs. Empty uses `["release/", "hotfix/"]`. `[]` turns the check off.
     required: false
     default: ''
   version:
