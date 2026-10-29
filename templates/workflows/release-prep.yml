@@ -56,6 +56,8 @@ jobs:
       # A changelog writing strategy that has to be built first, or a toolchain the repository needs,
       # is set up here, before the action.
 
+      # The action prepares a release/…, hotfix/… or bucket/… branch only; a repository that names
+      # them differently passes its own list as `branch-prefixes`, a JSON array in a string.
       - uses: stellarwp/plugin-toolbox/.github/actions/release-prep@v1
         with:
           branch: ${{ inputs.branch }}

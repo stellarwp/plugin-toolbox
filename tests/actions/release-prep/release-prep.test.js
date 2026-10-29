@@ -11,6 +11,7 @@ const {
   runCommit,
   validateVersion,
   resolveDate,
+  readBranchPrefixes,
   validateBranch,
   validatePupVersion,
   readPuprc,
@@ -66,6 +67,7 @@ function checkoutWith(files = {}) {
 function prepareEnv(overrides = {}) {
   return {
     INPUT_BRANCH: 'release/M26.jigglypuff',
+    INPUT_BRANCH_PREFIXES: '',
     INPUT_VERSION: '4.17.0',
     INPUT_DATE: '',
     INPUT_PUP_VERSION: '2.0.0',
@@ -321,7 +323,7 @@ describe('release-prep', () => {
       assert.equal(validateBranch('release/M26.jigglypuff'), 'release/M26.jigglypuff')
     })
 
-    it('refuses an empty ref', () => {
+    it('refuses an empty branch', () => {
       assert.throws(() => validateBranch(''), /No branch was given/)
     })
 
@@ -330,6 +332,66 @@ describe('release-prep', () => {
         () => validateBranch('refs/heads/release/M26.jigglypuff'),
         /pass the branch name, e\.g\. 'release\/M26\.jigglypuff'/
       )
+    })
+
+    it('accepts a branch that starts with one of the prefixes', () => {
+      const prefixes = ['release/', 'hotfix/']
+
+      assert.equal(validateBranch('release/M26.jigglypuff', prefixes), 'release/M26.jigglypuff')
+      assert.equal(validateBranch('hotfix/4.19.2', prefixes), 'hotfix/4.19.2')
+    })
+
+    it('refuses a branch outside the prefixes, naming the branch and the list', () => {
+      assert.throws(
+        () => validateBranch('develop', ['release/', 'hotfix/']),
+        /Refusing to prepare 'develop': it does not start with release\/ or hotfix\/.*set branch-prefixes to a JSON array.*Nothing was changed/s
+      )
+      assert.throws(
+        () => validateBranch('release/4.20.0', ['bucket/']),
+        /'release\/4\.20\.0': it does not start with bucket\//
+      )
+    })
+
+    it('matches a prefix literally, so one without a slash takes any branch that starts with it', () => {
+      assert.equal(validateBranch('release-4.x', ['release']), 'release-4.x')
+      assert.equal(validateBranch('releases/x', ['release']), 'releases/x')
+    })
+
+    it('checks nothing about the prefixes when there are none', () => {
+      assert.equal(validateBranch('develop', []), 'develop')
+      assert.equal(validateBranch('develop'), 'develop')
+    })
+
+    it('refuses an empty branch and a full ref before looking at the prefixes', () => {
+      assert.throws(() => validateBranch('', ['release/']), /No branch was given/)
+      assert.throws(() => validateBranch('refs/heads/release/x', ['release/']), /pass the branch name/)
+    })
+  })
+
+  describe('readBranchPrefixes', () => {
+    it('reads a JSON array of prefixes, ignoring the whitespace around each one', () => {
+      assert.deepEqual(readBranchPrefixes('["release/", "hotfix/"]'), ['release/', 'hotfix/'])
+      assert.deepEqual(readBranchPrefixes(' [" rc/ ", "release-"] '), ['rc/', 'release-'])
+    })
+
+    it('reads an empty or blank input as the default list, so a blank input keeps the check on', () => {
+      assert.deepEqual(readBranchPrefixes(''), ['release/', 'hotfix/', 'bucket/'])
+      assert.deepEqual(readBranchPrefixes('  '), ['release/', 'hotfix/', 'bucket/'])
+      assert.deepEqual(readBranchPrefixes(undefined), ['release/', 'hotfix/', 'bucket/'])
+    })
+
+    it('reads an empty array as no prefixes, which turns the check off', () => {
+      assert.deepEqual(readBranchPrefixes('[]'), [])
+    })
+
+    it('refuses anything that is not a JSON array of prefixes, showing the shape to pass', () => {
+      for (const input of ['release/,hotfix/', 'any', '{}', '"release/"', '["release/", 1]', '[""]', '[" "]']) {
+        assert.throws(
+          () => readBranchPrefixes(input),
+          /is not a JSON array of prefixes, such as '\["release\/", "hotfix\/"\]'.*Nothing was changed/s,
+          input
+        )
+      }
     })
   })
 
@@ -566,6 +628,100 @@ describe('release-prep', () => {
         assert.deepEqual(calls, [], `nothing ran for ${JSON.stringify(overrides)}`)
         assert.deepEqual(outputs(), {})
       }
+    })
+
+    it('prepares a release, a hotfix or a bucket branch by default', async (t) => {
+      for (const branch of ['release/M26.jigglypuff', 'hotfix/4.19.2', 'bucket/4.20']) {
+        const { core } = await coreWithOutputs(t)
+        const { exec, calls } = recordingExec(
+          allSucceed([{ command: 'git', args: /^symbolic-ref /, stdout: `${branch}\n` }])
+        )
+        const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+        await runPrepare({ core, exec, env: prepareEnv({ INPUT_BRANCH: branch }), cwd })
+        assert.equal(sequence(calls)[0], `git check-ref-format refs/heads/${branch}`)
+      }
+    })
+
+    it('refuses any other branch before running anything, by default', async (t) => {
+      for (const branch of ['develop', 'main', 'feature/x']) {
+        const { core, outputs } = await coreWithOutputs(t)
+        const { exec, calls } = recordingExec(allSucceed())
+        const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+        await assert.rejects(
+          runPrepare({ core, exec, env: prepareEnv({ INPUT_BRANCH: branch }), cwd }),
+          new RegExp(`Refusing to prepare '${branch}': it does not start with release/, hotfix/, or bucket/`)
+        )
+        assert.deepEqual(calls, [], `nothing ran for ${branch}`)
+        assert.deepEqual(outputs(), {})
+      }
+    })
+
+    it('takes the prefixes branch-prefixes lists instead of the default', async (t) => {
+      const prefixes = { INPUT_BRANCH_PREFIXES: '["rc/", "release-"]' }
+
+      for (const branch of ['rc/2026.11', 'release-4.20.0']) {
+        const { core } = await coreWithOutputs(t)
+        const { exec, calls } = recordingExec(
+          allSucceed([{ command: 'git', args: /^symbolic-ref /, stdout: `${branch}\n` }])
+        )
+        const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+        await runPrepare({ core, exec, env: prepareEnv({ ...prefixes, INPUT_BRANCH: branch }), cwd })
+        assert.equal(sequence(calls)[0], `git check-ref-format refs/heads/${branch}`)
+      }
+
+      const { core } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed())
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+      await assert.rejects(
+        runPrepare({ core, exec, env: prepareEnv({ ...prefixes, INPUT_BRANCH: 'release/4.20.0' }), cwd }),
+        /'release\/4\.20\.0': it does not start with rc\/ or release-/
+      )
+      assert.deepEqual(calls, [])
+    })
+
+    it('checks no prefix when branch-prefixes is an empty array', async (t) => {
+      const { core } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(
+        allSucceed([{ command: 'git', args: /^symbolic-ref /, stdout: 'develop\n' }])
+      )
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+      await runPrepare({
+        core,
+        exec,
+        env: prepareEnv({ INPUT_BRANCH: 'develop', INPUT_BRANCH_PREFIXES: '[]' }),
+        cwd,
+      })
+      assert.equal(sequence(calls)[0], 'git check-ref-format refs/heads/develop')
+    })
+
+    it('stops before running anything when branch-prefixes is not a JSON array', async (t) => {
+      const { core, outputs } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed())
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+      await assert.rejects(
+        runPrepare({ core, exec, env: prepareEnv({ INPUT_BRANCH_PREFIXES: 'release/,hotfix/' }), cwd }),
+        /branch-prefixes 'release\/,hotfix\/' is not a JSON array of prefixes/
+      )
+      assert.deepEqual(calls, [])
+      assert.deepEqual(outputs(), {})
+    })
+
+    it('keeps the default list when branch-prefixes is left empty', async (t) => {
+      const { core } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed())
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+      await assert.rejects(
+        runPrepare({ core, exec, env: prepareEnv({ INPUT_BRANCH: 'develop', INPUT_BRANCH_PREFIXES: '' }), cwd }),
+        /does not start with release\/, hotfix\/, or bucket\//
+      )
+      assert.deepEqual(calls, [])
     })
 
     it('stops before downloading pup when the branch is not a valid name', async (t) => {
