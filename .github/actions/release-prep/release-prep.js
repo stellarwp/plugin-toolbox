@@ -142,7 +142,8 @@ function resolveDate(date, now = new Date()) {
 
 /**
  * The prefixes a branch has to start with when `branch-prefixes` is not set: the names the
- * consumers give their release branches (`bucket/` is LearnDash's).
+ * consumers give their release branches. `bucket/` is a LearnDash feature bucket, which now and
+ * then ships as a release on its own.
  */
 const DEFAULT_BRANCH_PREFIXES = ['release/', 'hotfix/', 'bucket/']
 
