@@ -8,18 +8,18 @@ name: Release Merge
 # A file to copy into .github/workflows/ of a plugin repository, not a workflow to call. Rename the
 # base branch below where it is `master`.
 #
-# The inputs are the interface a release tool dispatches: `release_name` and `version`.
-# `production` is accepted because the release dashboard sends it for the deploy step; this
-# workflow builds nothing, so it does not read it.
+# The inputs are the interface a release tool dispatches: `branch` and `version`. `production` is
+# accepted because the release dashboard sends it for the deploy step; this workflow builds nothing,
+# so it does not read it.
 #
 # Run it locally: you cannot, it pushes to two branches and publishes a release. Start it by hand with
-# `gh workflow run release-merge.yml -f release_name=M26.jigglypuff -f version=4.17.0`.
+# `gh workflow run release-merge.yml -f branch=release/M26.jigglypuff -f version=4.17.0`.
 
 on:
   workflow_dispatch:
     inputs:
-      release_name:
-        description: 'Release name, the part after release/ in the branch, e.g. M26.jigglypuff'
+      branch:
+        description: 'Release branch to merge, e.g. release/M26.jigglypuff'
         required: true
         type: string
       version:
@@ -63,7 +63,7 @@ jobs:
       - uses: stellarwp/plugin-toolbox/.github/actions/release-merge@v1
         id: release
         with:
-          branch: release/${{ inputs.release_name }}
+          branch: ${{ inputs.branch }}
           version: ${{ inputs.version }}
           # base-branch: master
 
