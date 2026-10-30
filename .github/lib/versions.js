@@ -5,7 +5,7 @@
  *
  * One implementation lives here so every action orders versions the same way. The actions load
  * this file through a path relative to their own directory, so it ships inside the same
- * repository checkout the runner already fetches for the action — there is nothing to publish
+ * repository checkout the runner already fetches for the action: there is nothing to publish
  * and nothing for a caller to install.
  */
 

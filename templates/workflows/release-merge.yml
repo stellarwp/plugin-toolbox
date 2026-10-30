@@ -36,7 +36,7 @@ on:
 # same version would otherwise merge side by side, and the second would land its changes under a
 # version the first has just published. Run one after the other, the second finds the tag published
 # and the action refuses it before merging. A repository that also deploys from another workflow
-# (an `on: release` one, say) gives both the same group.
+# (an `on: release` workflow, for instance) gives both the same group.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
