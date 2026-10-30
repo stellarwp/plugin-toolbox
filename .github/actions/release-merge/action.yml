@@ -17,9 +17,12 @@ inputs:
   version:
     description: >-
       The version being released: three or four numeric parts, such as 4.17.0 or 4.17.0.1, the rule
-      the release dashboard applies. It becomes the tag and the title of the GitHub release. A pre-release such as 4.17.0-beta.1 and an empty value are refused before
-      anything is merged, and so is a version whose tag already exists, unless that tag's release was
-      published from this branch, which makes the run a retry.
+      the release dashboard applies. It becomes the tag and the title of the GitHub release, so it has
+      to be the version the release branch holds: every file the branch's .puprc lists under
+      paths.versions is read, and a different version in any of them is refused. A pre-release such as
+      4.17.0-beta.1 and an empty value are refused before anything is merged, and so is a version
+      whose tag already exists, unless that tag's release was published from this branch, which makes
+      the run a retry.
     required: true
   base-branch:
     description: 'The branch the release is merged into: `main`, or `master` where that is the name.'
