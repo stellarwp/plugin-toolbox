@@ -1,0 +1,195 @@
+# Compares a WordPress.org Plugin Check results file with a baseline: the counts of an earlier run
+# of the same workflow, never a committed file. Only a rule with more errors than the baseline
+# fails (ratchet mode), or any error at all (strict mode). It also saves this run's counts as the
+# next baseline and writes the short body for the pull request comment.
+#
+# It does not run Plugin Check and it does not post the comment. The reusable workflow
+# .github/workflows/plugin-check.yml does both, so this action stays usable with a results file
+# from anywhere.
+#
+# The work is in two bash scripts next to this file, ratchet.sh and fetch-baseline.sh. They are
+# run by path, so there is nothing to build: the file in the repository is the file that runs.
+name: Plugin Check report
+description: Compares Plugin Check results with an earlier run's baseline, and saves a new baseline
+
+inputs:
+  results:
+    description: >-
+      Path of the results file wordpress/plugin-check-action writes, `plugin-check-results.txt`. A
+      missing file fails the compare step: that is how a broken build or a broken check shows up.
+    required: true
+  comment-file:
+    description: >-
+      Where to write the short Markdown body for the pull request comment. Empty writes none. The
+      file is only written when the compare runs, so a caller can tell "no result" from a result.
+    required: false
+    default: ''
+  mode:
+    description: >-
+      `ratchet`: fail only when a rule has more errors than the baseline. `strict`: fail on any
+      error, baseline or not.
+    required: false
+    default: 'ratchet'
+  comment-marker:
+    description: >-
+      Hidden first line of the comment body, which the caller searches for to find its own
+      comment. Empty uses `<!-- plugin-check:<owner>/<repo> -->`.
+    required: false
+    default: ''
+  workflow-file:
+    description: >-
+      File name of the workflow whose earlier runs hold the baseline, e.g. `plugin-check.yml`.
+      Empty reads it from GITHUB_WORKFLOW_REF, which names the calling workflow's file when this
+      runs inside a reusable workflow.
+    required: false
+    default: ''
+  baseline-wait:
+    description: >-
+      Seconds a pull request waits for the run of its base commit to finish, when that run is
+      still going.
+    required: false
+    default: '1200'
+  badge-url:
+    description: 'Image URL shown under the status line of the comment. Empty shows none.'
+    required: false
+    default: ''
+  token:
+    description: >-
+      Token that lists earlier runs and downloads their artifacts. It needs `actions: read`.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  artifact-url:
+    description: 'Link to the plugin-check-report artifact this run uploaded. Empty when there was nothing to upload.'
+    value: ${{ steps.artifact.outputs.artifact-url }}
+  baseline-url:
+    description: 'Link to the run the baseline came from. Empty when there was no baseline.'
+    value: ${{ steps.baseline.outputs.url }}
+
+runs:
+  using: 'composite'
+  steps:
+    # One folder per run under RUNNER_TEMP, cleared first, so a second use of the action in the same
+    # job never reads the first one's files.
+    - name: Set file paths
+      id: paths
+      shell: bash
+      env:
+        INPUT_WORKFLOW_FILE: ${{ inputs.workflow-file }}
+        INPUT_COMMENT_MARKER: ${{ inputs.comment-marker }}
+      run: |
+        dir="$RUNNER_TEMP/plugin-check-report"
+        rm -rf "$dir"
+        mkdir -p "$dir/report" "$dir/baseline"
+
+        # In a called workflow GITHUB_WORKFLOW_REF is the caller's, like
+        # impress-org/givewp/.github/workflows/plugin-check.yml@refs/pull/12/merge. The runs that
+        # hold the baseline belong to that file, not to the toolbox's workflow.
+        workflow=$INPUT_WORKFLOW_FILE
+        if [ -z "$workflow" ]; then
+          ref=${GITHUB_WORKFLOW_REF%%@*}
+          workflow=${ref##*/}
+        fi
+
+        {
+          echo "report=$dir/report"
+          echo "baseline=$dir/baseline/baseline.json"
+          echo "workflow=$workflow"
+          echo "marker=${INPUT_COMMENT_MARKER:-<!-- plugin-check:$GITHUB_REPOSITORY -->}"
+        } >> "$GITHUB_OUTPUT"
+        echo "Baselines are read from the runs of $workflow."
+
+    # A baseline made from this run, uploaded even when the compare below fails. Later runs
+    # download it as their baseline: pull requests into this branch, and the next push.
+    - name: Write a new baseline
+      shell: bash
+      env:
+        RESULTS: ${{ inputs.results }}
+        REPORT_DIR: ${{ steps.paths.outputs.report }}
+      run: |
+        if [ -f "$RESULTS" ]; then
+          cp "$RESULTS" "$REPORT_DIR/"
+          PLUGIN_CHECK_BASELINE="$REPORT_DIR/baseline.json" bash "$GITHUB_ACTION_PATH/ratchet.sh" --update "$RESULTS"
+        fi
+
+    # The name and the baseline.json inside it are what fetch-baseline.sh looks for. Keep both:
+    # they are also what GiveWP's runs from before the shared workflow uploaded, so its old
+    # baselines keep working.
+    - name: Upload the report
+      id: artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: plugin-check-report
+        path: ${{ steps.paths.outputs.report }}
+        if-no-files-found: ignore
+
+    # The baseline: what the branch the code goes into looks like now, from the artifact of an
+    # earlier run on it. A pull request takes the run for its base commit; for a stacked pull
+    # request that is the run of the pull request below it. When that run is still going, it is
+    # waited for. When it has no baseline (it was cancelled by a newer push, say), the latest run on
+    # the base branch is used instead, and more errors than it are only reported, not failed: that
+    # run is older than the target. A push takes the run before it on the same branch, so a merge
+    # that adds errors fails there, where the whole team sees it.
+    # With no run to take it from, ratchet.sh compares nothing and passes with a warning. A failed
+    # lookup (GitHub API or download error) fails the step instead, so an outage never passes as
+    # "no baseline".
+    - name: Get the baseline
+      id: baseline
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        EVENT: ${{ github.event_name }}
+        BASE_REF: ${{ github.event.pull_request.base.ref }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        WAIT: ${{ inputs.baseline-wait }}
+        WORKFLOW: ${{ steps.paths.outputs.workflow }}
+        BASELINE: ${{ steps.paths.outputs.baseline }}
+      run: |
+        fetch="$GITHUB_ACTION_PATH/fetch-baseline.sh"
+        status=0
+        if [ "$EVENT" = pull_request ]; then
+          label="Target branch"
+          found=$(bash "$fetch" --workflow "$WORKFLOW" --sha "$BASE_SHA" --wait "$WAIT" "$BASE_REF" "$BASELINE") || status=$?
+        else
+          label="Previous run"
+          found=$(bash "$fetch" --workflow "$WORKFLOW" --before-run "$GITHUB_RUN_ID" "$GITHUB_REF_NAME" "$BASELINE") || status=$?
+        fi
+        case "$status" in
+          0) ;;
+          1) echo "No earlier run has a baseline."; exit 0 ;;
+          *) exit "$status" ;;
+        esac
+        read -r _ url match <<< "$found"
+        advisory=false
+        if [ "$match" = older ]; then
+          label="Target branch, older run"
+          advisory=true
+        fi
+        {
+          echo "label=$label"
+          echo "url=$url"
+          echo "advisory=$advisory"
+        } >> "$GITHUB_OUTPUT"
+        echo "Baseline from $url ($match)"
+
+    # Fails the step when the mode says so. Also writes the comment body and the same text to the
+    # job summary.
+    - name: Compare with the baseline
+      shell: bash
+      env:
+        RESULTS: ${{ inputs.results }}
+        COMMENT_FILE: ${{ inputs.comment-file }}
+        PLUGIN_CHECK_MODE: ${{ inputs.mode }}
+        PLUGIN_CHECK_BASELINE: ${{ steps.paths.outputs.baseline }}
+        PLUGIN_CHECK_ADVISORY: ${{ steps.baseline.outputs.advisory }}
+        COMMENT_MARKER: ${{ steps.paths.outputs.marker }}
+        BASELINE_LABEL: ${{ steps.baseline.outputs.label }}
+        BASELINE_URL: ${{ steps.baseline.outputs.url }}
+        COMMENT_BADGE: ${{ inputs.badge-url }}
+        ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        args=()
+        [ -z "$COMMENT_FILE" ] || args=(--comment-file "$COMMENT_FILE")
+        bash "$GITHUB_ACTION_PATH/ratchet.sh" "${args[@]}" "$RESULTS"
