@@ -19,7 +19,7 @@ as Playwright, calls its own commands after this action instead.
 | `target` | yes | | The `slic use` target |
 | `php-version` | recommended | slic resolves it | PHP version to set in slic, e.g. `8.3`. See [PHP version](#php-version) |
 | `here-dir` | no | the workspace | Directory `slic here` runs in. Must be the parent of the target checkout |
-| `ref` | no | `main` | slic branch, tag or commit |
+| `ref` | no | `2.5.1` | slic branch, tag or commit |
 | `slic-repository` | no | `stellarwp/slic` | Repository to check slic out from |
 | `slic-path` | no | `slic` | Path in the workspace to check slic out into |
 | `wp-version` | no | `latest` | `latest`, an explicit version like `6.6`, or `''` to keep the image's version |

@@ -33,9 +33,11 @@ inputs:
     required: false
     default: ''
   ref:
-    description: 'The slic branch, tag or commit to check out.'
+    description: >-
+      The slic branch, tag or commit to check out. Defaults to a fixed slic release, so a
+      plugin-toolbox tag keeps running the same slic version when slic publishes a new one.
     required: false
-    default: 'main'
+    default: '2.5.1'
   slic-repository:
     description: 'The repository to check slic out from.'
     required: false
