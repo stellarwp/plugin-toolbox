@@ -160,6 +160,7 @@ Each phase ends with something people can actually use.
 - [ ] Port `check-php-changes`, `smart-checkout`, `process-changelog`, `add-changelog`, `generate-pot` from TEC.
 - [ ] Add `setup-node` for the npm crowd.
 - [x] Add `release-prep`: version bump, TBD replacement and changelog through pup and the changelogger action, committed to the release branch through the GitHub API. A caller to copy is in `templates/workflows/release-prep.yml`.
+- [x] Add `release-merge`: the release branch into the base branch, the base back into develop, then the GitHub release, each step safe to rerun and a conflict reported with a `MERGE_CONFLICT` line. A caller to copy is in `templates/workflows/release-merge.yml`.
 - [ ] Turn every hard-coded repo name, slug, or branch pattern into an input.
 - [ ] Self-checks: actionlint everything, unit test anything with real logic.
 - [ ] Tag `v1.0.0`.
