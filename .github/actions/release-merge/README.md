@@ -44,8 +44,8 @@ The checkout is left on the base branch at the merged commit, clean. The merge c
 
 ## Running it again
 
-Every step is safe to run again after a late failure, which is how a retry from a release tool
-works:
+Every step is safe to run again after a late failure, which is what a retry from a release tool
+does:
 
 - A branch that already holds the other merges as "Already up to date" and pushes nothing.
 - A release that already exists is skipped, and its URL is still reported in `release-url`. It
@@ -144,9 +144,8 @@ cancels the waiting one, which has to be started again.
 The job needs `contents: write`, and the token is used for the fetch, the two pushes and the release.
 It is handed to git through the environment of those commands only (`GIT_CONFIG_*`, the
 `http.<server>/.extraheader` header actions/checkout would store), so it is never in the checkout's
-`.git/config` and never on a command line in the log. The checkout can and should use
-`persist-credentials: false`, which matters when later steps of the same job run third-party
-actions.
+`.git/config` and never on a command line in the log. Use `persist-credentials: false` on the
+checkout; it matters when later steps of the same job run third-party actions.
 
 A release published with the default `github.token` triggers no `release` workflow: GitHub does not
 start workflows from events a workflow's own token caused. That is on purpose. The run that merged
