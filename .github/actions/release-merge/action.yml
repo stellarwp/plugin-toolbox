@@ -1,10 +1,11 @@
 # Merges a release: the release branch into the base branch (`main`, or `master` where that is the
-# name), the base branch back into develop, then publishes the GitHub release for the version. The part of a deploy that is the same for every
-# plugin; what happens after the merge (building, wordpress.org, announcements) is the caller's.
+# name), the base branch back into develop, then publishes the GitHub release for the version. The
+# part of a deploy that is the same for every plugin; what happens after the merge (building,
+# wordpress.org, announcements) is the caller's.
 #
 # The checks, the merges and the publish live in release-merge.js, run by actions/github-script, so
-# there is no dependency to install and nothing to build. The merges are git in the caller's checkout,
-# the tag and release reads and the publish go through the GitHub API.
+# there is no dependency to install and nothing to build. The merges are git in the caller's
+# checkout; the tag and release reads and the publish go through the GitHub API.
 name: Release merge
 description: Merges the release branch into the base and the base back into develop, then publishes the GitHub release
 
