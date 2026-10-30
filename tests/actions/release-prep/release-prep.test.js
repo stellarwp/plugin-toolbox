@@ -72,8 +72,26 @@ function prepareEnv(overrides = {}) {
     INPUT_DATE: '',
     INPUT_PUP_VERSION: '2.0.0',
     RUNNER_TEMP: '/runner/temp',
+    GITHUB_REPOSITORY: 'stellarwp/plugin',
     ...overrides,
   }
+}
+
+/** The tag the prepare step reads, as a real Octokit spells it. */
+const TAG_PATH = '/repos/stellarwp/plugin/git/ref/tags%2F4.17.0'
+
+/**
+ * runPrepare against a repository that has not tagged the version, the common case. A test that
+ * needs the tag to exist passes its own `github`.
+ *
+ * @param {object} args The arguments for runPrepare.
+ *
+ * @returns {Promise<void>} What runPrepare resolves to.
+ */
+async function prepareUntagged(args) {
+  const { github } = await octokitFor()
+
+  return runPrepare({ github, ...args })
 }
 
 /**
@@ -568,7 +586,7 @@ describe('release-prep', () => {
       const { exec, calls } = recordingExec(allSucceed())
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
-      await runPrepare({ core, exec, env: prepareEnv(), cwd })
+      await prepareUntagged({ core, exec, env: prepareEnv(), cwd })
 
       const phar = '/runner/temp/pup-2.0.0.phar'
       assert.deepEqual(sequence(calls), [
@@ -597,7 +615,7 @@ describe('release-prep', () => {
       const { exec } = recordingExec(allSucceed())
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
-      await runPrepare({ core, exec, env: prepareEnv({ INPUT_DATE: 'today' }), cwd })
+      await prepareUntagged({ core, exec, env: prepareEnv({ INPUT_DATE: 'today' }), cwd })
       assert.equal(outputs().date, TODAY)
     })
 
@@ -606,7 +624,7 @@ describe('release-prep', () => {
       const { exec } = recordingExec(allSucceed())
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
-      await runPrepare({ core, exec, env: prepareEnv({ INPUT_DATE: '2026-10-06' }), cwd })
+      await prepareUntagged({ core, exec, env: prepareEnv({ INPUT_DATE: '2026-10-06' }), cwd })
       assert.equal(outputs().date, '2026-10-06')
     })
 
@@ -624,7 +642,7 @@ describe('release-prep', () => {
         const { exec, calls } = recordingExec(allSucceed())
         const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
-        await assert.rejects(runPrepare({ core, exec, env: prepareEnv(overrides), cwd }), message)
+        await assert.rejects(prepareUntagged({ core, exec, env: prepareEnv(overrides), cwd }), message)
         assert.deepEqual(calls, [], `nothing ran for ${JSON.stringify(overrides)}`)
         assert.deepEqual(outputs(), {})
       }
@@ -638,7 +656,7 @@ describe('release-prep', () => {
         )
         const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
-        await runPrepare({ core, exec, env: prepareEnv({ INPUT_BRANCH: branch }), cwd })
+        await prepareUntagged({ core, exec, env: prepareEnv({ INPUT_BRANCH: branch }), cwd })
         assert.equal(sequence(calls)[0], `git check-ref-format refs/heads/${branch}`)
       }
     })
@@ -650,7 +668,7 @@ describe('release-prep', () => {
         const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
         await assert.rejects(
-          runPrepare({ core, exec, env: prepareEnv({ INPUT_BRANCH: branch }), cwd }),
+          prepareUntagged({ core, exec, env: prepareEnv({ INPUT_BRANCH: branch }), cwd }),
           new RegExp(`Refusing to prepare '${branch}': it does not start with release/, hotfix/, or bucket/`)
         )
         assert.deepEqual(calls, [], `nothing ran for ${branch}`)
@@ -668,7 +686,7 @@ describe('release-prep', () => {
         )
         const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
-        await runPrepare({ core, exec, env: prepareEnv({ ...prefixes, INPUT_BRANCH: branch }), cwd })
+        await prepareUntagged({ core, exec, env: prepareEnv({ ...prefixes, INPUT_BRANCH: branch }), cwd })
         assert.equal(sequence(calls)[0], `git check-ref-format refs/heads/${branch}`)
       }
 
@@ -677,7 +695,7 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv({ ...prefixes, INPUT_BRANCH: 'release/4.20.0' }), cwd }),
+        prepareUntagged({ core, exec, env: prepareEnv({ ...prefixes, INPUT_BRANCH: 'release/4.20.0' }), cwd }),
         /'release\/4\.20\.0': it does not start with rc\/ or release-/
       )
       assert.deepEqual(calls, [])
@@ -690,7 +708,7 @@ describe('release-prep', () => {
       )
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
-      await runPrepare({
+      await prepareUntagged({
         core,
         exec,
         env: prepareEnv({ INPUT_BRANCH: 'develop', INPUT_BRANCH_PREFIXES: '[]' }),
@@ -705,7 +723,7 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv({ INPUT_BRANCH_PREFIXES: 'release/,hotfix/' }), cwd }),
+        prepareUntagged({ core, exec, env: prepareEnv({ INPUT_BRANCH_PREFIXES: 'release/,hotfix/' }), cwd }),
         /branch-prefixes 'release\/,hotfix\/' is not a JSON array of prefixes/
       )
       assert.deepEqual(calls, [])
@@ -718,7 +736,7 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv({ INPUT_BRANCH: 'develop', INPUT_BRANCH_PREFIXES: '' }), cwd }),
+        prepareUntagged({ core, exec, env: prepareEnv({ INPUT_BRANCH: 'develop', INPUT_BRANCH_PREFIXES: '' }), cwd }),
         /does not start with release\/, hotfix\/, or bucket\//
       )
       assert.deepEqual(calls, [])
@@ -732,7 +750,7 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv({ INPUT_BRANCH: 'release/..x' }), cwd }),
+        prepareUntagged({ core, exec, env: prepareEnv({ INPUT_BRANCH: 'release/..x' }), cwd }),
         /'release\/\.\.x' is not a valid branch name/
       )
       assert.deepEqual(sequence(calls), ['git check-ref-format refs/heads/release/..x'])
@@ -748,7 +766,7 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        prepareUntagged({ core, exec, env: prepareEnv(), cwd }),
         /The checkout is on 'main', not on 'release\/M26\.jigglypuff'.*Nothing was changed/s
       )
       assert.ok(!calls.some((call) => call.command === 'curl' || call.command === 'php'))
@@ -762,7 +780,7 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        prepareUntagged({ core, exec, env: prepareEnv(), cwd }),
         /The checkout is on a detached commit, not on 'release\/M26\.jigglypuff'/
       )
       assert.ok(!calls.some((call) => call.command === 'curl' || call.command === 'php'))
@@ -776,7 +794,7 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        prepareUntagged({ core, exec, env: prepareEnv(), cwd }),
         /Refusing to prepare 4\.17\.0: release\/M26\.jigglypuff already has 4\.18\.0.*Nothing was changed/s
       )
       assert.ok(!sequence(calls).some((call) => / replace-(version|tbd) /.test(call)), 'pup changed nothing')
@@ -798,7 +816,7 @@ describe('release-prep', () => {
         )
         const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
         const env = prepareEnv({ INPUT_VERSION: version, INPUT_BRANCH: `release/${version}` })
-        const prepare = runPrepare({ core, exec, env, cwd })
+        const prepare = prepareUntagged({ core, exec, env, cwd })
 
         if (accepted) {
           await prepare
@@ -815,7 +833,7 @@ describe('release-prep', () => {
       )
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
-      await runPrepare({ core, exec, env: prepareEnv(), cwd })
+      await prepareUntagged({ core, exec, env: prepareEnv(), cwd })
 
       assert.ok(sequence(calls).some((call) => call.endsWith('replace-version 4.17.0')))
       assert.equal(outputs().version, '4.17.0')
@@ -828,7 +846,7 @@ describe('release-prep', () => {
       )
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
-      await runPrepare({ core, exec, env: prepareEnv(), cwd })
+      await prepareUntagged({ core, exec, env: prepareEnv(), cwd })
 
       assert.match(logged(), /::warning::The version files hold `dev`, which is not a numeric version/)
       assert.ok(sequence(calls).some((call) => call.endsWith('replace-version 4.17.0')))
@@ -850,7 +868,7 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        prepareUntagged({ core, exec, env: prepareEnv(), cwd }),
         /pup get-version failed.*Could not find version in file plugin\.php/s
       )
       assert.ok(!sequence(calls).some((call) => / replace-(version|tbd) /.test(call)), 'pup changed nothing')
@@ -868,7 +886,7 @@ describe('release-prep', () => {
         const { exec, calls } = recordingExec(allSucceed())
         const cwd = checkoutWith({ 'package.json': PACKAGE_JSON, ...files })
 
-        await assert.rejects(runPrepare({ core, exec, env: prepareEnv(), cwd }), message)
+        await assert.rejects(prepareUntagged({ core, exec, env: prepareEnv(), cwd }), message)
         assert.ok(
           !calls.some((call) => call.command === 'curl' || call.command === 'php'),
           `pup never ran, got ${JSON.stringify(sequence(calls))}`
@@ -882,7 +900,7 @@ describe('release-prep', () => {
       const { checks, ...withoutChecks } = PUPRC
       const cwd = checkoutWith({ '.puprc': withoutChecks, 'package.json': PACKAGE_JSON })
 
-      await runPrepare({ core, exec, env: prepareEnv(), cwd })
+      await prepareUntagged({ core, exec, env: prepareEnv(), cwd })
 
       assert.match(logged(), /::warning::.*checks\.tbd\.dirs.*src\//)
     })
@@ -893,7 +911,7 @@ describe('release-prep', () => {
       const { exec } = recordingExec(allSucceed())
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': { name: 'x' } })
 
-      await runPrepare({ core, exec, env: prepareEnv(), cwd })
+      await prepareUntagged({ core, exec, env: prepareEnv(), cwd })
 
       assert.match(logged(), /::warning::.*changelogger/)
     })
@@ -903,7 +921,7 @@ describe('release-prep', () => {
 
       const accepted = await coreWithOutputs(t)
       const run = recordingExec(allSucceed())
-      await runPrepare({
+      await prepareUntagged({
         core: accepted.core,
         exec: run.exec,
         env: prepareEnv({ INPUT_VERSION: '4.17.0-beta.1' }),
@@ -915,7 +933,7 @@ describe('release-prep', () => {
       const refused = await coreWithOutputs(t)
       const stopped = recordingExec(allSucceed())
       await assert.rejects(
-        runPrepare({
+        prepareUntagged({
           core: refused.core,
           exec: stopped.exec,
           env: prepareEnv({ INPUT_VERSION: '4.17.0.1' }),
@@ -932,7 +950,7 @@ describe('release-prep', () => {
       const custom = { changelogger: { versioning: 'bin/versioning.js' } }
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': custom })
 
-      await runPrepare({ core, exec, env: prepareEnv({ INPUT_VERSION: 'M26.1' }), cwd })
+      await prepareUntagged({ core, exec, env: prepareEnv({ INPUT_VERSION: 'M26.1' }), cwd })
 
       assert.match(logged(), /::warning::.*custom versioning strategy \(bin\/versioning\.js\)/)
       assert.match(logged(), /::warning::.*M26\.1 holds no numeric version/)
@@ -945,7 +963,7 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': { changelogger: { versioning: 'foo' } } })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        prepareUntagged({ core, exec, env: prepareEnv(), cwd }),
         /changelogger\.versioning to 'foo', which is not a versioning strategy the changelogger knows/
       )
       assert.deepEqual(calls, [])
@@ -964,7 +982,7 @@ describe('release-prep', () => {
           allSucceed([{ command: 'php', args: /get-version$/, stdout: `${current}\n` }])
         )
         const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': semver })
-        const prepare = runPrepare({ core, exec, env: prepareEnv({ INPUT_VERSION: '4.17.0-beta.1' }), cwd })
+        const prepare = prepareUntagged({ core, exec, env: prepareEnv({ INPUT_VERSION: '4.17.0-beta.1' }), cwd })
 
         if (accepted) {
           await prepare
@@ -989,7 +1007,7 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        prepareUntagged({ core, exec, env: prepareEnv(), cwd }),
         /pup replace-version failed.*No version files found/s
       )
       assert.ok(!sequence(calls).some((call) => call.includes('replace-tbd')), 'replace-tbd never ran')
@@ -1006,7 +1024,7 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        prepareUntagged({ core, exec, env: prepareEnv(), cwd }),
         /Downloading pup 2\.0\.0 failed.*404/s
       )
     })
@@ -1021,7 +1039,7 @@ describe('release-prep', () => {
         return { ok: true, json: async () => ({ tag_name: '2.0.0' }) }
       }
 
-      await runPrepare({
+      await prepareUntagged({
         core,
         exec,
         env: prepareEnv({ INPUT_PUP_VERSION: 'latest', INPUT_TOKEN: 'ghp_example' }),
@@ -1048,15 +1066,16 @@ describe('release-prep', () => {
       })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv({ INPUT_PUP_VERSION: 'latest' }), cwd, fetchImpl }),
+        prepareUntagged({ core, exec, env: prepareEnv({ INPUT_PUP_VERSION: 'latest' }), cwd, fetchImpl }),
         /The latest pup release has no usable tag/
       )
       assert.deepEqual(outputs(), {}, 'no distribution is decided from a broken response')
     })
 
-    it('does not call the GitHub API for a pinned pup version', async (t) => {
+    it('reads the API once, for the tag, and not for a pinned pup version', async (t) => {
       const { core } = await coreWithOutputs(t)
       const { exec } = recordingExec(allSucceed())
+      const { github, requests } = await octokitFor()
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
       let called = 0
       const fetchImpl = async () => {
@@ -1064,9 +1083,43 @@ describe('release-prep', () => {
         return { ok: true, json: async () => ({}) }
       }
 
-      await runPrepare({ core, exec, env: prepareEnv(), cwd, fetchImpl })
+      await runPrepare({ github, core, exec, env: prepareEnv(), cwd, fetchImpl })
 
       assert.equal(called, 0, 'a pinned version downloads straight from the release URL')
+      assert.deepEqual(requested(requests), [`GET ${TAG_PATH}`])
+    })
+
+    it('refuses a version the repository has already tagged, before downloading or running anything', async (t) => {
+      const { core, outputs } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed())
+      const { github } = await octokitFor([{ method: 'GET', path: TAG_PATH, body: { ref: 'refs/tags/4.17.0', object: { sha: 'abc' } } }])
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+      await assert.rejects(
+        runPrepare({ github, core, exec, env: prepareEnv(), cwd }),
+        /tag 4\.17\.0 already exists in stellarwp\/plugin.*Give the release a new version.*Nothing was changed/s
+      )
+
+      assert.ok(!sequence(calls).some((call) => /^(curl|php)/.test(call)), sequence(calls).join('\n'))
+      assert.deepEqual(outputs(), {})
+    })
+
+    it('fails when the tag cannot be read, rather than taking the error for an absent tag', async (t) => {
+      const { core } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed())
+      const { github } = await octokitFor([{ method: 'GET', path: TAG_PATH, status: 500, body: { message: 'boom' } }])
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+      await assert.rejects(runPrepare({ github, core, exec, env: prepareEnv(), cwd }), /Reading tag 4\.17\.0 failed.*500/s)
+      assert.ok(!sequence(calls).some((call) => /^(curl|php)/.test(call)))
+    })
+
+    it('fails when GITHUB_REPOSITORY is missing, since it cannot check the tag', async (t) => {
+      const { core } = await coreWithOutputs(t)
+      const { exec } = recordingExec(allSucceed())
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
+
+      await assert.rejects(prepareUntagged({ core, exec, env: prepareEnv({ GITHUB_REPOSITORY: '' }), cwd }), /GITHUB_REPOSITORY is not set/)
     })
 
     it('fails loudly when the release exists but has no phar, pointing at the pin', async (t) => {
@@ -1081,7 +1134,7 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        prepareUntagged({ core, exec, env: prepareEnv(), cwd }),
         /pup 2\.0\.0 publishes no pup\.phar asset.*Pin pup-version to a release that ships one, such as 2\.0\.0/s
       )
       assert.deepEqual(outputs(), { distribution: 'ts' }, 'the resolved distribution is reported on the failed run')
@@ -1110,7 +1163,7 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv({ INPUT_PUP_VERSION: '2.0.9' }), cwd }),
+        prepareUntagged({ core, exec, env: prepareEnv({ INPUT_PUP_VERSION: '2.0.9' }), cwd }),
         /pup 2\.0\.9 is not a release: check pup-version for a typo\. Nothing was changed\./
       )
       assert.deepEqual(outputs(), {}, 'no distribution is reported for a release that does not exist')
@@ -1128,7 +1181,7 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        prepareUntagged({ core, exec, env: prepareEnv(), cwd }),
         /Checking the pup 2\.0\.0 release failed.*Connection timed out/s
       )
     })
@@ -1141,7 +1194,7 @@ describe('release-prep', () => {
       const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': PACKAGE_JSON })
 
       await assert.rejects(
-        runPrepare({ core, exec, env: prepareEnv(), cwd }),
+        prepareUntagged({ core, exec, env: prepareEnv(), cwd }),
         /Checking the pup 2\.0\.0 release failed.*Connection timed out/s
       )
     })

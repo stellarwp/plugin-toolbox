@@ -111,6 +111,10 @@ any, it writes nothing and accepts any version. The action's check does not depe
   GitHub refuses the dispatch itself with HTTP 422 and no run starts. When the workflow declares it
   optional, the run starts and the action fails it with "No version was given". Either way the
   release needs a version before the step runs again.
+- **A version the repository has already tagged is refused.** A release branch cut from `main` right
+  after a release still carries that release's version, and preparing it again would put the next
+  changes under a version that is already out. The tag is read through the GitHub API with `token`,
+  so the check works on the shallow checkout the template makes. Give the release a new version.
 - **A version lower than the branch's is refused.** pup reads the version the branch already has
   (`pup get-version`, the first file in `paths.versions`), and preparing `4.17.0` on a branch at
   `4.18.0` would bump the plugin backwards: either the version or the branch is wrong. The same
@@ -210,8 +214,9 @@ branch already has — runs on the phar path only; the TS contract does not defi
 ## Running it again
 
 Preparing a version the branch already holds changes nothing: the versions match, no TBDs are left
-and `changelog/` is empty. The action commits nothing, calls no API, and succeeds, so a retry of a
-finished preparation is safe.
+and `changelog/` is empty. The action commits nothing and succeeds, so a retry of a finished
+preparation is safe, as long as the version has not been tagged in between: once the release is out,
+preparing its version again is refused.
 
 ## The date
 
