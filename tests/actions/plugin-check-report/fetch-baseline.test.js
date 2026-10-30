@@ -9,7 +9,7 @@ const { spawnSync } = require('node:child_process')
 
 const FETCH = path.join(__dirname, '../../../.github/actions/plugin-check-report/fetch-baseline.sh')
 
-const REPO = 'impress-org/givewp'
+const REPO = 'example-org/my-plugin'
 const SHA = 'a'.repeat(40)
 const OLD_SHA = 'b'.repeat(40)
 

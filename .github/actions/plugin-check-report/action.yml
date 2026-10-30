@@ -84,7 +84,7 @@ runs:
         mkdir -p "$dir/report" "$dir/baseline"
 
         # In a called workflow GITHUB_WORKFLOW_REF is the caller's, like
-        # impress-org/givewp/.github/workflows/plugin-check.yml@refs/pull/12/merge. The runs that
+        # example-org/my-plugin/.github/workflows/plugin-check.yml@refs/pull/12/merge. The runs that
         # hold the baseline belong to that file, not to the toolbox's workflow.
         workflow=$INPUT_WORKFLOW_FILE
         if [ -z "$workflow" ]; then
@@ -114,7 +114,7 @@ runs:
         fi
 
     # The name and the baseline.json inside it are what fetch-baseline.sh looks for. Keep both:
-    # they are also what GiveWP's runs from before the shared workflow uploaded, so its old
+    # repositories that ran an earlier copy of this check upload the same names, so their old
     # baselines keep working.
     - name: Upload the report
       id: artifact

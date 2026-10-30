@@ -263,7 +263,7 @@ describe('ratchet.sh', () => {
     })
 
     it('starts with the marker the workflow passes', () => {
-      const marker = '<!-- plugin-check:impress-org/givewp -->'
+      const marker = '<!-- plugin-check:example-org/my-plugin -->'
       const run = ratchet([fixture('clean.txt')], { COMMENT_MARKER: marker })
 
       assert.equal(run.comment.split('\n')[0], marker)
