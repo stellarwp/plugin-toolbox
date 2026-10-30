@@ -1,6 +1,6 @@
-# StellarWP Plugin Toolbox
+# Nexcess Plugin Toolbox
 
-One home for the CI that every StellarWP brand keeps rebuilding on its own.
+One home for the CI that every Nexcess brand keeps rebuilding on its own.
 
 It's a toolbox and not an actions repo because it holds more than actions. It has composite actions, full reusable workflows, and the config files every plugin repo needs. Grab whichever tools your repo needs and leave the rest.
 
@@ -8,7 +8,7 @@ This file is the README and the build plan. Until Phase 2 ships, anything under 
 
 ## Why
 
-All the StellarWP brands have built their own solid CI, but it is time to merge them all into one place to reduce duplication and increase efficiency of managing these tools.
+All the Nexcess brands have built their own solid CI, but it is time to merge them all into one place to reduce duplication and increase efficiency of managing these tools.
 
 This repo will start by merging TEC and LD's Cis. Both run phpcs. Both run slic. Both package with pup, process changelogs at release, and spit out QA zips. When one team fixes something, the other team never hears about it.
 
