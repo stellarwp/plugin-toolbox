@@ -32,10 +32,14 @@ on:
         type: string
         default: 'true'
 
-# Two merges of the same release would race each other's pushes. One group per release makes the
-# second wait for the first, which then finds nothing left to do.
+# One deploy at a time for the whole repository, not one per release. Two releases prepared with the
+# same version would otherwise merge side by side, and the second would land its changes under a
+# version the first has just published. Run one after the other, the second finds the tag published
+# and the action refuses it before merging. A repository that also deploys from another workflow
+# (an `on: release` one, say) gives both the same group.
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.release_name }}
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
