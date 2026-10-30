@@ -63,10 +63,16 @@ function commitFile(dir, name, contents, message) {
  *                                           into it conflicts.
  * @param {string}  options.releaseReadme    The readme.txt of the release branch; its Stable tag is
  *                                           the second version file .puprc lists.
+ * @param {object}  options.puprc            The .puprc every branch carries.
  *
  * @returns {string} The bare repository.
  */
-function remoteWith({ baseConflicts = false, developConflicts = false, releaseReadme = 'Stable tag: 4.17.0\n' } = {}) {
+function remoteWith({
+  baseConflicts = false,
+  developConflicts = false,
+  releaseReadme = 'Stable tag: 4.17.0\n',
+  puprc = PUPRC,
+} = {}) {
   const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'release-merge-remote-'))
   const seed = fs.mkdtempSync(path.join(os.tmpdir(), 'release-merge-seed-'))
 
@@ -75,7 +81,7 @@ function remoteWith({ baseConflicts = false, developConflicts = false, releaseRe
   git(seed, 'init', '--quiet', '-b', 'main')
   git(seed, 'config', 'user.name', 'Test')
   git(seed, 'config', 'user.email', 'test@example.com')
-  fs.writeFileSync(path.join(seed, '.puprc'), JSON.stringify(PUPRC))
+  fs.writeFileSync(path.join(seed, '.puprc'), JSON.stringify(puprc))
   fs.writeFileSync(path.join(seed, 'readme.txt'), 'Stable tag: 4.16.0\n')
   commitFile(seed, 'plugin.php', 'Version: 4.16.0\n', 'Initial')
 
@@ -587,6 +593,33 @@ describe('release-merge', () => {
         runMerge({ github, core, exec, env: mergeEnv(), cwd }),
         /readme\.txt on release\/M26\.test holds no version.*\(Stable tag: \)\(\.\+\)/s
       )
+    })
+
+    it('names the file when the .puprc regex is not one JavaScript accepts', async (t) => {
+      const bare = remoteWith({ puprc: { paths: { versions: [{ file: 'plugin.php', regex: '(Version: )(?<' }] } } })
+      const cwd = checkoutOf(bare)
+      const { github } = await octokitFor(UNTAGGED)
+      const { core } = await coreWithOutputs(t)
+      const { exec, calls } = await recordedRealExec()
+
+      await assert.rejects(
+        runMerge({ github, core, exec, env: mergeEnv(), cwd }),
+        /regex \.puprc gives for plugin\.php \(\(Version: \)\(\?<\) is not one JavaScript accepts.*Nothing was merged/s
+      )
+      assert.ok(!sequence(calls).some((line) => / merge --no-ff |^git push/.test(line)))
+    })
+
+    it('refuses a publish value that is neither true nor false before touching git', async (t) => {
+      const { github, requests } = await octokitFor(UNTAGGED)
+      const { core } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec([{ command: 'git' }])
+
+      await assert.rejects(
+        runMerge({ github, core, exec, env: mergeEnv({ INPUT_PUBLISH: 'yes' }), cwd: os.tmpdir() }),
+        /publish 'yes'/
+      )
+      assert.deepStrictEqual(calls, [])
+      assert.deepStrictEqual(requests, [])
     })
 
     it('refuses a branch without a .puprc, since the version it holds cannot be read', async (t) => {

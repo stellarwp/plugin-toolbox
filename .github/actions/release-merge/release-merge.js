@@ -261,7 +261,15 @@ async function assertBranchHoldsVersion({ exec, cwd, branch, version }) {
       throw new Error(`${file}, which .puprc lists under paths.versions, is not on ${branch}. Nothing was merged.`)
     }
 
-    const found = versionIn(content, regex)
+    let found
+    try {
+      found = versionIn(content, regex)
+    } catch (error) {
+      throw new Error(
+        `The regex .puprc gives for ${file} (${regex}) is not one JavaScript accepts: ${error.message}. ` +
+          'Nothing was merged.'
+      )
+    }
     if (found === null) {
       throw new Error(
         `${file} on ${branch} holds no version where .puprc expects one (${regex}). Nothing was merged.`
@@ -381,6 +389,8 @@ async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
   const version = validateVersion(env.INPUT_VERSION)
   const base = validateBranch(env.INPUT_BASE_BRANCH, 'base-branch')
   const develop = validateBranch(env.INPUT_DEVELOP_BRANCH, 'develop-branch')
+  // Read by the publish step; checked here so a wrong value fails before anything is merged.
+  readPublish(env.INPUT_PUBLISH)
   const { owner, repo } = readRepository(env, 'Nothing was merged.')
 
   if (base === develop) {

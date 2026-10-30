@@ -28,8 +28,9 @@ In this order, stopping at the first failure:
 1. Checks the inputs, and the version against the repository's tags. See
    [Versions it refuses](#versions-it-refuses).
 2. Fetches the release branch, the base branch and develop from `origin`, with the full history
-   when the checkout is shallow, and checks that every version file the branch's `.puprc` lists
-   holds the version.
+   when the checkout is shallow. Then it checks that every version file the branch's `.puprc` lists
+   holds the version and, when the version is already tagged, that the tag contains the branch: a
+   retry of this release goes on, a tag made from another commit is refused.
 3. Merges the release branch into the base branch as a merge commit, `Merge release/… into main`
    (or `into master`), and pushes it.
 4. Merges the **base branch** into develop as a merge commit, `Merge main back into develop
