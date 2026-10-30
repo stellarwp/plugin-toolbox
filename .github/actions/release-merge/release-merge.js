@@ -187,9 +187,10 @@ function isNotFound(error) {
  * Checks the version against the repository's tags before anything is merged.
  *
  * A version that was never tagged is the common case. One whose tag exists with a published release
- * is a retry after a late failure: the merges will find nothing to do and the publish step will skip
- * it. One whose tag exists without a release would make the publish step reuse whatever commit the
- * tag points at, so it is refused here, with the base and develop untouched.
+ * may be a retry after a late failure; runMerge settles that once the tag is fetched, by checking
+ * that the tag contains the branch. One whose tag exists without a release would make the publish
+ * step reuse whatever commit the tag points at, so it is refused here, with the base and develop
+ * untouched.
  *
  * @param {object} options
  * @param {object} options.github  The Octokit github-script supplies.
@@ -199,15 +200,15 @@ function isNotFound(error) {
  *
  * @throws {Error} When the tag exists without a release, or a read fails for any reason but 404.
  *
- * @returns {Promise<{releaseUrl: string|null}>} The published release's URL, or null when the
- *          version was never tagged.
+ * @returns {Promise<{tagged: boolean, releaseUrl: string|null}>} Whether the tag exists, and the
+ *          published release's URL when it does.
  */
 async function runPreflight({ github, owner, repo, version }) {
   try {
     await github.rest.git.getRef({ owner, repo, ref: `tags/${version}` })
   } catch (error) {
     if (isNotFound(error)) {
-      return { releaseUrl: null }
+      return { tagged: false, releaseUrl: null }
     }
 
     throw new Error(`Reading tag ${version} failed (HTTP ${error.status}): ${error.message}. Nothing was merged.`)
@@ -216,7 +217,7 @@ async function runPreflight({ github, owner, repo, version }) {
   try {
     const { data: release } = await github.rest.repos.getReleaseByTag({ owner, repo, tag: version })
 
-    return { releaseUrl: release.html_url }
+    return { tagged: true, releaseUrl: release.html_url }
   } catch (error) {
     if (isNotFound(error)) {
       throw new Error(
@@ -384,10 +385,7 @@ async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
     }
   }
 
-  const { releaseUrl } = await runPreflight({ github, owner, repo, version })
-  if (releaseUrl) {
-    core.info(`${version} is already published (${releaseUrl}); the publish step will skip it.`)
-  }
+  const { tagged, releaseUrl } = await runPreflight({ github, owner, repo, version })
 
   const token = String(env.INPUT_TOKEN || '')
   const authEnv = { ...env, ...gitAuthEnv(token, env.GITHUB_SERVER_URL) }
@@ -399,12 +397,38 @@ async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
   // in; `--unshallow` fetches it along with the branches.
   const shallow = (await exec.getExecOutput('git', ['rev-parse', '--is-shallow-repository'], { cwd, silent: true })).stdout.trim()
   const refspecs = [branch, base, develop].map((name) => `+refs/heads/${name}:refs/remotes/origin/${name}`)
+  if (tagged) {
+    refspecs.push(`+refs/tags/${version}:refs/tags/${version}`)
+  }
   await gitOrFail(
     exec,
     ['fetch', ...(shallow === 'true' ? ['--unshallow'] : []), 'origin', ...refspecs],
     { cwd, env: authEnv },
     'Fetching the branches'
   )
+
+  // A tag with a published release is a retry only when that release came from this branch: its
+  // commit then contains the branch, and the merges below find nothing to do. A tag that does not
+  // contain the branch is an earlier release of the same version, which the branch was never bumped
+  // past; merging it would put a second set of changes under a version that is already out.
+  if (tagged) {
+    const ancestry = await exec.getExecOutput(
+      'git',
+      ['merge-base', '--is-ancestor', `origin/${branch}`, `refs/tags/${version}^{commit}`],
+      { cwd, ignoreReturnCode: true, silent: true }
+    )
+    if (ancestry.exitCode === 1) {
+      throw new Error(
+        `The tag ${version} already exists and does not contain ${branch}: ${version} was released ` +
+          `from another commit, and the branch was never bumped past it. Give the release a new ` +
+          'version and prepare the branch again. Nothing was merged.'
+      )
+    }
+    if (ancestry.exitCode !== 0) {
+      throw new Error(`Comparing ${branch} with the tag ${version} failed (exit code ${ancestry.exitCode}). Nothing was merged.`)
+    }
+    core.info(`${version} is already published (${releaseUrl}) from ${branch}; the publish step will skip it.`)
+  }
 
   await gitOrFail(exec, ['checkout', '--quiet', '-B', base, `origin/${base}`], { cwd }, `Checking out ${base}`)
   const mergedBase = await mergeAndPush({

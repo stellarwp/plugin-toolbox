@@ -19,7 +19,8 @@ inputs:
       The version being released: three or four numeric parts, such as 4.17.0 or 4.17.0.1, the same
       rule the release dashboard and release-prep apply. It becomes the tag and the title of the
       GitHub release. A pre-release such as 4.17.0-beta.1 and an empty value are refused before
-      anything is merged, and so is a version whose tag already exists without a published release.
+      anything is merged, and so is a version whose tag already exists, unless that tag's release was
+      published from this very branch, which is a retry.
     required: true
   base-branch:
     description: 'The branch the release is merged into: `main`, or `master` where that is the name.'
