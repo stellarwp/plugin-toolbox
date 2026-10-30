@@ -86,6 +86,8 @@ runs:
         INPUT_VERSION: ${{ inputs.version }}
         INPUT_BASE_BRANCH: ${{ inputs.base-branch }}
         INPUT_DEVELOP_BRANCH: ${{ inputs.develop-branch }}
+        # Checked here too, so a wrong value fails before anything is merged.
+        INPUT_PUBLISH: ${{ inputs.publish }}
         INPUT_TOKEN: ${{ inputs.token }}
       with:
         # The tag and release reads go through github-script's own client, built from this token.
