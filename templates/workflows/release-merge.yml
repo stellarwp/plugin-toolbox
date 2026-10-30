@@ -1,0 +1,66 @@
+name: Release Merge
+
+# Merges a release and publishes it on GitHub: the release branch into the base branch, the base
+# branch back into develop, then the GitHub release for the version. Nothing is built or deployed
+# here; a plugin repository adds its own steps after the action, on the checkout it leaves on the
+# merged base branch.
+#
+# A file to copy into .github/workflows/ of a plugin repository, not a workflow to call. Rename the
+# base branch below where it is `master`.
+#
+# The inputs are the interface a release tool dispatches: `release_name` and `version`.
+# `production` is accepted because the release dashboard sends it for the deploy step; this
+# workflow builds nothing, so it does not read it.
+#
+# Run it locally: you cannot, it pushes to two branches and publishes a release. Start it by hand with
+# `gh workflow run release-merge.yml -f release_name=M26.jigglypuff -f version=4.17.0`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_name:
+        description: 'Release name, the part after release/ in the branch, e.g. M26.jigglypuff'
+        required: true
+        type: string
+      version:
+        description: 'Version being released, e.g. 4.17.0'
+        required: true
+        type: string
+      production:
+        description: 'Sent by the release dashboard for the deploy step. Not read here'
+        required: false
+        type: string
+        default: 'true'
+
+# Two merges of the same release would race each other's pushes. One group per release makes the
+# second wait for the first, which then finds nothing left to do.
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.release_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  merge:
+    runs-on: ubuntu-24.04
+    # A release that reaches users should wait for a person: give this environment required reviewers
+    # in the repository settings, and let its branch policy accept the release branches the dashboard
+    # dispatches on.
+    environment: live
+    permissions:
+      contents: write # the action pushes the merges and publishes the release
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The action fetches the branches it merges and pushes them with the token it is given, so
+          # the checkout keeps no credentials in .git/config for a later step to find.
+          persist-credentials: false
+
+      - uses: stellarwp/plugin-toolbox/.github/actions/release-merge@v1
+        id: release
+        with:
+          branch: release/${{ inputs.release_name }}
+          version: ${{ inputs.version }}
+          # base-branch: master
+
+      # The checkout is now on the merged base branch: build and deploy from here.
