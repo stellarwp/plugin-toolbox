@@ -1,0 +1,70 @@
+name: Release Merge
+
+# Merges a release and publishes it on GitHub: the release branch into the base branch (`main` here,
+# `master` in some repositories), the base branch back into develop, then the GitHub release for the
+# version. Nothing is built or deployed here; a plugin repository adds its own steps after the
+# action, on the checkout it leaves on the merged base branch.
+#
+# A file to copy into .github/workflows/ of a plugin repository, not a workflow to call. Rename the
+# base branch below where it is `master`.
+#
+# The inputs are the interface a release tool dispatches: `branch` and `version`. `production` is
+# accepted because the release dashboard sends it for the deploy step; this workflow builds nothing,
+# so it does not read it.
+#
+# Run it locally: you cannot, it pushes to two branches and publishes a release. Start it by hand with
+# `gh workflow run release-merge.yml -f branch=release/M26.jigglypuff -f version=4.17.0`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Release branch to merge, e.g. release/M26.jigglypuff'
+        required: true
+        type: string
+      version:
+        description: 'Version being released, e.g. 4.17.0'
+        required: true
+        type: string
+      production:
+        description: 'Sent by the release dashboard for the deploy step. Not read here'
+        required: false
+        type: string
+        default: 'true'
+
+# One deploy at a time for the whole repository, not one per release. Two releases prepared with the
+# same version would otherwise merge side by side, and the second would land its changes under a
+# version the first has just published. Run one after the other, the second finds the tag published
+# and the action refuses it before merging. A repository that also deploys from another workflow
+# (an `on: release` workflow, for instance) gives both the same group.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  merge:
+    runs-on: ubuntu-24.04
+    # A release that reaches users should wait for a person: give this environment required reviewers
+    # in the repository settings, and let its branch policy accept the release branches the dashboard
+    # dispatches on.
+    environment: live
+    permissions:
+      contents: write # the action pushes the merges and publishes the release
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The action fetches the branches it merges and pushes them with the token it is given, so
+          # the checkout keeps no credentials in .git/config for a later step to find.
+          persist-credentials: false
+
+      - uses: stellarwp/plugin-toolbox/.github/actions/release-merge@v1
+        id: release
+        with:
+          branch: ${{ inputs.branch }}
+          version: ${{ inputs.version }}
+          # base-branch: master
+
+      # The checkout is now on the merged base branch: build and deploy from here.
