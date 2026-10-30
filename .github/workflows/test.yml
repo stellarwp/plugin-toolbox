@@ -3,7 +3,8 @@ name: Tests
 # This repo's own checks. A bug here reaches every repo that pins a tag from it, so the logic in the
 # actions is unit tested rather than only exercised by a real release.
 #
-# Run it locally: `npm install` once, then `node --test`. For the lint job, run `actionlint`.
+# Run it locally: `npm install` once, then `node --test`. For the lint job, `actionlint` and
+# `shellcheck .github/actions/*/*.sh`.
 
 on:
   push:
@@ -59,3 +60,8 @@ jobs:
           bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
           ./actionlint -ignore 'unexpected key "queue" for "concurrency" section' \
             .github/workflows/*.yml templates/workflows/*.yml
+
+      # actionlint does not read composite actions or standalone scripts. shellcheck comes with the
+      # runner image.
+      - name: Run shellcheck on the action scripts
+        run: shellcheck .github/actions/*/*.sh
