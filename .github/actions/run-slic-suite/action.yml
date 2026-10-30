@@ -115,7 +115,7 @@ runs:
 
     - name: Upload failed test data as an artifact
       if: failure() && inputs.upload-output-on-failure == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ steps.run.outputs.artifact-name }}
         path: ${{ steps.run.outputs.output-path }}
