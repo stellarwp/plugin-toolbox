@@ -1,5 +1,5 @@
-# Merges a release: the release branch into the base branch, the base branch back into develop, then
-# publishes the GitHub release for the version. The part of a deploy that is the same for every
+# Merges a release: the release branch into the base branch (`main`, or `master` where that is the
+# name), the base branch back into develop, then publishes the GitHub release for the version. The part of a deploy that is the same for every
 # plugin; what happens after the merge (building, wordpress.org, announcements) is the caller's.
 #
 # The checks, the merges and the publish live in release-merge.js, run by actions/github-script, so
@@ -16,9 +16,8 @@ inputs:
     required: true
   version:
     description: >-
-      The version being released: three or four numeric parts, such as 4.17.0 or 4.17.0.1, the same
-      rule the release dashboard and release-prep apply. It becomes the tag and the title of the
-      GitHub release. A pre-release such as 4.17.0-beta.1 and an empty value are refused before
+      The version being released: three or four numeric parts, such as 4.17.0 or 4.17.0.1, the rule
+      the release dashboard applies. It becomes the tag and the title of the GitHub release. A pre-release such as 4.17.0-beta.1 and an empty value are refused before
       anything is merged, and so is a version whose tag already exists, unless that tag's release was
       published from this branch, which makes the run a retry.
     required: true
@@ -42,7 +41,7 @@ inputs:
       the job needs that permission too. It is handed to git through the environment of the fetch and
       the pushes only, never written to the checkout's config, so the checkout can use
       `persist-credentials: false`. A release published with the default token triggers no `release`
-      workflow, on purpose: the run that merged the release is the one that deploys it.
+      workflow: the run that merged the release is the one that deploys it.
     required: false
     default: ${{ github.token }}
 
@@ -96,7 +95,8 @@ runs:
       uses: actions/github-script@v9
       env:
         ACTION_PATH: ${{ github.action_path }}
-        # The values the merge step validated, not the raw inputs.
+        # The values the merge step validated, not the raw inputs. base-branch and develop-branch
+        # are outputs of that step for this hand-over only; the action exposes neither.
         INPUT_VERSION: ${{ steps.merge.outputs.version }}
         INPUT_BASE_BRANCH: ${{ steps.merge.outputs.base-branch }}
         INPUT_PUBLISH: ${{ inputs.publish }}

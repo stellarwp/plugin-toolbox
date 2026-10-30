@@ -18,6 +18,8 @@ const { execFileSync } = require('node:child_process')
 
 // The three-or-four-parts pattern lives with the other version rules, shared with release-merge.
 const { compareVersions, STELLARWP_VERSION_PATTERN } = require('../../lib/versions.js')
+const { readRepository } = require('../../lib/github.js')
+const { runOrFail } = require('../../lib/exec.js')
 
 /**
  * A semver version as semver.org defines it: MAJOR.MINOR.PATCH, an optional pre-release and
@@ -618,31 +620,6 @@ function readCheckoutFile(cwd, name) {
 }
 
 /**
- * Runs a command and fails with its output when it exits non-zero.
- *
- * @param {object}   exec    The @actions/exec toolkit.
- * @param {string}   command The program.
- * @param {string[]} args    Its arguments.
- * @param {object}   options Options for @actions/exec.
- * @param {string}   what    What the command does, to open the error message.
- *
- * @throws {Error} When the command exits non-zero, holding what it printed.
- *
- * @returns {Promise<string>} What the command printed to stdout.
- */
-async function runOrFail(exec, command, args, options, what) {
-  const result = await exec.getExecOutput(command, args, { ...options, ignoreReturnCode: true })
-
-  if (result.exitCode !== 0) {
-    const output = [result.stdout, result.stderr].map((text) => text.trim()).filter(Boolean)
-
-    throw new Error(`${what} failed (exit code ${result.exitCode}):\n${output.join('\n')}`)
-  }
-
-  return result.stdout
-}
-
-/**
  * Validates the inputs, then bumps the version and replaces the TBDs with pup.
  *
  * Every check runs before anything is written, so a wrong version, date or ref, a checkout that is
@@ -838,14 +815,7 @@ async function runCommit({ github, core, exec, env, cwd = process.cwd() }) {
   const branch = validateBranch(env.INPUT_BRANCH)
   const version = readVersion(env.INPUT_VERSION)
   const message = commitMessage(branch, version)
-  const [owner, repo] = String(env.GITHUB_REPOSITORY || '').split('/')
-
-  if (!owner || !repo) {
-    throw new Error(
-      'GITHUB_REPOSITORY is not set, so the action does not know which repository to commit to. ' +
-        'Nothing was committed.'
-    )
-  }
+  const { owner, repo } = readRepository(env, 'Nothing was committed.')
 
   await runOrFail(exec, 'git', ['add', '--all'], { cwd }, 'Staging the changes')
 

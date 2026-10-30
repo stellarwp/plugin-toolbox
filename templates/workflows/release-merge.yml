@@ -1,7 +1,8 @@
 name: Release Merge
 
-# Merges a release and publishes it on GitHub: the release branch into the base branch, the base
-# branch back into develop, then the GitHub release for the version. Nothing is built or deployed
+# Merges a release and publishes it on GitHub: the release branch into the base branch (`main` here,
+# `master` in some repositories), the base branch back into develop, then the GitHub release for the
+# version. Nothing is built or deployed
 # here; a plugin repository adds its own steps after the action, on the checkout it leaves on the
 # merged base branch.
 #

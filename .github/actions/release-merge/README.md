@@ -1,7 +1,8 @@
 # release-merge
 
-Merges a release and publishes it on GitHub: the release branch into the base branch, the base branch
-back into develop, then the GitHub release for the version:
+Merges a release and publishes it on GitHub: the release branch into the base branch, the base
+branch back into develop, then the GitHub release for the version. **The base branch is `main`, or
+`master` where that is the repository's name for it**, set with `base-branch`:
 
 ```yaml
 - uses: actions/checkout@v6
@@ -14,9 +15,9 @@ back into develop, then the GitHub release for the version:
     version: ${{ inputs.version }}
 ```
 
-It is the part of a deploy that is the same for every plugin repository on a `main` + `develop`
-branch model. Building the plugin, uploading it anywhere and announcing it are the caller's steps,
-after the action, on the checkout it leaves on the merged base branch.
+It is the part of a deploy that is the same for every plugin repository on a base branch plus
+`develop` model. Building the plugin, uploading it anywhere and announcing it are the caller's
+steps, after the action, on the checkout it leaves on the merged base branch.
 [`templates/workflows/release-merge.yml`](../../../templates/workflows/release-merge.yml) is a
 complete workflow around it, ready to copy into a plugin repository.
 
@@ -28,12 +29,12 @@ In this order, stopping at the first failure:
    [Versions it refuses](#versions-it-refuses).
 2. Fetches the release branch, the base branch and develop from `origin`, with the full history
    when the checkout is shallow.
-3. Merges the release branch into the base branch as a merge commit, `Merge release/… into main`,
-   and pushes it.
+3. Merges the release branch into the base branch as a merge commit, `Merge release/… into main`
+   (or `into master`), and pushes it.
 4. Merges the **base branch** into develop as a merge commit, `Merge main back into develop
-   (release/…)`, and pushes it. The base branch rather than the release branch, so develop descends
-   from the base and consecutive releases bring one version bump each instead of divergent copies
-   of the same generated lines.
+   (release/…)`, and pushes it. The base branch rather than the release branch, so develop
+   descends from the base and consecutive releases bring one version bump each instead of
+   divergent copies of the same generated lines.
 5. Publishes the GitHub release: tag and title are the version, target is the base branch, the notes
    are the ones GitHub generates from the pull requests since the previous release. Skipped with
    `publish: false`.
@@ -64,10 +65,11 @@ step fails with the branch named. The branches already pushed stay pushed: a con
 base into develop leaves the release on the base. Resolve the conflict on the branch by hand, push,
 and run the step again.
 
-The log carries the line
+The log carries this line, on one line:
 
 ```
-MERGE_CONFLICT: merging main into develop conflicted. Resolve it on develop by hand and push, then run this step again. Nothing was pushed to develop.
+MERGE_CONFLICT: merging main into develop conflicted. Resolve it on develop by hand and push,
+then run this step again. Nothing was pushed to develop.
 ```
 
 and the `conflict` output names the branch. The [release
@@ -81,11 +83,12 @@ two lines git itself prints, `CONFLICT (…)` and `Automatic merge failed`, are 
 
 - **Anything but three or four numeric parts**, such as `4.17.0` or `4.17.0.1`. A pre-release such
   as `4.17.0-beta.1` and a leading `v` are refused: the version becomes the tag and the title of the
-  published release, and a beta or an RC is not released this way. It is the same rule the release
-  dashboard and release-prep apply, so a version that reaches this action has passed it already.
+  published release, and a beta or an RC is not released this way. The release dashboard validates
+  versions with the same rule, so a version it dispatches has passed it already; release-prep
+  does under the stellarwp changelog versioning.
 - **An empty version.** A tool that dispatches the workflow for a release with no version set sends
-  an empty one. When the workflow declares `version` as required, GitHub refuses the dispatch itself;
-  when it is optional, the action fails the run before merging.
+  an empty one. When the workflow declares `version` as required, GitHub refuses the dispatch
+  itself; when it is optional, the action fails the run before merging.
 - **A version whose tag exists without a published release.** Publishing would release whatever
   commit the tag points at. Delete the tag or release another version.
 - **A version already released from another commit.** When the tag exists with a published release
@@ -105,7 +108,7 @@ two different branches, and the release branch cannot be either of them.
 |---|---|---|---|
 | `branch` | yes | | The release branch to merge, e.g. `release/M26.jigglypuff`. A branch name, fetched from `origin`. |
 | `version` | yes | | The version being released: three or four numeric parts. |
-| `base-branch` | no | `main` | The branch the release is merged into. `master` where that is the name. |
+| `base-branch` | no | `main` | The branch the release is merged into: `main`, or `master` where that is the repository's name for it. |
 | `develop-branch` | no | `develop` | The branch the base is merged back into. |
 | `publish` | no | `true` | `false` to do the two merges without the GitHub release. |
 | `token` | no | `github.token` | The token for the pushes and the release. Needs `contents: write`. See [The token](#the-token). |
@@ -119,6 +122,9 @@ two different branches, and the release branch cannot be either of them.
 | `conflict` | The branch a merge conflicted on, or empty. A conflict fails the step, so read it with `continue-on-error` or in a later `if: failure()` step. |
 | `published` | `true` when the release was created, `skipped` when it already existed, `false` when `publish` was false. |
 | `release-url` | The release page, empty when `publish` was false. |
+
+The merge step also sets `base-branch` and `develop-branch` as step outputs, for the publish step;
+the action does not expose them.
 
 ## One deploy at a time
 
@@ -141,15 +147,15 @@ cancels the waiting one, which has to be started again.
 
 ## The token
 
-The job needs `contents: write`, and the token is used for the fetch, the two pushes and the release.
-It is handed to git through the environment of those commands only (`GIT_CONFIG_*`, the
+The job needs `contents: write`, and the token is used for the fetch, the two pushes and the
+release. It is handed to git through the environment of those commands only (`GIT_CONFIG_*`, the
 `http.<server>/.extraheader` header actions/checkout would store), so it is never in the checkout's
 `.git/config` and never on a command line in the log. Use `persist-credentials: false` on the
 checkout; it matters when later steps of the same job run third-party actions.
 
 A release published with the default `github.token` triggers no `release` workflow: GitHub does not
-start workflows from events a workflow's own token caused. That is on purpose. The run that merged
-the release is the one that deploys it, so a repository that also has an `on: release` deploy does
+start workflows from events a workflow's own token caused. The run that merged the release is the
+one that deploys it, so a repository that also has an `on: release` deploy does
 not deploy it twice. A release that should trigger other workflows needs a token of its own.
 
 ## The checkout
@@ -164,8 +170,8 @@ tags and the release are read and written.
 ## How it runs
 
 Two [actions/github-script](https://github.com/actions/github-script) steps run
-[`release-merge.js`](./release-merge.js): one for the checks and the merges, one for the release. The
-inputs reach the script through environment variables, never interpolated into it, so a crafted
+[`release-merge.js`](./release-merge.js): one for the checks and the merges, one for the release.
+The inputs reach the script through environment variables, never interpolated into it, so a crafted
 value is data rather than part of the program. The merges are git commands in the checkout; the tag
 and release reads and the publish go through github-script's Octokit.
 
