@@ -398,9 +398,11 @@ jobs:
           echo "url=https://img.shields.io/badge/Check%20Finished-${stamp}-darkgreen" >> "$GITHUB_OUTPUT"
 
       # Full path, never ./: in a called workflow a relative path resolves against the caller's
-      # repository.
+      # repository. @main, like the callers: this repository publishes no releases, and a branch
+      # is the only ref the workflow and the action can share. A caller that tests another branch
+      # of this repository still gets the action from main.
       - name: Compare with the baseline
-        uses: stellarwp/plugin-toolbox/.github/actions/plugin-check-report@v1
+        uses: stellarwp/plugin-toolbox/.github/actions/plugin-check-report@main
         with:
           results: ${{ env.RESULTS }}
           comment-file: ${{ env.COMMENT_BODY }}

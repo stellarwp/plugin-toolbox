@@ -35,6 +35,6 @@ jobs:
       contents: read # check out the repository
       issues: write # the sticky pull request comment
       pull-requests: write # the sticky pull request comment
-    uses: stellarwp/plugin-toolbox/.github/workflows/plugin-check.yml@v1
+    uses: stellarwp/plugin-toolbox/.github/workflows/plugin-check.yml@main
     with:
       plugin-slug: my-plugin
