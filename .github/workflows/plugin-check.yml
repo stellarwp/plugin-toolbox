@@ -1,0 +1,441 @@
+name: Plugin Check
+
+# Runs WordPress.org's Plugin Check against the built plugin: the same files the release zip ships,
+# so tests, dotfiles, node_modules and other dev-only files cannot cause false positives.
+#
+# A reusable workflow. A plugin repository calls it from a thin workflow of its own; copy
+# templates/workflows/plugin-check.yml. Ported from GiveWP's plugin-check.yml.
+#
+# The plugin is built with pup by default (`composer -- pup build`, then `pup package`), so the
+# repository's .puprc and .distignore decide what is checked, the same as the release. A repository
+# without pup passes `build-command` instead; see the plugin-check-report README.
+#
+# Three jobs, so the third-party action never holds a token that can write:
+#   start   posts "in progress" on the pull request.
+#   check   builds the plugin and runs wordpress/plugin-check-action. Read-only token.
+#   report  compares the results with the baseline and replaces the comment with the result.
+#
+# The action also tries to post its own comment. With a read-only token that call fails (it logs
+# "Failed to post PR comment" and carries on), so the only comment is ours.
+#
+# The caller has to grant every permission a job below asks for: a called workflow can lower the
+# token's permissions, never raise them, and GitHub refuses to start the run when a job asks for
+# more than the caller gave. `concurrency` is the caller's too: here it would be evaluated with the
+# caller's context and could clash with the caller's own group.
+#
+# Run it locally: see "Running it locally" in .github/actions/plugin-check-report/README.md. In
+# short, `wp plugin check <slug> --format=json > results.txt` in a local WordPress, then
+# `bash .github/actions/plugin-check-report/ratchet.sh results.txt`.
+
+on:
+  workflow_call:
+    inputs:
+      plugin-slug:
+        description: >-
+          The plugin's folder name, e.g. `give`. It has to equal the top folder of the zip pup
+          builds (`zip_name` in .puprc), because Plugin Check takes the slug from the folder name.
+        required: true
+        type: string
+      main-file:
+        description: 'The main plugin file inside the plugin folder. Empty means `<plugin-slug>.php`.'
+        required: false
+        type: string
+        default: ''
+      build-command:
+        description: >-
+          Empty (the default) builds with pup. Otherwise a bash command that runs in the root of
+          the checkout instead of pup, and leaves the plugin as it ships in
+          "$PLUGIN_CHECK_BUILD_DIR/<plugin-slug>/". Prefer .puprc when the repository has one: this
+          is a second place that defines the build.
+        required: false
+        type: string
+        default: ''
+      runs-on:
+        description: 'Runner label for the job that builds and checks. The two small jobs run on ubuntu-latest.'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      php-version:
+        description: >-
+          PHP that builds vendor/. Use the oldest version the plugin supports, as its release does,
+          so Composer resolves dependencies that still run there.
+        required: false
+        type: string
+        default: '7.4'
+      exclude-checks:
+        description: 'Checks to skip, one per line. Passed to wordpress/plugin-check-action as it is.'
+        required: false
+        type: string
+        default: ''
+      cache-paths:
+        description: >-
+          Build caches to keep between runs, one path per line, relative to the repository root,
+          e.g. `.cache/webpack`. Empty keeps none. A path inside node_modules does not survive:
+          pup's build reinstalls it.
+        required: false
+        type: string
+        default: ''
+      mode:
+        description: >-
+          `ratchet`: fail only when a rule has more errors than the baseline. `strict`: fail on any
+          error. Not called `strict` because wordpress/plugin-check-action has a `strict` input
+          that means something else.
+        required: false
+        type: string
+        default: 'ratchet'
+      submodules:
+        description: 'Passed to actions/checkout: `false`, `true` or `recursive`.'
+        required: false
+        type: string
+        default: 'false'
+    secrets:
+      composer-token:
+        description: >-
+          GitHub token for private Composer packages. Becomes COMPOSER_AUTH for the build step
+          only.
+        required: false
+      package-token:
+        description: >-
+          Token for private npm or bun packages. Becomes NODE_AUTH_TOKEN, BUN_AUTH_TOKEN and
+          GITHUB_TOKEN for the build step only.
+        required: false
+
+env:
+  # Hidden line that marks the sticky pull request comment. The report action writes it as the
+  # first line of the body, and both comment steps search for it. Named after the repository, so
+  # two plugin repositories never share a marker.
+  COMMENT_MARKER: '<!-- plugin-check:${{ github.repository }} -->'
+  # Only pull requests from this repository get a comment: a fork's token is read-only.
+  COMMENT: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+
+jobs:
+  start:
+    name: Plugin Check start
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      # One comment per pull request, found by a hidden marker line and replaced on every run. The
+      # badge time is Eastern Time: %Z prints EST in winter and EDT in summer.
+      - name: Make the start badge
+        id: badge
+        run: |
+          stamp=$(LC_ALL=C TZ='America/New_York' date '+%m/%d %I:%M %p %Z')
+          stamp=${stamp// /%20}
+          stamp=${stamp//\//%2F}
+          echo "url=https://img.shields.io/badge/Check%20Started-${stamp}-blue" >> "$GITHUB_OUTPUT"
+
+      - name: Find the Plugin Check comment
+        id: find_comment
+        continue-on-error: true
+        uses: peter-evans/find-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: ${{ env.COMMENT_MARKER }}
+
+      - name: Post "in progress"
+        continue-on-error: true
+        uses: peter-evans/create-or-update-comment@v5
+        with:
+          comment-id: ${{ steps.find_comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          edit-mode: replace
+          body: |
+            ${{ env.COMMENT_MARKER }}
+            ⏳ Plugin Check in progress
+
+            ![Plugin Check started](${{ steps.badge.outputs.url }})
+
+  check:
+    name: Plugin Check run
+    runs-on: ${{ inputs.runs-on }}
+
+    # Build, WordPress start and the check together take about 15 minutes for GiveWP. The cap is
+    # for a container that stops answering.
+    timeout-minutes: 30
+
+    # Read-only on purpose: this job runs a third-party action. Its own attempt to post a comment
+    # fails with this token, which is what keeps the pull request to one comment.
+    permissions:
+      contents: read
+
+    env:
+      PLUGIN_CHECK_BUILD_DIR: ${{ github.workspace }}/build
+      SLUG: ${{ inputs.plugin-slug }}
+      MAIN_FILE: ${{ inputs.main-file || format('{0}.php', inputs.plugin-slug) }}
+
+    steps:
+      # The repo goes into source/, so the workspace root has no .wp-env.json. A repo's own file
+      # mounts the repo root as a plugin, and the action would merge into it.
+      - uses: actions/checkout@v7
+        with:
+          path: source
+          submodules: ${{ inputs.submodules }}
+          # Nothing here pushes over git, and the job goes on to run third-party code.
+          persist-credentials: false
+
+      # The action's wp-env pulls these images when it starts, and pulling them is part of the
+      # time that step takes. Started now, in the background, the download overlaps with the
+      # build. The images are the ones wp-env's generated files name (FROM wordpress..., FROM
+      # wordpress:cli..., image: mariadb:lts); if a later wp-env names others, these pulls are just
+      # wasted, never wrong. A failed pull only means wp-env pulls the image itself, so this step
+      # cannot fail the job.
+      - name: Start pulling the wp-env Docker images
+        continue-on-error: true
+        env:
+          IMAGES: wordpress wordpress:cli mariadb:lts
+        run: |
+          (
+            set +e
+            start=$(date +%s)
+            for image in $IMAGES; do
+              docker pull --quiet "$image" || echo "Could not pull $image, wp-env will pull it." &
+            done
+            wait
+            echo "Pulled in $(( $(date +%s) - start )) seconds."
+            touch "$RUNNER_TEMP/docker-pull.done"
+          ) > "$RUNNER_TEMP/docker-pull.log" 2>&1 < /dev/null &
+
+      - name: Set Up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ inputs.php-version }}
+          coverage: none
+
+      - name: Find the Composer cache
+        id: composer-cache
+        working-directory: source
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache dependencies
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ hashFiles('source/composer.lock') }}
+
+      # The JavaScript toolchain is picked from the files the repository already has, not from an
+      # input: .nvmrc for Node, package-lock.json for the npm cache, bun.lock or bun.lockb for bun.
+      - name: Set Up Node
+        if: ${{ hashFiles('source/.nvmrc') != '' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: source/.nvmrc
+          cache: ${{ hashFiles('source/package-lock.json') != '' && 'npm' || '' }}
+          cache-dependency-path: source/package-lock.json
+
+      - name: Set Up Bun
+        if: ${{ hashFiles('source/bun.lock', 'source/bun.lockb') != '' }}
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # actions/cache takes paths relative to the workspace, and the repository sits in source/.
+      # A path that leaves the checkout is refused: it would cache files this job did not build.
+      - name: List the cache paths
+        id: cache-paths
+        if: ${{ inputs.cache-paths != '' }}
+        env:
+          CACHE_PATHS: ${{ inputs.cache-paths }}
+        run: |
+          {
+            echo 'paths<<PLUGIN_CHECK_PATHS'
+            while IFS= read -r line; do
+              line=$(echo "$line" | xargs)
+              [ -n "$line" ] || continue
+              case "$line" in
+                /* | ..* | */..*) echo "::error title=Plugin Check::cache-paths must stay inside the repository: $line"; exit 1 ;;
+              esac
+              echo "source/$line"
+            done <<< "$CACHE_PATHS"
+            echo 'PLUGIN_CHECK_PATHS'
+          } >> "$GITHUB_OUTPUT"
+
+      # Each commit saves a new entry; the restore key picks the newest one for the same lockfile.
+      # A stale cache must be safe for the tool that owns it (webpack checks every entry against
+      # the files).
+      - name: Restore the build cache
+        id: build-cache
+        if: ${{ inputs.cache-paths != '' }}
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ steps.cache-paths.outputs.paths }}
+          key: plugin-check-${{ runner.os }}-${{ hashFiles('source/package-lock.json', 'source/bun.lock', 'source/bun.lockb') }}-${{ github.sha }}
+          restore-keys: |
+            plugin-check-${{ runner.os }}-${{ hashFiles('source/package-lock.json', 'source/bun.lock', 'source/bun.lockb') }}-
+
+      # The same pup steps the release zip uses, so .puprc and .distignore decide what is checked.
+      # The secrets reach this step only, never the job, so the third-party action later in this
+      # job does not see them in its environment.
+      - name: Build the plugin
+        working-directory: source
+        env:
+          BUILD_COMMAND: ${{ inputs.build-command }}
+          COMPOSER_TOKEN: ${{ secrets.composer-token }}
+          PACKAGE_TOKEN: ${{ secrets.package-token }}
+        run: |
+          if [ -n "$COMPOSER_TOKEN" ]; then
+            COMPOSER_AUTH=$(jq -cn --arg token "$COMPOSER_TOKEN" '{"github-oauth": {"github.com": $token}}')
+            export COMPOSER_AUTH
+          fi
+          if [ -n "$PACKAGE_TOKEN" ]; then
+            export NODE_AUTH_TOKEN="$PACKAGE_TOKEN" BUN_AUTH_TOKEN="$PACKAGE_TOKEN" GITHUB_TOKEN="$PACKAGE_TOKEN"
+          fi
+          unset COMPOSER_TOKEN PACKAGE_TOKEN
+          mkdir -p "$PLUGIN_CHECK_BUILD_DIR"
+
+          if [ -n "$BUILD_COMMAND" ]; then
+            echo "Building with build-command."
+            bash -eo pipefail -c "$BUILD_COMMAND"
+            exit 0
+          fi
+
+          composer run -q pup -- --version > /dev/null
+          composer -- pup build
+          version=$(php -d display_errors=0 bin/pup.phar get-version --dev)
+          composer -- pup package "$version"
+          name=$(php -d display_errors=0 bin/pup.phar zip-name "$version")
+          unzip -q "$name.zip" -d "$PLUGIN_CHECK_BUILD_DIR"
+
+      # The one contract every build has to meet, pup or not: a folder named after the slug, with
+      # the main plugin file in it. Plugin Check takes the slug from the folder name, so a wrong
+      # folder would check nothing useful and still look green.
+      - name: Check the built plugin
+        env:
+          CACHE_PATHS: ${{ inputs.cache-paths }}
+        run: |
+          dir="$PLUGIN_CHECK_BUILD_DIR/$SLUG"
+          if [ ! -f "$dir/$MAIN_FILE" ]; then
+            echo "::error title=Plugin Check::The build did not leave $SLUG/$MAIN_FILE in $PLUGIN_CHECK_BUILD_DIR. Found: $(find "$PLUGIN_CHECK_BUILD_DIR" -mindepth 1 -maxdepth 1 -printf '%f ')"
+            exit 1
+          fi
+          # A cache that ends up in the plugin would be checked, and shipped by the release.
+          while IFS= read -r line; do
+            line=$(echo "$line" | xargs)
+            [ -n "$line" ] || continue
+            if [ -e "$dir/$line" ]; then
+              echo "::error title=Plugin Check::The cache path $line is inside the built plugin. Add it to .distignore."
+              exit 1
+            fi
+          done <<< "$CACHE_PATHS"
+          echo "Checking $dir ($(find "$dir" -type f | wc -l | xargs) files)."
+
+      # Saved now, before the third-party action below runs, so nothing it does can end up in a
+      # cache that later runs restore. Skipped when this exact commit already saved one.
+      - name: Save the build cache
+        if: ${{ inputs.cache-paths != '' && steps.build-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ steps.cache-paths.outputs.paths }}
+          key: ${{ steps.build-cache.outputs.cache-primary-key }}
+
+      # Waits for the pulls started earlier, so wp-env does not start a second download of an
+      # image that is still coming, and prints how long they took. Gives up after two minutes and
+      # lets wp-env carry on; never fails the job.
+      - name: Wait for the Docker image pulls
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          for _ in $(seq 120); do
+            [ -f "$RUNNER_TEMP/docker-pull.done" ] && break
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/docker-pull.log" 2>/dev/null || true
+
+      # Fails on any error, which is expected while a plugin still has known problems: the report
+      # job decides pass or fail from the counts. The action writes its results to
+      # $RUNNER_TEMP/plugin-check-results.txt and uploads them as the plugin-check-results
+      # artifact. Its `slug` input is not passed: it would rename that artifact.
+      - name: Run Plugin Check
+        continue-on-error: true
+        uses: wordpress/plugin-check-action@v1
+        with:
+          build-dir: ${{ github.workspace }}/build/${{ inputs.plugin-slug }}
+          exclude-checks: ${{ inputs.exclude-checks }}
+
+  report:
+    name: Plugin Check
+    needs: [start, check]
+    # "start" is skipped for forks and non-pull-request runs, which would skip this job too.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    # Up to 20 minutes of it can be waiting for the target branch's run.
+    timeout-minutes: 30
+
+    # Writes one sticky comment on the pull request, and reads an earlier run's artifact as the
+    # baseline. No checkout: the scripts come with the action.
+    permissions:
+      actions: read
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Set file paths
+        run: |
+          {
+            echo "RESULTS=$RUNNER_TEMP/results/plugin-check-results.txt"
+            echo "COMMENT_BODY=$RUNNER_TEMP/plugin-check-comment.md"
+          } >> "$GITHUB_ENV"
+
+      # The action uploaded its results under this name. Missing when the build or the check broke
+      # before then: the compare reports that.
+      - name: Download the results
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: plugin-check-results
+          path: ${{ runner.temp }}/results
+
+      - name: Make the finish badge
+        id: finish_badge
+        run: |
+          stamp=$(LC_ALL=C TZ='America/New_York' date '+%m/%d %I:%M %p %Z')
+          stamp=${stamp// /%20}
+          stamp=${stamp//\//%2F}
+          echo "url=https://img.shields.io/badge/Check%20Finished-${stamp}-darkgreen" >> "$GITHUB_OUTPUT"
+
+      # Full path, never ./: in a called workflow a relative path resolves against the caller's
+      # repository.
+      - name: Compare with the baseline
+        uses: stellarwp/plugin-toolbox/.github/actions/plugin-check-report@v1
+        with:
+          results: ${{ env.RESULTS }}
+          comment-file: ${{ env.COMMENT_BODY }}
+          comment-marker: ${{ env.COMMENT_MARKER }}
+          mode: ${{ inputs.mode }}
+          badge-url: ${{ steps.finish_badge.outputs.url }}
+
+      # When the build or the check broke, the action never wrote a body. Say so instead of leaving
+      # "in progress" behind.
+      - name: Prepare the comment
+        if: ${{ !cancelled() && env.COMMENT == 'true' }}
+        env:
+          BADGE: ${{ steps.finish_badge.outputs.url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ ! -s "$COMMENT_BODY" ]; then
+            printf '%s\n❌ Plugin Check could not run\n\n![Plugin Check finished](%s)\n\n📎 [Run](%s)\n' "$COMMENT_MARKER" "$BADGE" "$RUN_URL" > "$COMMENT_BODY"
+          fi
+
+      - name: Find the Plugin Check comment
+        id: find_comment
+        if: ${{ !cancelled() && env.COMMENT == 'true' }}
+        continue-on-error: true
+        uses: peter-evans/find-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: ${{ env.COMMENT_MARKER }}
+
+      - name: Post the result
+        if: ${{ !cancelled() && env.COMMENT == 'true' }}
+        continue-on-error: true
+        uses: peter-evans/create-or-update-comment@v5
+        with:
+          comment-id: ${{ steps.find_comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          edit-mode: replace
+          body-path: ${{ env.COMMENT_BODY }}

@@ -7,3 +7,6 @@ npm-shrinkwrap.json
 bun.lock
 bun.lockb
 yarn.lock
+
+# fetch-baseline.sh writes the baseline here when run by hand (see the plugin-check-report README).
+.github/actions/plugin-check-report/baseline.json

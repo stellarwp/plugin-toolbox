@@ -1,0 +1,40 @@
+name: Plugin Check
+
+# Runs WordPress.org's Plugin Check on the plugin as it ships, and compares the error counts with
+# an earlier run: a pull request with the branch it targets, a push with the run before it.
+#
+# A file to copy into .github/workflows/ of a plugin repository. Keep the file name
+# plugin-check.yml: earlier runs of this file hold the baselines, and a new name starts with none.
+# The work is in stellarwp/plugin-toolbox/.github/workflows/plugin-check.yml. The repository needs
+# a .puprc whose zip_name equals plugin-slug, and a `pup` Composer script; see the
+# plugin-check-report action's README.
+#
+# Run it locally: `wp plugin check <slug> --format=json > results.txt` in a local WordPress, then
+# the ratchet script on that file. See "Running it locally" in the action's README.
+
+on:
+  pull_request:
+  # The branches pull requests target. A push there makes the baseline those pull requests read.
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A new push to a pull request cancels the run still going for the older commit.
+concurrency:
+  group: plugin-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  plugin-check:
+    # The most any job of the shared workflow asks for. A called workflow cannot go above this.
+    permissions:
+      actions: read # read earlier runs and download their baseline
+      contents: read # check out the repository
+      issues: write # the sticky pull request comment
+      pull-requests: write # the sticky pull request comment
+    uses: stellarwp/plugin-toolbox/.github/workflows/plugin-check.yml@v1
+    with:
+      plugin-slug: my-plugin

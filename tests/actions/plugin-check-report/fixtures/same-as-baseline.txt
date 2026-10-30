@@ -1,0 +1,4 @@
+FILE: give.php
+[{"line":12,"column":10,"type":"ERROR","code":"WordPress.Security.EscapeOutput.OutputNotEscaped","message":"All output should be run through an escaping function.","docs":""},{"line":12,"column":10,"type":"ERROR","code":"WordPress.Security.EscapeOutput.OutputNotEscaped","message":"All output should be run through an escaping function.","docs":""}]
+FILE: src/Forms/Form.php
+[{"line":40,"column":5,"type":"ERROR","code":"WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents","message":"file_get_contents() is discouraged.","docs":""},{"line":88,"column":9,"type":"WARNING","code":"WordPress.DB.DirectDatabaseQuery.DirectQuery","message":"Use of a direct database call is discouraged.","docs":""}]
