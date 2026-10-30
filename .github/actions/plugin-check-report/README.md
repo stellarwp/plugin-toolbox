@@ -18,7 +18,7 @@ jobs:
       contents: read
       issues: write
       pull-requests: write
-    uses: stellarwp/plugin-toolbox/.github/workflows/plugin-check.yml@v1
+    uses: stellarwp/plugin-toolbox/.github/workflows/plugin-check.yml@main
     with:
       plugin-slug: my-plugin
 ```
