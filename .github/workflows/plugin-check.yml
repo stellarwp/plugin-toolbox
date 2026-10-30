@@ -4,7 +4,7 @@ name: Plugin Check
 # so tests, dotfiles, node_modules and other dev-only files cannot cause false positives.
 #
 # A reusable workflow. A plugin repository calls it from a thin workflow of its own; copy
-# templates/workflows/plugin-check.yml. Ported from GiveWP's plugin-check.yml.
+# templates/workflows/plugin-check.yml.
 #
 # The plugin is built with pup by default (`composer -- pup build`, then `pup package`), so the
 # repository's .puprc and .distignore decide what is checked, the same as the release. A repository
@@ -32,7 +32,7 @@ on:
     inputs:
       plugin-slug:
         description: >-
-          The plugin's folder name, e.g. `give`. It has to equal the top folder of the zip pup
+          The plugin's folder name, e.g. `my-plugin`. It has to equal the top folder of the zip pup
           builds (`zip_name` in .puprc), because Plugin Check takes the slug from the folder name.
         required: true
         type: string
@@ -154,7 +154,7 @@ jobs:
     name: Plugin Check run
     runs-on: ${{ inputs.runs-on }}
 
-    # Build, WordPress start and the check together take about 15 minutes for GiveWP. The cap is
+    # Build, WordPress start and the check together take about 15 minutes for a large plugin. The cap is
     # for a container that stops answering.
     timeout-minutes: 30
 
