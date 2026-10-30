@@ -48,7 +48,9 @@ Every step is safe to run again after a late failure, which is how a retry from 
 works:
 
 - A branch that already holds the other merges as "Already up to date" and pushes nothing.
-- A release that already exists is skipped, and its URL is still reported in `release-url`.
+- A release that already exists is skipped, and its URL is still reported in `release-url`. It
+  counts as a retry only when its tag contains the release branch, that is, when it was published
+  from this branch. See [Versions it refuses](#versions-it-refuses).
 - A conflict resolved by hand on the branch, then pushed, is found as an already-merged branch on
   the next run, which goes on to the step that had not run.
 
@@ -85,8 +87,14 @@ two lines git itself prints, `CONFLICT (…)` and `Automatic merge failed`, are 
   an empty one. When the workflow declares `version` as required, GitHub refuses the dispatch itself;
   when it is optional, the action fails the run before merging.
 - **A version whose tag exists without a published release.** Publishing would release whatever
-  commit the tag points at. Delete the tag or release another version. A tag whose release is
-  published is a retry, and goes on.
+  commit the tag points at. Delete the tag or release another version.
+- **A version already released from another commit.** When the tag exists with a published release
+  and does not contain the release branch, the version went out before this branch, and the branch
+  was never bumped past it: a branch cut from `main` right after a release still carries that
+  release's version. Merging it would put a second set of changes under a version that is already
+  out, so the action refuses, with the branches untouched. Give the release a new version and
+  prepare the branch again. A tag that does contain the branch is a retry of this release, and the
+  action goes on.
 
 The branches are checked too: each has to be a name git accepts, the base and develop have to be
 two different branches, and the release branch cannot be either of them.

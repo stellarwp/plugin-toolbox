@@ -116,6 +116,17 @@ function checkoutOf(bare, { shallow = false } = {}) {
 }
 
 /**
+ * Tags a commit on the remote, as publishing a GitHub release does.
+ *
+ * @param {string} bare    The remote.
+ * @param {string} version The tag.
+ * @param {string} ref     The commit to tag, e.g. `main`.
+ */
+function tagRemote(bare, version, ref) {
+  git(bare, 'tag', version, ref)
+}
+
+/**
  * The contents of a file on a branch of the remote.
  *
  * @param {string} bare   The remote.
@@ -315,7 +326,7 @@ describe('release-merge', () => {
 
       const result = await runPreflight({ github, owner: 'stellarwp', repo: 'plugin', version: '4.17.0' })
 
-      assert.deepStrictEqual(result, { releaseUrl: null })
+      assert.deepStrictEqual(result, { tagged: false, releaseUrl: null })
       assert.deepStrictEqual(requested(requests), [`GET ${API.tag}`])
     })
 
@@ -324,7 +335,7 @@ describe('release-merge', () => {
 
       const result = await runPreflight({ github, owner: 'stellarwp', repo: 'plugin', version: '4.17.0' })
 
-      assert.deepStrictEqual(result, { releaseUrl: RELEASE_URL })
+      assert.deepStrictEqual(result, { tagged: true, releaseUrl: RELEASE_URL })
       assert.deepStrictEqual(requested(requests), [`GET ${API.tag}`, `GET ${API.releaseByTag}`])
     })
 
@@ -423,10 +434,13 @@ describe('release-merge', () => {
       await runMerge({ github, core, exec, env: mergeEnv(), cwd: first })
       const main = git(bare, 'rev-parse', 'main')
       const develop = git(bare, 'rev-parse', 'develop')
+      // The publish step then tagged the merge, so the retry finds the tag with its release.
+      tagRemote(bare, '4.17.0', 'main')
+      const published = await octokitFor(PUBLISHED)
 
       const second = checkoutOf(bare)
       const retry = await coreWithOutputs(t)
-      await runMerge({ github, core: retry.core, exec, env: mergeEnv(), cwd: second })
+      await runMerge({ github: published.github, core: retry.core, exec, env: mergeEnv(), cwd: second })
 
       assert.strictEqual(git(bare, 'rev-parse', 'main'), main)
       assert.strictEqual(git(bare, 'rev-parse', 'develop'), develop)
@@ -434,8 +448,10 @@ describe('release-merge', () => {
       assert.strictEqual(retry.outputs().conflict, '')
     })
 
-    it('says so when the release is already published, so the publish step is expected to skip it', async (t) => {
+    it('says so when the release is already published from this branch, so the publish step is expected to skip it', async (t) => {
       const bare = remoteWith()
+      // A run that merged and published, then failed in a later step of the caller.
+      tagRemote(bare, '4.17.0', 'release/M26.test')
       const cwd = checkoutOf(bare)
       const { github } = await octokitFor(PUBLISHED)
       const { core, logged } = await coreWithOutputs(t)
@@ -444,6 +460,29 @@ describe('release-merge', () => {
       await runMerge({ github, core, exec, env: mergeEnv(), cwd })
 
       assert.match(logged(), /4\.17\.0 is already published.*publish step will skip it/s)
+      assert.strictEqual(fileOn(bare, 'develop', 'plugin.php'), 'Version: 4.17.0')
+    })
+
+    it('refuses a published version whose tag does not contain the branch: the branch was not bumped', async (t) => {
+      const bare = remoteWith()
+      // 4.17.0 was released from main before this branch was cut, and the branch still says 4.17.0.
+      tagRemote(bare, '4.17.0', 'main')
+      const cwd = checkoutOf(bare)
+      const main = git(bare, 'rev-parse', 'main')
+      const develop = git(bare, 'rev-parse', 'develop')
+      const { github } = await octokitFor(PUBLISHED)
+      const { core } = await coreWithOutputs(t)
+      const { exec, calls } = await recordedRealExec()
+
+      await assert.rejects(
+        runMerge({ github, core, exec, env: mergeEnv(), cwd }),
+        /tag 4\.17\.0 already exists and does not contain release\/M26\.test.*new version.*Nothing was merged/s
+      )
+
+      assert.strictEqual(git(bare, 'rev-parse', 'main'), main)
+      assert.strictEqual(git(bare, 'rev-parse', 'develop'), develop)
+      // `git -c user.name=… merge --no-ff` is the merge; merge-base is only the ancestry check.
+      assert.ok(!sequence(calls).some((line) => / merge --no-ff |^git push/.test(line)), sequence(calls).join('\n'))
     })
 
     it('prints the MERGE_CONFLICT marker and pushes nothing when the release conflicts with the base', async (t) => {
@@ -515,7 +554,7 @@ describe('release-merge', () => {
 
       await assert.rejects(runMerge({ github, core, exec, env: mergeEnv(), cwd }), /no published release/)
 
-      assert.ok(!sequence(calls).some((line) => /^git (fetch|merge|push|checkout)/.test(line)), sequence(calls).join('\n'))
+      assert.ok(!sequence(calls).some((line) => /^git (fetch|push|checkout)| merge --no-ff /.test(line)), sequence(calls).join('\n'))
     })
 
     it('refuses a branch name git would refuse, before asking the API anything', async (t) => {
