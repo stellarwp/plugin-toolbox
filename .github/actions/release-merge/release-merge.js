@@ -1,8 +1,8 @@
 'use strict'
 
 /**
- * Merges a release: the release branch into the base branch, the base branch back into develop, then
- * publishes the GitHub release for the version.
+ * Merges a release: the release branch into the base branch (`main`, or `master` where that is the
+ * name), the base branch back into develop, then publishes the GitHub release for the version.
  *
  * The action runs in two github-script steps, so there are two entry points. runMerge checks the
  * inputs and the version against the repository's tags, then does the two merges with git in the
@@ -16,6 +16,8 @@
  */
 
 const { STELLARWP_VERSION_PATTERN } = require('../../lib/versions.js')
+const { readRepository, isNotFound, tagExists } = require('../../lib/github.js')
+const { runOrFail } = require('../../lib/exec.js')
 
 /** The identity the merge commits are made with: the one GitHub gives the default token. */
 const BOT_IDENTITY = {
@@ -32,9 +34,9 @@ const CONFLICT_OUTPUT = /CONFLICT \(|Automatic merge failed/
 /**
  * Reads the version to release, refusing anything but three or four numeric parts.
  *
- * A pre-release is refused on purpose: the version becomes the tag and the title of a published
- * release, and a beta or RC is not released this way. The same rule validates the version in the
- * release dashboard and in release-prep, so a version that gets this far has already passed it twice.
+ * A pre-release is refused: the version becomes the tag and the title of a published release, and a
+ * beta or RC is not released this way. The release dashboard validates versions with this rule, and
+ * release-prep does under the stellarwp changelog versioning.
  *
  * @param {string} version The `version` input.
  *
@@ -173,21 +175,10 @@ function isConflict(result) {
 }
 
 /**
- * Whether an Octokit error is the API saying a thing does not exist.
- *
- * @param {Error} error The error.
- *
- * @returns {boolean} True for a 404.
- */
-function isNotFound(error) {
-  return error?.status === 404
-}
-
-/**
  * Checks the version against the repository's tags before anything is merged.
  *
  * A version that was never tagged is the common case. One whose tag exists with a published release
- * may be a retry after a late failure; runMerge settles that once the tag is fetched, by checking
+ * may be a retry after a late failure; runMerge decides that once the tag is fetched, by checking
  * that the tag contains the branch. One whose tag exists without a release would make the publish
  * step reuse whatever commit the tag points at, so it is refused here, with the base and develop
  * untouched.
@@ -204,14 +195,8 @@ function isNotFound(error) {
  *          published release's URL when it does.
  */
 async function runPreflight({ github, owner, repo, version }) {
-  try {
-    await github.rest.git.getRef({ owner, repo, ref: `tags/${version}` })
-  } catch (error) {
-    if (isNotFound(error)) {
-      return { tagged: false, releaseUrl: null }
-    }
-
-    throw new Error(`Reading tag ${version} failed (HTTP ${error.status}): ${error.message}. Nothing was merged.`)
+  if (!(await tagExists({ github, owner, repo, version, what: 'Nothing was merged.' }))) {
+    return { tagged: false, releaseUrl: null }
   }
 
   try {
@@ -234,26 +219,6 @@ async function runPreflight({ github, owner, repo, version }) {
 }
 
 /**
- * Reads `GITHUB_REPOSITORY` as owner and name.
- *
- * @param {object} env  The environment.
- * @param {string} what What the action was about to do, to close the message.
- *
- * @throws {Error} When it is not set.
- *
- * @returns {{owner: string, repo: string}} The repository.
- */
-function readRepository(env, what) {
-  const [owner, repo] = String(env.GITHUB_REPOSITORY || '').split('/')
-
-  if (!owner || !repo) {
-    throw new Error(`GITHUB_REPOSITORY is not set, so the action does not know which repository to work on. ${what}`)
-  }
-
-  return { owner, repo }
-}
-
-/**
  * Runs a git command in the checkout and fails with its output when it exits non-zero.
  *
  * @param {object}   exec    The @actions/exec toolkit.
@@ -265,16 +230,8 @@ function readRepository(env, what) {
  *
  * @returns {Promise<string>} What git printed to stdout.
  */
-async function gitOrFail(exec, args, options, what) {
-  const result = await exec.getExecOutput('git', args, { ...options, ignoreReturnCode: true })
-
-  if (result.exitCode !== 0) {
-    const output = [result.stdout, result.stderr].map((text) => text.trim()).filter(Boolean)
-
-    throw new Error(`${what} failed (exit code ${result.exitCode}):\n${output.join('\n')}`)
-  }
-
-  return result.stdout
+function gitOrFail(exec, args, options, what) {
+  return runOrFail(exec, 'git', args, options, what)
 }
 
 /**
@@ -471,9 +428,9 @@ async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
 /**
  * Publishes the GitHub release for the version, unless `publish` is false or it already exists.
  *
- * The release is checked again here rather than read from the merge step: a retry, or another run
- * publishing in between, finds the truth either way. Its notes are the ones GitHub generates from
- * the pull requests since the previous release.
+ * The release is read again here rather than taken from the merge step's outputs, so a release
+ * created in between, by a retry or another run, is found. Its notes are the ones GitHub generates
+ * from the pull requests since the previous release.
  *
  * @param {object} options
  * @param {object} options.github The Octokit github-script supplies, authenticated with the token.
