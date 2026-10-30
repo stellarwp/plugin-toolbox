@@ -309,6 +309,38 @@ function recordingExec(rules = []) {
 }
 
 /**
+ * The real @actions/exec, wrapped to record each call and what it printed.
+ *
+ * For an action whose logic is in the commands themselves, such as git merges, a stand-in would only
+ * test the test. What a command prints is sent to a buffer of its own rather than to stdout, where
+ * the test runner reports results: that covers the `[command]` line @actions/exec echoes, so a test
+ * can assert what a run would have shown in the log.
+ *
+ * @returns {Promise<{exec: object, calls: object[], printed: Function}>} The wrapper, the calls it
+ *          recorded, and a reader for everything the commands printed.
+ */
+async function recordedRealExec() {
+  const { Writable } = require('node:stream')
+  const real = await import('@actions/exec')
+  const calls = []
+  const chunks = []
+  const sink = new Writable({
+    write(chunk, encoding, callback) {
+      chunks.push(String(chunk))
+      callback()
+    },
+  })
+
+  const getExecOutput = (command, args = [], options = {}) => {
+    calls.push({ command, args, options })
+
+    return real.getExecOutput(command, args, { ...options, outStream: sink, errStream: sink })
+  }
+
+  return { exec: { getExecOutput }, calls, printed: () => chunks.join('') }
+}
+
+/**
  * Both arguments actions/github-script passes to a script, ready for one test.
  *
  * @param {object}   t     The node:test context.
@@ -331,6 +363,7 @@ module.exports = {
   coreWithOutputs,
   recordingFetch,
   recordingExec,
+  recordedRealExec,
   readOutputs,
   isLogWrite,
 }

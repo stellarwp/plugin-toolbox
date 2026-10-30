@@ -16,14 +16,8 @@ const os = require('node:os')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 
-const { compareVersions } = require('../../lib/versions.js')
-
-/**
- * Three or four numeric parts, the shape the stellarwp changelog versioning accepts. That strategy
- * also accepts an empty part (it reads it as 0, so it would take 2.1..21); this pattern rejects
- * that. A version of this shape is also always a valid tag name.
- */
-const STELLARWP_VERSION_PATTERN = /^\d+\.\d+\.\d+(\.\d+)?$/
+// The three-or-four-parts pattern lives with the other version rules, shared with release-merge.
+const { compareVersions, STELLARWP_VERSION_PATTERN } = require('../../lib/versions.js')
 
 /**
  * A semver version as semver.org defines it: MAJOR.MINOR.PATCH, an optional pre-release and
