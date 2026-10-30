@@ -11,7 +11,7 @@ branch back into develop, then the GitHub release for the version. **The base br
 
 - uses: stellarwp/plugin-toolbox/.github/actions/release-merge@v1
   with:
-    branch: release/${{ inputs.release_name }}
+    branch: ${{ inputs.branch }}
     version: ${{ inputs.version }}
 ```
 
