@@ -642,9 +642,9 @@ async function refuseTaggedVersion({ github, owner, repo, version }) {
   }
 
   throw new Error(
-    `The tag ${version} already exists in ${owner}/${repo}: that version has already been released. ` +
-      'Preparing it again would put new changes under a released version; the branch was cut from a ' +
-      'commit that already carries it. Give the release a new version. Nothing was changed.'
+    `The tag ${version} already exists in ${owner}/${repo}: that version has already been released, ` +
+      'and preparing it again would put new changes under it. Give the release a new version. ' +
+      'Nothing was changed.'
   )
 }
 
