@@ -120,6 +120,25 @@ two different branches, and the release branch cannot be either of them.
 | `published` | `true` when the release was created, `skipped` when it already existed, `false` when `publish` was false. |
 | `release-url` | The release page, empty when `publish` was false. |
 
+## One deploy at a time
+
+Two releases prepared with the same version, deployed at the same time, would merge side by side:
+the second's changes would land on the base under a version the first had just published, and its
+publish would be skipped as already done. The action cannot stop that on its own, since both runs
+start before either has a tag to find. The caller does, with a `concurrency` group shared by every
+deploy of the repository, as the template sets:
+
+```yaml
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+```
+
+The second run then waits for the first, finds the version tagged from another branch, and is
+refused before merging. A repository that also deploys from another workflow gives it the same
+group. GitHub keeps one run waiting per group: a third deploy started while one is already waiting
+cancels the waiting one, which has to be started again.
+
 ## The token
 
 The job needs `contents: write`, and the token is used for the fetch, the two pushes and the release.
