@@ -61,10 +61,12 @@ function commitFile(dir, name, contents, message) {
  *                                           merging the release into it conflicts.
  * @param {boolean} options.developConflicts Also move `develop` on that line, so merging `main` back
  *                                           into it conflicts.
+ * @param {string}  options.releaseReadme    The readme.txt of the release branch; its Stable tag is
+ *                                           the second version file .puprc lists.
  *
  * @returns {string} The bare repository.
  */
-function remoteWith({ baseConflicts = false, developConflicts = false } = {}) {
+function remoteWith({ baseConflicts = false, developConflicts = false, releaseReadme = 'Stable tag: 4.17.0\n' } = {}) {
   const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'release-merge-remote-'))
   const seed = fs.mkdtempSync(path.join(os.tmpdir(), 'release-merge-seed-'))
 
@@ -73,6 +75,8 @@ function remoteWith({ baseConflicts = false, developConflicts = false } = {}) {
   git(seed, 'init', '--quiet', '-b', 'main')
   git(seed, 'config', 'user.name', 'Test')
   git(seed, 'config', 'user.email', 'test@example.com')
+  fs.writeFileSync(path.join(seed, '.puprc'), JSON.stringify(PUPRC))
+  fs.writeFileSync(path.join(seed, 'readme.txt'), 'Stable tag: 4.16.0\n')
   commitFile(seed, 'plugin.php', 'Version: 4.16.0\n', 'Initial')
 
   git(seed, 'checkout', '--quiet', '-b', 'develop')
@@ -82,6 +86,7 @@ function remoteWith({ baseConflicts = false, developConflicts = false } = {}) {
   }
 
   git(seed, 'checkout', '--quiet', '-b', 'release/M26.test', 'main')
+  fs.writeFileSync(path.join(seed, 'readme.txt'), releaseReadme)
   commitFile(seed, 'plugin.php', 'Version: 4.17.0\n', 'Prepare release/M26.test (4.17.0)')
 
   if (baseConflicts) {
@@ -175,6 +180,16 @@ function publishEnv(overrides = {}) {
     GITHUB_REPOSITORY: 'stellarwp/plugin',
     ...overrides,
   }
+}
+
+/** The .puprc of the fixture: the plugin header and the readme's Stable tag hold the version. */
+const PUPRC = {
+  paths: {
+    versions: [
+      { file: 'plugin.php', regex: '(Version: )(.+)' },
+      { file: 'readme.txt', regex: '(Stable tag: )(.+)' },
+    ],
+  },
 }
 
 /** The repository paths the action reads and writes, as a real Octokit spells them. */
@@ -529,6 +544,67 @@ describe('release-merge', () => {
       assert.strictEqual(fileOn(bare, 'main', 'plugin.php'), 'Version: 4.17.0')
       assert.strictEqual(git(bare, 'rev-parse', 'develop'), develop)
       assert.strictEqual(git(cwd, 'status', '--porcelain'), '')
+    })
+
+    it('refuses a version the branch does not hold, naming the file, before merging anything', async (t) => {
+      const bare = remoteWith()
+      const cwd = checkoutOf(bare)
+      const main = git(bare, 'rev-parse', 'main')
+      const { github } = await octokitFor(UNTAGGED)
+      const { core } = await coreWithOutputs(t)
+      const { exec, calls } = await recordedRealExec()
+
+      await assert.rejects(
+        runMerge({ github, core, exec, env: mergeEnv({ INPUT_VERSION: '4.18.0' }), cwd }),
+        /release\/M26\.test holds 4\.17\.0 in plugin\.php, not 4\.18\.0.*prepared with.*Nothing was merged/s
+      )
+
+      assert.strictEqual(git(bare, 'rev-parse', 'main'), main)
+      assert.ok(!sequence(calls).some((line) => / merge --no-ff |^git push/.test(line)), sequence(calls).join('\n'))
+    })
+
+    it('checks every version file .puprc lists, so a half-prepared branch is refused too', async (t) => {
+      const bare = remoteWith({ releaseReadme: 'Stable tag: 4.16.0\n' })
+      const cwd = checkoutOf(bare)
+      const { github } = await octokitFor(UNTAGGED)
+      const { core } = await coreWithOutputs(t)
+      const { exec } = await recordedRealExec()
+
+      await assert.rejects(
+        runMerge({ github, core, exec, env: mergeEnv(), cwd }),
+        /release\/M26\.test holds 4\.16\.0 in readme\.txt, not 4\.17\.0/
+      )
+    })
+
+    it('refuses a branch whose version file does not match the .puprc regex', async (t) => {
+      const bare = remoteWith({ releaseReadme: 'No stable tag here\n' })
+      const cwd = checkoutOf(bare)
+      const { github } = await octokitFor(UNTAGGED)
+      const { core } = await coreWithOutputs(t)
+      const { exec } = await recordedRealExec()
+
+      await assert.rejects(
+        runMerge({ github, core, exec, env: mergeEnv(), cwd }),
+        /readme\.txt on release\/M26\.test holds no version.*\(Stable tag: \)\(\.\+\)/s
+      )
+    })
+
+    it('refuses a branch without a .puprc, since the version it holds cannot be read', async (t) => {
+      const bare = remoteWith()
+      // Remove .puprc from the release branch only.
+      const work = checkoutOf(bare)
+      git(work, 'checkout', '--quiet', 'release/M26.test')
+      git(work, 'config', 'user.name', 'Test')
+      git(work, 'config', 'user.email', 'test@example.com')
+      git(work, 'rm', '--quiet', '.puprc')
+      git(work, 'commit', '--quiet', '-m', 'Drop .puprc')
+      git(work, 'push', '--quiet', 'origin', 'release/M26.test')
+      const cwd = checkoutOf(bare)
+      const { github } = await octokitFor(UNTAGGED)
+      const { core } = await coreWithOutputs(t)
+      const { exec } = await recordedRealExec()
+
+      await assert.rejects(runMerge({ github, core, exec, env: mergeEnv(), cwd }), /No \.puprc on the branch.*Nothing was merged/s)
     })
 
     it('fetches the full history first when the caller made a shallow checkout', async (t) => {

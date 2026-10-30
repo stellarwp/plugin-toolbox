@@ -28,7 +28,8 @@ In this order, stopping at the first failure:
 1. Checks the inputs, and the version against the repository's tags. See
    [Versions it refuses](#versions-it-refuses).
 2. Fetches the release branch, the base branch and develop from `origin`, with the full history
-   when the checkout is shallow.
+   when the checkout is shallow, and checks that every version file the branch's `.puprc` lists
+   holds the version.
 3. Merges the release branch into the base branch as a merge commit, `Merge release/… into main`
    (or `into master`), and pushes it.
 4. Merges the **base branch** into develop as a merge commit, `Merge main back into develop
@@ -86,6 +87,12 @@ two lines git itself prints, `CONFLICT (…)` and `Automatic merge failed`, are 
   published release, and a beta or an RC is not released this way. The release dashboard validates
   versions with the same rule, so a version it dispatches has passed it already; release-prep
   does under the stellarwp changelog versioning.
+- **A version the branch does not hold.** The release branch's `.puprc` lists the files that carry the
+  version under `paths.versions`, with the regex that finds it in each, the same entries release-prep
+  bumps. The action reads every one of them on the branch and refuses when any holds a different
+  version, naming the file: the version becomes the tag, so it has to be the one the branch was
+  prepared with. A branch without a `.puprc`, or with a file where the regex finds nothing, is
+  refused too, since the version it holds cannot be read.
 - **An empty version.** A tool that dispatches the workflow for a release with no version set sends
   an empty one. When the workflow declares `version` as required, GitHub refuses the dispatch
   itself; when it is optional, the action fails the run before merging.

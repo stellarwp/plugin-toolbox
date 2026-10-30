@@ -18,6 +18,7 @@
 const { STELLARWP_VERSION_PATTERN } = require('../../lib/versions.js')
 const { readRepository, isNotFound, tagExists } = require('../../lib/github.js')
 const { runOrFail } = require('../../lib/exec.js')
+const { readVersionFiles, versionIn } = require('../../lib/puprc.js')
 
 /** The identity the merge commits are made with: the one GitHub gives the default token. */
 const BOT_IDENTITY = {
@@ -219,6 +220,63 @@ async function runPreflight({ github, owner, repo, version }) {
 }
 
 /**
+ * Reads a file from a ref of the checkout, without checking it out.
+ *
+ * @param {object} exec The @actions/exec toolkit.
+ * @param {string} cwd  The checkout.
+ * @param {string} ref  The ref, e.g. `origin/release/M26.test`.
+ * @param {string} file The path in the repository.
+ *
+ * @returns {Promise<string|null>} The contents, or null when the ref has no such file.
+ */
+async function fileAt(exec, cwd, ref, file) {
+  const result = await exec.getExecOutput('git', ['show', `${ref}:${file}`], { cwd, ignoreReturnCode: true, silent: true })
+
+  return result.exitCode === 0 ? result.stdout : null
+}
+
+/**
+ * Checks that the version to release is the one the release branch holds, in every file .puprc lists
+ * under paths.versions. The tag and the title of the release come from `version`, so a value other
+ * than what release-prep wrote into the branch would publish the code under the wrong version.
+ *
+ * @param {object} options
+ * @param {object} options.exec    The @actions/exec toolkit.
+ * @param {string} options.cwd     The checkout.
+ * @param {string} options.branch  The release branch, fetched as `origin/<branch>`.
+ * @param {string} options.version The version to release, validated.
+ *
+ * @throws {Error} When the branch has no usable .puprc, a version file holds no version, or any of
+ *                 them holds a different version.
+ *
+ * @returns {Promise<void>} Resolves when every version file holds `version`.
+ */
+async function assertBranchHoldsVersion({ exec, cwd, branch, version }) {
+  const ref = `origin/${branch}`
+  const files = readVersionFiles(await fileAt(exec, cwd, ref, '.puprc'), 'Nothing was merged.')
+
+  for (const { file, regex } of files) {
+    const content = await fileAt(exec, cwd, ref, file)
+    if (content === null) {
+      throw new Error(`${file}, which .puprc lists under paths.versions, is not on ${branch}. Nothing was merged.`)
+    }
+
+    const found = versionIn(content, regex)
+    if (found === null) {
+      throw new Error(
+        `${file} on ${branch} holds no version where .puprc expects one (${regex}). Nothing was merged.`
+      )
+    }
+    if (found !== version) {
+      throw new Error(
+        `${branch} holds ${found} in ${file}, not ${version}. The version to release has to be the one ` +
+          'the branch was prepared with; check the version, or prepare the branch again. Nothing was merged.'
+      )
+    }
+  }
+}
+
+/**
  * Runs a git command in the checkout and fails with its output when it exits non-zero.
  *
  * @param {object}   exec    The @actions/exec toolkit.
@@ -295,7 +353,8 @@ async function mergeAndPush({ core, exec, cwd, authEnv, from, into, message, lab
 
 /**
  * Checks the inputs and the version, then merges the release branch into the base branch and the
- * base branch back into develop, pushing each.
+ * base branch back into develop, pushing each. The version has to be the one the release branch
+ * holds in every file its .puprc lists, so the tag matches the code.
  *
  * The base branch, not the release branch, is merged into develop: develop then descends from the
  * base, and consecutive releases bring one version bump each instead of divergent copies of the same
@@ -363,6 +422,8 @@ async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
     { cwd, env: authEnv },
     'Fetching the branches'
   )
+
+  await assertBranchHoldsVersion({ exec, cwd, branch, version })
 
   // A tag with a published release is a retry only when that release came from this branch: its
   // commit then contains the branch, and the merges below find nothing to do. A tag that does not
