@@ -10,6 +10,14 @@
  */
 
 /**
+ * Three or four numeric parts, the shape the stellarwp changelog versioning accepts and the one the
+ * release-merge action publishes. That strategy also accepts an empty part (it reads it as 0, so it
+ * would take 2.1..21); this pattern rejects that. A version of this shape is also always a valid tag
+ * name.
+ */
+const STELLARWP_VERSION_PATTERN = /^\d+\.\d+\.\d+(\.\d+)?$/
+
+/**
  * Splits a version into its numbers, for comparing one part against another.
  *
  * @param {string} version A numeric version, e.g. `1.2.3`.
@@ -54,4 +62,4 @@ function compareVersions(a, b) {
   return 0
 }
 
-module.exports = { toParts, compareVersions }
+module.exports = { toParts, compareVersions, STELLARWP_VERSION_PATTERN }

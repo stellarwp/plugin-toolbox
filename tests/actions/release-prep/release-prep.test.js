@@ -25,7 +25,7 @@ const {
   compareVersions,
   readCurrentVersion,
 } = require('../../../.github/actions/release-prep/release-prep.js')
-const { coreWithOutputs, recordingExec, octokitFor } = require('../../support/actions.js')
+const { coreWithOutputs, recordingExec, recordedRealExec, octokitFor } = require('../../support/actions.js')
 
 /** A .puprc that bumps the plugin header and replaces TBDs under src/. */
 const PUPRC = {
@@ -189,37 +189,6 @@ function apiAccepts(before = []) {
  */
 function requested(requests) {
   return requests.map((request) => `${request.method} ${request.path}`)
-}
-
-/**
- * The real @actions/exec, wrapped to record each call and what it printed.
- *
- * What a command prints is sent to a buffer of its own rather than to stdout, where the test runner
- * reports results: that covers the `[command]` line @actions/exec echoes, so a test can assert what
- * a run would have shown in the log.
- *
- * @returns {Promise<{exec: object, calls: object[], printed: Function}>} The wrapper, the calls it
- *          recorded, and a reader for everything the commands printed.
- */
-async function recordedRealExec() {
-  const { Writable } = require('node:stream')
-  const real = await import('@actions/exec')
-  const calls = []
-  const chunks = []
-  const sink = new Writable({
-    write(chunk, encoding, callback) {
-      chunks.push(String(chunk))
-      callback()
-    },
-  })
-
-  const getExecOutput = (command, args = [], options = {}) => {
-    calls.push({ command, args, options })
-
-    return real.getExecOutput(command, args, { ...options, outStream: sink, errStream: sink })
-  }
-
-  return { exec: { getExecOutput }, calls, printed: () => chunks.join('') }
 }
 
 /**
