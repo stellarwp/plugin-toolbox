@@ -27,7 +27,8 @@ inputs:
       The version to prepare. It is validated against the versioning strategy the repository's
       changelogger configures: three or four numeric parts for `stellarwp`, a semver version for
       `semver` or no configuration, no shape check for a custom strategy. An empty value and a
-      version lower than the one the branch already has are refused before anything is changed.
+      version lower than the one the branch already has are refused before anything is changed, and
+      so is a version the repository has already tagged.
     required: true
   date:
     description: >-
@@ -89,12 +90,14 @@ runs:
         INPUT_DATE: ${{ inputs.date }}
         INPUT_PUP_VERSION: ${{ inputs.pup-version }}
         # Authenticates the 'latest' lookup against the GitHub API; a pinned pup-version
-        # never calls the API.
+        # never calls it for pup.
         INPUT_TOKEN: ${{ inputs.token }}
       with:
+        # The tag check reads the repository through github-script's own client, built from this token.
+        github-token: ${{ inputs.token }}
         script: |
           const { runPrepare } = require(`${process.env.ACTION_PATH}/release-prep.js`)
-          await runPrepare({ core, exec, env: process.env })
+          await runPrepare({ github, core, exec, env: process.env })
 
     # The resolved date, never inputs.date: this action writes the date it is given as it is, so
     # `today` would land in the changelog as the word and an empty value as an empty date.
