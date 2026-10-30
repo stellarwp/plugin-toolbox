@@ -28,8 +28,8 @@ jobs:
 - A `.puprc` whose `build` makes the plugin as it ships, and whose `zip_name` equals `plugin-slug`.
   The zip's top folder is named after `zip_name`, and Plugin Check takes the slug from the folder
   name.
-- A `pup` Composer script that puts `pup.phar` in `bin/` and runs it, as GiveWP and Kadence Blocks
-  have:
+- A `pup` Composer script that puts `pup.phar` in `bin/` and runs it, as Kadence Blocks
+  has:
 
   ```json
   "pup": [
