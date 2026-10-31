@@ -49,7 +49,7 @@ The JavaScript toolchain comes from files the repository already has: `.nvmrc` s
 By default, with pup, the same steps the release zip uses, from the root of the checkout:
 
 ```bash
-composer run -q pup -- --version > /dev/null   # downloads bin/pup.phar
+composer run -q pup > /dev/null   # downloads bin/pup.phar
 composer -- pup build
 version=$(php -d display_errors=0 bin/pup.phar get-version --dev)
 composer -- pup package "$version"
