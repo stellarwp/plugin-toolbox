@@ -1,0 +1,14 @@
+{
+  "steps": [
+    {
+      "step": "installPlugin",
+      "pluginData": {
+        "resource": "url",
+        "url": "{{ZIP_URL}}"
+      },
+      "options": {
+        "activate": true
+      }
+    }
+  ]
+}

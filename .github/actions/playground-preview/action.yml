@@ -1,0 +1,78 @@
+# Writes the "Try in WordPress Playground" comment on a pull request: "building", the links when the
+# zip is ready, or "failed". One comment per pull request, found by a hidden first line and replaced
+# each time.
+#
+# It does not build the zip. The reusable workflow .github/workflows/playground-preview.yml does,
+# and calls this action from its three comment jobs, so the action also works with a zip from
+# anywhere.
+#
+# The work is in playground-preview.js, run by actions/github-script, so there is nothing to install
+# or build: the file in the repository is the file that runs.
+name: Playground preview
+description: Posts the pull request comment with WordPress Playground links for a plugin zip
+
+inputs:
+  status:
+    description: '`building`, `ready` or `failed`. Picks the comment to write.'
+    required: true
+  zip-url:
+    description: >-
+      Public https link to the plugin zip. Required for `ready`: it replaces {{ZIP_URL}} in the
+      blueprints and is the "Download zip" link.
+    required: false
+    default: ''
+  blueprints:
+    description: >-
+      Blueprint files, one path per line, relative to the repository root. Each file becomes one
+      link, in this order. Empty uses the default blueprint next to this action: install the zip,
+      activate it, turn on WP_DEBUG and WP_DEBUG_DISPLAY. Read only for `ready`, from the checkout,
+      so the job has to check out the repository first.
+    required: false
+    default: ''
+  comment-marker:
+    description: >-
+      Hidden first line of the comment, used to find it again. Empty uses
+      `<!-- playground-preview:<owner>/<repo> -->`.
+    required: false
+    default: ''
+  time-zone:
+    description: 'IANA time zone of the time on the badge, e.g. America/New_York.'
+    required: false
+    default: 'America/New_York'
+  sha:
+    description: 'The commit the comment names. Only the first 7 characters are shown.'
+    required: false
+    default: ${{ github.event.pull_request.head.sha }}
+  pull-request:
+    description: 'Number of the pull request to comment on.'
+    required: false
+    default: ${{ github.event.pull_request.number }}
+  token:
+    description: 'Token that reads and writes the comment. It needs `pull-requests: write`.'
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Write the Playground preview comment
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than written into the script, so an input is data and never
+        # part of the program.
+        INPUT_STATUS: ${{ inputs.status }}
+        INPUT_ZIP_URL: ${{ inputs.zip-url }}
+        INPUT_BLUEPRINTS: ${{ inputs.blueprints }}
+        INPUT_COMMENT_MARKER: ${{ inputs.comment-marker }}
+        INPUT_TIME_ZONE: ${{ inputs.time-zone }}
+        INPUT_SHA: ${{ inputs.sha }}
+        INPUT_PULL_REQUEST: ${{ inputs.pull-request }}
+      with:
+        # github-script builds its `github` client from this input, not from the env.
+        github-token: ${{ inputs.token }}
+        script: |
+          const { run } = require(`${process.env.ACTION_PATH}/playground-preview.js`)
+          await run({ github, core, env: process.env })
