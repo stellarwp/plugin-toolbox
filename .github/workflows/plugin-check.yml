@@ -293,7 +293,7 @@ jobs:
             exit 0
           fi
 
-          composer run -q pup -- --version > /dev/null
+          composer run -q pup > /dev/null
           composer -- pup build
           version=$(php -d display_errors=0 bin/pup.phar get-version --dev)
           composer -- pup package "$version"
