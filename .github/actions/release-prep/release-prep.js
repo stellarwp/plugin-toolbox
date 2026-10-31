@@ -623,7 +623,7 @@ function readCheckoutFile(cwd, name) {
  * Refuses a version the repository has already tagged.
  *
  * A release branch cut from `main` right after a release still carries that release's version, and
- * preparing it again would put the next changes under a version that is already out. The tag is
+ * preparing it again would put the next changes under a version that is already tagged. The tag is
  * read through the API rather than from the checkout, which is shallow and fetches no tags.
  *
  * @param {object} options
@@ -642,9 +642,8 @@ async function refuseTaggedVersion({ github, owner, repo, version }) {
   }
 
   throw new Error(
-    `The tag ${version} already exists in ${owner}/${repo}: that version has already been released, ` +
-      'and preparing it again would put new changes under it. Give the release a new version. ' +
-      'Nothing was changed.'
+    `The tag ${version} already exists in ${owner}/${repo}. Preparing the branch again would put new ` +
+      'changes under a version that is already tagged. Give the release a new version. Nothing was changed.'
   )
 }
 
