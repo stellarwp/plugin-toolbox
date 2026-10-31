@@ -101,6 +101,11 @@ artifact of an earlier run of the same workflow file:
 - With no earlier run at all, nothing is compared and the check passes with a warning. A failed
   lookup (an API or download error) fails instead, so an outage never passes as "no baseline".
 
+Only runs of the repository's own branches count. A pull request from a fork has a run of the same
+workflow, and the runs list matches it by branch name and commit, so a fork's run on a branch called
+`develop` would look like a run of `develop`. Its artifact is whatever the fork's workflow uploaded,
+so runs whose head commit is in another repository are skipped.
+
 The earlier runs are found by the caller's workflow file name, read from `GITHUB_WORKFLOW_REF`.
 Renaming the caller file starts again with no baseline. Artifacts expire after the repository's
 retention period (90 days by default), so a branch with no run for that long starts with none too.
@@ -172,7 +177,7 @@ not start the run. The job that runs the Plugin Check action lowers itself to `c
 | `mode` | no | `ratchet` | `ratchet` or `strict` |
 | `comment-marker` | no | `<!-- plugin-check:<owner>/<repo> -->` | First line of the comment body |
 | `workflow-file` | no | from `GITHUB_WORKFLOW_REF` | Whose runs hold the baseline |
-| `baseline-wait` | no | `1200` | Seconds to wait for the base commit's run |
+| `baseline-wait` | no | `1200` | Seconds to wait for the base commit's run. A whole number, or the check fails |
 | `badge-url` | no | none | Image under the status line |
 | `token` | no | `github.token` | Needs `actions: read` |
 

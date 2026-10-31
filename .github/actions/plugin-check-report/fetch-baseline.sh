@@ -42,23 +42,42 @@ wait_for=0
 before_run=""
 # How long to wait for a run for --sha to show up at all.
 GRACE=120
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --workflow) workflow=${2:?"--workflow needs a file name"}; shift 2 ;;
-        --sha) sha=${2:?"--sha needs a commit"}; shift 2 ;;
-        --wait) wait_for=${2:?"--wait needs seconds"}; shift 2 ;;
-        --before-run) before_run=${2:?"--before-run needs a run id"}; shift 2 ;;
-        *) break ;;
-    esac
-done
-
-branch=${1:?"Usage: $0 [--workflow <file>] [--sha <commit>] [--wait <seconds>] [--before-run <run-id>] <branch> [<output-file>]"}
-output=${2:-"$(cd "$(dirname "$0")" && pwd)/baseline.json"}
+usage="Usage: $0 [--workflow <file>] [--sha <commit>] [--wait <seconds>] [--before-run <run-id>] <branch> [<output-file>]"
 
 lookup_failed() {
     echo "Could not look up Plugin Check runs: $1" >&2
     exit 2
 }
+
+# A missing or malformed argument exits 2, like any other lookup that cannot be trusted. Exit 1 is
+# kept for "no run has a baseline", so a typo must never read as that.
+need_value() {
+    [ "$#" -ge 2 ] && [ -n "$2" ] || lookup_failed "$1 needs a value. $usage"
+}
+
+# A plain count of seconds or a run id. At most 18 digits keeps it inside bash's 64-bit integers,
+# and 10# keeps a leading zero from being read as octal later.
+number() {
+    case "$2" in
+        '' | *[!0-9]*) lookup_failed "$1 must be a whole number, not '$2'" ;;
+    esac
+    [ "${#2}" -le 18 ] || lookup_failed "$1 is too large: '$2'"
+    echo $((10#$2))
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --workflow) need_value "$@"; workflow=$2; shift 2 ;;
+        --sha) need_value "$@"; sha=$2; shift 2 ;;
+        --wait) need_value "$@"; wait_for=$(number --wait "$2"); shift 2 ;;
+        --before-run) need_value "$@"; before_run=$(number --before-run "$2"); shift 2 ;;
+        *) break ;;
+    esac
+done
+
+[ "$#" -ge 1 ] && [ -n "$1" ] || lookup_failed "a branch is needed. $usage"
+branch=$1
+output=${2:-"$(cd "$(dirname "$0")" && pwd)/baseline.json"}
 
 # Any other command that fails (mktemp, mkdir, cp, ...) is a failure too, never "no baseline":
 # exit 1 is kept for the one place below that means it.
@@ -72,6 +91,19 @@ case "$workflow" in
 esac
 runs="repos/$repo/actions/workflows/$workflow/runs"
 
+# Only runs of this repository's own branches count. The runs API matches `branch` and `head_sha`
+# against the head of a pull request too, so a run for a pull request from a fork, from a branch
+# named like the target, would otherwise be taken for a run of the target, and its artifact is
+# whatever that fork's workflow chose to upload.
+#
+# jq reads $repo, so the filters stay in single quotes.
+# shellcheck disable=SC2016
+own='select((.head_repository.full_name // "" | ascii_downcase) == ($repo | ascii_downcase))'
+# shellcheck disable=SC2016
+own_runs='.workflow_runs[] | '"$own"' | "\(.id) \(.html_url) \(.head_sha)"'
+# shellcheck disable=SC2016
+own_counts='[.workflow_runs[] | '"$own"'] | "\(length) \([.[] | select(.status != "completed")] | length)"'
+
 # The run for the base commit may still be going: a pull request opened right after a merge starts
 # at the same time as the push run on the target branch. Waiting for it beats comparing with an
 # older run.
@@ -81,7 +113,7 @@ if [ -n "$sha" ] && [ "$wait_for" -gt 0 ]; then
     while :; do
         # "<all runs> <runs still going>" for the commit.
         counts=$(gh api "$runs?head_sha=$sha&per_page=20" \
-            --jq '"\(.workflow_runs | length) \([.workflow_runs[] | select(.status != "completed")] | length)"') \
+            | jq -r --arg repo "$repo" "$own_counts") \
             || lookup_failed "runs for $sha"
         read -r total going <<< "$counts"
         # A run can take a moment to show up after its push. After GRACE seconds with none, the
@@ -103,12 +135,12 @@ fi
 candidates=""
 if [ -n "$sha" ]; then
     candidates=$(gh api "$runs?status=completed&head_sha=$sha&per_page=10" \
-        --jq '.workflow_runs[] | "\(.id) \(.html_url) \(.head_sha)"') || lookup_failed "runs for $sha"
+        | jq -r --arg repo "$repo" "$own_runs") || lookup_failed "runs for $sha"
 fi
 # Newest first by run id (ids only grow), not by the order the API happens to return. The 50
 # newest runs are plenty: if none of them has a baseline, an older one would be stale anyway.
 on_branch=$(gh api "$runs?status=completed&branch=$branch&per_page=50" \
-    --jq '.workflow_runs[] | "\(.id) \(.html_url) \(.head_sha)"' | sort -k1,1nr) || lookup_failed "runs on $branch"
+    | jq -r --arg repo "$repo" "$own_runs" | sort -k1,1nr) || lookup_failed "runs on $branch"
 candidates+=${candidates:+$'\n'}$on_branch
 
 tried=" "
