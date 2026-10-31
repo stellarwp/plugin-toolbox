@@ -3,7 +3,8 @@ name: Tests
 # This repo's own checks. A bug here reaches every repo that pins a tag from it, so the logic in the
 # actions is unit tested rather than only exercised by a real release.
 #
-# Run it locally: `npm install` once, then `node --test`.
+# Run it locally: `npm install` once, then `node --test`. For the lint job, `actionlint` and
+# `shellcheck .github/actions/*/*.sh`.
 
 on:
   push:
@@ -40,3 +41,30 @@ jobs:
       # finds every *.test.js under the repository on all of them.
       - name: Run the unit tests
         run: node --test
+
+  # The workflows and templates never run in this repository the way a plugin runs them, so a typo
+  # in one would only show up in someone else's CI. actionlint also runs shellcheck on every run:
+  # block it finds.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # Pinned, so a new actionlint rule cannot fail a pull request that did not change anything.
+      # Two things are ignored because GitHub accepts them and actionlint 1.7.12 does not know them
+      # yet: `queue` in `concurrency` (release-tags.yml uses it), and a `uses: $/path` reference to
+      # this repository (the reusable workflows use it for their own actions). Only that exact shape
+      # is ignored, so any other action reference that lacks a ref still fails.
+      - name: Run actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -ignore 'unexpected key "queue" for "concurrency" section' \
+            -ignore 'specifying action "\$/[^"]*" in invalid format because ref is missing' \
+            .github/workflows/*.yml templates/workflows/*.yml
+
+      # actionlint does not read composite actions or standalone scripts. shellcheck comes with the
+      # runner image.
+      - name: Run shellcheck on the action scripts
+        run: shellcheck .github/actions/*/*.sh
