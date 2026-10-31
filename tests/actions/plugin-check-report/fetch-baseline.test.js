@@ -77,7 +77,7 @@ const API = (workflow = 'plugin-check.yml') => {
   return {
     forSha: (sha) => `${runs}?status=completed&head_sha=${sha}&per_page=10`,
     goingForSha: (sha) => `${runs}?head_sha=${sha}&per_page=20`,
-    onBranch: (branch) => `${runs}?status=completed&branch=${branch}&per_page=50`,
+    onBranch: (branch) => `${runs}?status=completed&branch=${branch}&per_page=100`,
     artifacts: (id) => `repos/${REPO}/actions/runs/${id}/artifacts?name=plugin-check-report`,
   }
 }
