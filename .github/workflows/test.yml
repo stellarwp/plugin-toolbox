@@ -53,12 +53,15 @@ jobs:
           persist-credentials: false
 
       # Pinned, so a new actionlint rule cannot fail a pull request that did not change anything.
-      # `queue` is ignored because GitHub accepts it in `concurrency` (release-tags.yml uses it)
-      # and actionlint 1.7.12 does not know it yet.
+      # Two things are ignored because GitHub accepts them and actionlint 1.7.12 does not know them
+      # yet: `queue` in `concurrency` (release-tags.yml uses it), and a `uses: $/path` reference to
+      # this repository (the reusable workflows use it for their own actions). Only that exact shape
+      # is ignored, so any other action reference that lacks a ref still fails.
       - name: Run actionlint
         run: |
           bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
           ./actionlint -ignore 'unexpected key "queue" for "concurrency" section' \
+            -ignore 'specifying action "\$/[^"]*" in invalid format because ref is missing' \
             .github/workflows/*.yml templates/workflows/*.yml
 
       # actionlint does not read composite actions or standalone scripts. shellcheck comes with the
