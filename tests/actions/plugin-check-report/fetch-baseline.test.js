@@ -85,13 +85,21 @@ const API = (workflow = 'plugin-check.yml') => {
 /**
  * A run as the workflow runs API lists it.
  *
- * @param {number} id   Run id.
- * @param {string} sha  Head commit.
+ * @param {number} id       Run id.
+ * @param {string} sha      Head commit.
+ * @param {string} headRepo Repository the run's head commit belongs to. A pull request from a
+ *                          fork has the fork's name here.
  *
  * @returns {object} The run.
  */
-function run(id, sha = OLD_SHA) {
-  return { id, html_url: `https://github.com/${REPO}/actions/runs/${id}`, head_sha: sha, status: 'completed' }
+function run(id, sha = OLD_SHA, headRepo = REPO) {
+  return {
+    id,
+    html_url: `https://github.com/${REPO}/actions/runs/${id}`,
+    head_sha: sha,
+    status: 'completed',
+    head_repository: { full_name: headRepo },
+  }
 }
 
 /**
@@ -251,6 +259,112 @@ describe('fetch-baseline.sh', () => {
 
     assert.equal(result.status, 0, result.stderr)
     assert.ok(result.calls[0].includes('/workflows/wporg-check.yml/runs'), result.calls[0])
+  })
+
+  it('ignores a run whose head commit is in a fork, even on a branch named like the target', () => {
+    const api = API()
+    const result = fetchBaseline(['--sha', SHA, 'develop'], {
+      // A fork's pull request run for the base commit, and a newer one on a fork branch "develop".
+      [api.forSha(SHA)]: { workflow_runs: [run(300, SHA, 'someone/my-plugin')] },
+      [api.onBranch('develop')]: { workflow_runs: [run(250, OLD_SHA, 'someone/my-plugin'), run(150)] },
+      [api.artifacts(150)]: ONE_ARTIFACT,
+      [api.artifacts(250)]: ONE_ARTIFACT,
+      [api.artifacts(300)]: ONE_ARTIFACT,
+    }, { 150: BASELINE, 250: { errors: { 'Some.Rule': 9999 }, warnings: {} }, 300: { errors: { 'Some.Rule': 9999 }, warnings: {} } })
+
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stdout, /^150 .* older$/)
+    assert.deepEqual(JSON.parse(result.output), BASELINE)
+    assert.ok(!result.calls.some((call) => call.includes('/runs/250/') || call.includes('/runs/300/')), 'no fork run was looked at')
+  })
+
+  it('exits 1 when only fork runs exist', () => {
+    const api = API()
+    const result = fetchBaseline(['develop'], {
+      [api.onBranch('develop')]: { workflow_runs: [run(250, OLD_SHA, 'someone/my-plugin')] },
+    })
+
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /has a baseline/)
+  })
+
+  it('matches the repository name without regard to case', () => {
+    const api = API()
+    const result = fetchBaseline(['develop'], {
+      [api.onBranch('develop')]: { workflow_runs: [run(150, OLD_SHA, 'Example-Org/My-Plugin')] },
+      [api.artifacts(150)]: ONE_ARTIFACT,
+    }, { 150: BASELINE })
+
+    assert.equal(result.status, 0, result.stderr)
+  })
+
+  it('does not wait for a fork run that is still going', () => {
+    const api = API()
+    const result = fetchBaseline(['--sha', SHA, '--wait', '1', 'develop'], {
+      // Our run for the commit is done, and a fork's run for the same commit is not. Counted, the
+      // fork's run would make the script sleep 30 seconds and then give up waiting.
+      [api.goingForSha(SHA)]: {
+        workflow_runs: [run(200, SHA), { ...run(300, SHA, 'someone/my-plugin'), status: 'in_progress' }],
+      },
+      [api.forSha(SHA)]: { workflow_runs: [run(200, SHA)] },
+      [api.onBranch('develop')]: { workflow_runs: [] },
+      [api.artifacts(200)]: ONE_ARTIFACT,
+    }, { 200: BASELINE })
+
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stdout, /^200 .* exact$/)
+    assert.doesNotMatch(result.stderr, /still going/)
+  })
+
+  it('exits 2, not 1, for an option value that is empty or not a whole number', () => {
+    const cases = [
+      [['--wait', '20m', 'develop'], /--wait must be a whole number, not '20m'/],
+      [['--wait', '', 'develop'], /--wait needs a value/],
+      [['--before-run', 'abc', 'develop'], /--before-run must be a whole number, not 'abc'/],
+      [['--before-run', '-5', 'develop'], /--before-run must be a whole number/],
+      [['--before-run', '9'.repeat(19), 'develop'], /--before-run is too large/],
+      [['--sha', '', 'develop'], /--sha needs a value/],
+      [['', 'baseline.json'], /a branch is needed/],
+    ]
+
+    for (const [args, message] of cases) {
+      const result = fetchBaseline(args, {})
+
+      assert.equal(result.status, 2, args.join(' '))
+      assert.match(result.stderr, message, args.join(' '))
+      assert.deepEqual(result.calls, [], `${args.join(' ')} asked the API nothing`)
+    }
+  })
+
+  it('exits 2 when an option or the branch is missing altogether', () => {
+    // fetchBaseline() always adds an output path after the arguments, which a flag at the end of
+    // the line would take for its value, so these run the script as it is.
+    const cases = [
+      [['--wait'], /--wait needs a value/],
+      [['--workflow'], /--workflow needs a value/],
+      [[], /a branch is needed/],
+    ]
+
+    for (const [args, message] of cases) {
+      const result = spawnSync('bash', [FETCH, ...args], {
+        encoding: 'utf8',
+        env: { PATH: process.env.PATH, HOME: process.env.HOME, GITHUB_REPOSITORY: REPO },
+      })
+
+      assert.equal(result.status, 2, args.join(' '))
+      assert.match(result.stderr, message, args.join(' '))
+    }
+  })
+
+  it('reads a run id with a leading zero as a decimal number', () => {
+    const api = API()
+    const result = fetchBaseline(['--before-run', '0150', 'develop'], {
+      [api.onBranch('develop')]: { workflow_runs: [run(150), run(120)] },
+      [api.artifacts(120)]: ONE_ARTIFACT,
+    }, { 120: BASELINE })
+
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stdout, /^120 /)
   })
 
   it('refuses a --workflow that is a path or a ref, before calling the API', () => {
