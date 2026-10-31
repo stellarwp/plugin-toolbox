@@ -72,7 +72,7 @@ on:
         type: string
         default: 'https://evnt.is/test-zip?file='
       runs-on:
-        description: 'Runner label of the job that posts the links. The other jobs run on ubuntu-latest.'
+        description: 'Runner label of the job that posts the links, of runner version 2.336.0 or newer. The other jobs run on ubuntu-latest.'
         required: false
         type: string
         default: 'ubuntu-latest'
@@ -137,7 +137,7 @@ jobs:
       # A failed API call here must not stop the preview.
       - name: Post "building"
         continue-on-error: true
-        uses: stellarwp/plugin-toolbox/.github/actions/playground-preview@main
+        uses: $/.github/actions/playground-preview
         with:
           status: building
           comment-marker: ${{ env.COMMENT_MARKER }}
@@ -238,10 +238,12 @@ jobs:
           name=$(php -d display_errors=0 bin/pup.phar zip-name "$version")
           echo "url=${ZIP_LINK_BASE}${name}.zip" >> "$GITHUB_OUTPUT"
 
-      # Full path, never ./: in a called workflow a relative path resolves against the caller's
-      # repository. @main, like the callers: this repository publishes no releases.
+      # `$/` is this repository at the commit that runs this workflow, so the action is always the
+      # same revision as the workflow, whichever ref the caller used, and it needs no checkout. It
+      # needs a runner of version 2.336.0 or newer, which `runs-on` has to give. Not ./, which in a
+      # called workflow resolves against the caller's repository.
       - name: Post the links
-        uses: stellarwp/plugin-toolbox/.github/actions/playground-preview@main
+        uses: $/.github/actions/playground-preview
         with:
           status: ready
           zip-url: ${{ steps.zip.outputs.url }}
@@ -262,7 +264,7 @@ jobs:
     steps:
       - name: Post "failed"
         continue-on-error: true
-        uses: stellarwp/plugin-toolbox/.github/actions/playground-preview@main
+        uses: $/.github/actions/playground-preview
         with:
           status: failed
           comment-marker: ${{ env.COMMENT_MARKER }}
