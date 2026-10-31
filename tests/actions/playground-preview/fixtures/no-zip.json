@@ -1,0 +1,8 @@
+{
+  "steps": [
+    {
+      "step": "login",
+      "username": "admin"
+    }
+  ]
+}

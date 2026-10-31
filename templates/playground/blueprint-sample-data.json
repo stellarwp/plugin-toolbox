@@ -1,0 +1,66 @@
+{
+  "$schema": "https://playground.wordpress.net/blueprint-schema.json",
+  "meta": {
+    "title": "With sample data",
+    "description": "100 sample orders in test mode. Opens a few minutes slower."
+  },
+  "landingPage": "/wp-admin/admin.php?page=my-plugin",
+  "preferredVersions": {
+    "php": "8.3",
+    "wp": "latest"
+  },
+  "features": {
+    "networking": true
+  },
+  "steps": [
+    {
+      "step": "defineWpConfigConsts",
+      "consts": {
+        "WP_DEBUG": true,
+        "WP_DEBUG_DISPLAY": true
+      }
+    },
+    {
+      "step": "login",
+      "username": "admin"
+    },
+    {
+      "step": "installTheme",
+      "themeData": {
+        "resource": "wordpress.org/themes",
+        "slug": "twentytwentyfive"
+      },
+      "options": {
+        "activate": true
+      }
+    },
+    {
+      "step": "installPlugin",
+      "pluginData": {
+        "resource": "url",
+        "url": "{{ZIP_URL}}"
+      },
+      "options": {
+        "activate": true
+      }
+    },
+    {
+      "step": "installPlugin",
+      "pluginData": {
+        "resource": "url",
+        "url": "https://github.com/example-org/my-plugin-sample-data/releases/download/1.0.0/my-plugin-sample-data.1.0.0.zip"
+      },
+      "options": {
+        "activate": true
+      }
+    },
+    {
+      "step": "wp-cli",
+      "command": "wp eval 'update_option(\"my_plugin_test_mode\", \"enabled\");'"
+    },
+    {
+      "step": "wp-cli",
+      "command": "wp my-plugin-sample-data orders 100"
+    }
+  ]
+}
