@@ -9,8 +9,9 @@ name: Playground Preview
 # templates/workflows/playground-preview.yml.
 #
 # Four jobs, so the comment never stays on "building":
-#   pending  replaces the last comment with "building" at once.
-#   zip      builds the zip and uploads it. Skipped when the caller passes `zip-url`.
+#   pending  replaces the last comment with "building" at once, and checks the secrets.
+#   zip      builds the zip and uploads it, once pending is done. Skipped when the caller passes
+#            `zip-url`.
 #   button   works out the zip's public link and posts the Playground links.
 #   failed   replaces "building" with "failed" when anything above failed.
 #
@@ -122,8 +123,9 @@ env:
 
 jobs:
   # Replaces the comment from the last push at once, so a build that takes minutes does not leave
-  # links to an older zip on the pull request. It runs next to "zip", and "button" waits for it, so
-  # the finished comment can never be overwritten by this one.
+  # links to an older zip on the pull request. "zip" and "button" wait for it, so the finished
+  # comment can never be overwritten by this one, and a missing secret fails here in seconds instead
+  # of after a build that was never going to upload.
   pending:
     name: Playground preview start
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
@@ -165,6 +167,7 @@ jobs:
 
   zip:
     name: Zip
+    needs: pending
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && inputs.zip-url == '' }}
     # The shared workflow only checks out and builds this repository.
     permissions:
