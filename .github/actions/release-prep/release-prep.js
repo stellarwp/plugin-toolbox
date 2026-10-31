@@ -18,7 +18,7 @@ const { execFileSync } = require('node:child_process')
 
 // The three-or-four-parts pattern lives with the other version rules, shared with release-merge.
 const { compareVersions, STELLARWP_VERSION_PATTERN } = require('../../lib/versions.js')
-const { readRepository } = require('../../lib/github.js')
+const { readRepository, tagExists } = require('../../lib/github.js')
 const { runOrFail } = require('../../lib/exec.js')
 
 /**
@@ -620,14 +620,43 @@ function readCheckoutFile(cwd, name) {
 }
 
 /**
+ * Refuses a version the repository has already tagged.
+ *
+ * A release branch cut from `main` right after a release still carries that release's version, and
+ * preparing it again would put the next changes under a version that is already tagged. The tag is
+ * read through the API rather than from the checkout, which is shallow and fetches no tags.
+ *
+ * @param {object} options
+ * @param {object} options.github  The Octokit github-script supplies.
+ * @param {string} options.owner   The repository owner.
+ * @param {string} options.repo    The repository name.
+ * @param {string} options.version The version to prepare, validated.
+ *
+ * @throws {Error} When the tag exists, or reading it fails for any reason but 404.
+ *
+ * @returns {Promise<void>} Resolves when the tag does not exist.
+ */
+async function refuseTaggedVersion({ github, owner, repo, version }) {
+  if (!(await tagExists({ github, owner, repo, version, what: 'Nothing was changed.' }))) {
+    return
+  }
+
+  throw new Error(
+    `The tag ${version} already exists in ${owner}/${repo}. Preparing the branch again would put new ` +
+      'changes under a version that is already tagged. Give the release a new version. Nothing was changed.'
+  )
+}
+
+/**
  * Validates the inputs, then bumps the version and replaces the TBDs with pup.
  *
  * Every check runs before anything is written, so a wrong version, date or ref, a checkout that is
- * not on the release branch, a repository without a usable .puprc or with a changelogger versioning
- * the changelogger does not know, or a version lower than the one the branch already has, fails
- * with the branch untouched. The version is checked the way the changelog step will check it: by
- * the versioning strategy package.json configures.
+ * not on the release branch, a version the repository has already tagged, a repository without a
+ * usable .puprc or with a changelogger versioning the changelogger does not know, or a version lower
+ * than the one the branch already has, fails with the branch untouched. The version is checked the
+ * way the changelog step will check it: by the versioning strategy package.json configures.
  *
+ * @param {object}   github    An Octokit, as actions/github-script supplies it, for the tag read.
  * @param {object}   core      The @actions/core toolkit, for the log and the outputs.
  * @param {object}   exec      The @actions/exec toolkit.
  * @param {object}   env       The environment the action manifest put its inputs in.
@@ -639,7 +668,7 @@ function readCheckoutFile(cwd, name) {
  *
  * @returns {Promise<void>} Resolves once pup has run and the outputs are set.
  */
-async function runPrepare({ core, exec, env, cwd = process.cwd(), fetchImpl = globalThis.fetch }) {
+async function runPrepare({ github, core, exec, env, cwd = process.cwd(), fetchImpl = globalThis.fetch }) {
   const changelogger = readChangeloggerStrategy(readCheckoutFile(cwd, 'package.json'))
   const version = validateVersion(env.INPUT_VERSION, changelogger.strategy)
   const date = resolveDate(env.INPUT_DATE)
@@ -671,6 +700,9 @@ async function runPrepare({ core, exec, env, cwd = process.cwd(), fetchImpl = gl
         'was changed.'
     )
   }
+
+  const { owner, repo } = readRepository(env, 'Nothing was changed.')
+  await refuseTaggedVersion({ github, owner, repo, version })
 
   const { tbdDirs } = readPuprc(readCheckoutFile(cwd, '.puprc'))
 
@@ -917,6 +949,7 @@ async function runCommit({ github, core, exec, env, cwd = process.cwd() }) {
 
 module.exports = {
   runPrepare,
+  refuseTaggedVersion,
   runCommit,
   readVersion,
   validateVersion,
