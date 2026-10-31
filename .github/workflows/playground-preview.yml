@@ -1,0 +1,266 @@
+name: Playground Preview
+
+# Adds a "Try in WordPress Playground" comment to a pull request: a throwaway WordPress in the
+# browser with the pull request's build installed, and a link to download the zip. The zip is built
+# by the shared pup workflow in stellarwp/github-actions and lands in the same public bucket the
+# packaging bot uses, so nothing new is hosted anywhere.
+#
+# A reusable workflow. A plugin repository calls it from a thin workflow of its own; copy
+# templates/workflows/playground-preview.yml.
+#
+# Four jobs, so the comment never stays on "building":
+#   pending  replaces the last comment with "building" at once.
+#   zip      builds the zip and uploads it. Skipped when the caller passes `zip-url`.
+#   button   works out the zip's public link and posts the Playground links.
+#   failed   replaces "building" with "failed" when anything above failed.
+#
+# Only pull requests from the repository itself get a preview. A fork's run cannot see the bucket
+# secrets, and its token cannot write a comment.
+#
+# The caller has to grant every permission a job below asks for: a called workflow can lower the
+# token's permissions, never raise them. `concurrency` is the caller's too: here it would be
+# evaluated with the caller's context and could clash with the caller's own group.
+#
+# Run it locally: `node .github/actions/playground-preview/playground-preview.js --zip-url <url>
+# [blueprint.json ...]` prints the comment for any zip and blueprint files. See the action's README.
+
+on:
+  workflow_call:
+    inputs:
+      blueprints:
+        description: >-
+          Blueprint files, one path per line, relative to the repository root, e.g.
+          `.github/playground/blueprint.json`. Each file becomes one link. Empty uses the default
+          blueprint: install the zip, activate it, turn on WP_DEBUG and WP_DEBUG_DISPLAY. See the
+          playground-preview action's README for the file format.
+        required: false
+        type: string
+        default: ''
+      php-version:
+        description: >-
+          PHP that builds vendor/. Use the oldest version the plugin supports, as its release does,
+          so Composer resolves dependencies that still run there.
+        required: false
+        type: string
+        default: '7.4'
+      i18n:
+        description: '`yes` runs `pup i18n` in the build. A preview needs no translations, so `no` by default.'
+        required: false
+        type: string
+        default: 'no'
+      additional-commands:
+        description: >-
+          Commands the zip build runs after `pup build` and before `pup package`. Passed to the
+          shared zip workflow as `additional_commands`. Prefer `.puprc`: this is a second place
+          that defines the build.
+        required: false
+        type: string
+        default: ''
+      zip-url:
+        description: >-
+          Use this zip instead of building one, e.g. for a repository with its own zip workflow, or
+          to test this workflow without bucket secrets. No secret is needed then.
+        required: false
+        type: string
+        default: ''
+      zip-link-base:
+        description: >-
+          Public link to a zip in the bucket, without the file name. The zip's name, as pup makes
+          it, is added to the end.
+        required: false
+        type: string
+        default: 'https://evnt.is/test-zip?file='
+      runs-on:
+        description: 'Runner label of the job that posts the links. The other jobs run on ubuntu-latest.'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      time-zone:
+        description: 'IANA time zone of the time on the badge, e.g. America/Chicago.'
+        required: false
+        type: string
+        default: 'America/New_York'
+    secrets:
+      # All optional here, so a caller that passes `zip-url` needs none. The pending job fails
+      # with a clear message when the build needs one that is missing.
+      s3-bucket:
+        description: 'Bucket the zip is uploaded to. Required unless `zip-url` is set.'
+        required: false
+      s3-access-key-id:
+        description: 'Required unless `zip-url` is set.'
+        required: false
+      s3-secret-access-key:
+        description: 'Required unless `zip-url` is set.'
+        required: false
+      s3-region:
+        description: 'Required unless `zip-url` is set.'
+        required: false
+      s3-endpoint:
+        description: 'Required unless `zip-url` is set.'
+        required: false
+      bot-token:
+        description: >-
+          Token that checks out the repository for the build. Empty uses the workflow's own token,
+          which is enough unless the build reaches other private repositories.
+        required: false
+      jenkins-secret:
+        description: >-
+          Passed on to the shared zip workflow, which requires it but only uses it for Slack
+          messages. This workflow never sends one.
+        required: false
+      composer-token:
+        description: 'GitHub token for private Composer packages. Becomes COMPOSER_AUTH in the build.'
+        required: false
+      package-token:
+        description: 'Token for private npm or bun packages. Becomes NODE_AUTH_TOKEN and BUN_AUTH_TOKEN in the build.'
+        required: false
+
+env:
+  # Hidden first line of the sticky comment. Named after the repository, so two plugin repositories
+  # never share a marker.
+  COMMENT_MARKER: '<!-- playground-preview:${{ github.repository }} -->'
+
+jobs:
+  # Replaces the comment from the last push at once, so a build that takes minutes does not leave
+  # links to an older zip on the pull request. It runs next to "zip", and "button" waits for it, so
+  # the finished comment can never be overwritten by this one.
+  pending:
+    name: Playground preview start
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      # A failed API call here must not stop the preview.
+      - name: Post "building"
+        continue-on-error: true
+        uses: stellarwp/plugin-toolbox/.github/actions/playground-preview@main
+        with:
+          status: building
+          comment-marker: ${{ env.COMMENT_MARKER }}
+          time-zone: ${{ inputs.time-zone }}
+
+      # After the comment, so the "failed" job replaces it with a link to this message. Without it,
+      # missing secrets only show up minutes later, as an upload error deep in the zip build.
+      - name: Check the secrets
+        if: ${{ inputs.zip-url == '' }}
+        env:
+          S3_BUCKET: ${{ secrets.s3-bucket }}
+          S3_ACCESS_KEY_ID: ${{ secrets.s3-access-key-id }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.s3-secret-access-key }}
+          S3_REGION: ${{ secrets.s3-region }}
+          S3_ENDPOINT: ${{ secrets.s3-endpoint }}
+        run: |
+          missing=()
+          [ -n "$S3_BUCKET" ] || missing+=(s3-bucket)
+          [ -n "$S3_ACCESS_KEY_ID" ] || missing+=(s3-access-key-id)
+          [ -n "$S3_SECRET_ACCESS_KEY" ] || missing+=(s3-secret-access-key)
+          [ -n "$S3_REGION" ] || missing+=(s3-region)
+          [ -n "$S3_ENDPOINT" ] || missing+=(s3-endpoint)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error title=Playground preview::The zip build needs these secrets, and the caller did not pass them: ${missing[*]}. Pass them, or pass zip-url to use a zip from elsewhere."
+            exit 1
+          fi
+
+  zip:
+    name: Zip
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && inputs.zip-url == '' }}
+    # The shared workflow only checks out and builds this repository.
+    permissions:
+      contents: read
+    uses: stellarwp/github-actions/.github/workflows/zip.yml@main
+    with:
+      ref: ${{ github.event.pull_request.head.sha }}
+      # A dev build: its name has the commit in it, so every push gets its own zip.
+      production: 'no'
+      php_version: ${{ inputs.php-version }}
+      i18n: ${{ inputs.i18n }}
+      additional_commands: ${{ inputs.additional-commands }}
+    secrets:
+      GH_BOT_TOKEN: ${{ secrets.bot-token || secrets.GITHUB_TOKEN }}
+      JENKINS_SECRET: ${{ secrets.jenkins-secret }}
+      COMPOSER_TOKEN: ${{ secrets.composer-token }}
+      NODE_AUTH_TOKEN: ${{ secrets.package-token }}
+      S3_BUCKET: ${{ secrets.s3-bucket }}
+      S3_ACCESS_KEY_ID: ${{ secrets.s3-access-key-id }}
+      S3_SECRET_ACCESS_KEY: ${{ secrets.s3-secret-access-key }}
+      S3_REGION: ${{ secrets.s3-region }}
+      S3_ENDPOINT: ${{ secrets.s3-endpoint }}
+
+  button:
+    name: Playground preview
+    needs: [pending, zip]
+    # "zip" is skipped when the caller passes zip-url, which would skip this job too.
+    if: ${{ !cancelled() && needs.pending.result == 'success' && (needs.zip.result == 'success' || needs.zip.result == 'skipped') }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+
+    # Writes one comment on the pull request and reads the checkout, nothing else.
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      # For the blueprint files, and for pup to name the zip.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      # The runner's own Composer can be out of date, so set up PHP for a current one before
+      # Composer downloads pup.
+      - name: Set Up PHP
+        if: ${{ inputs.zip-url == '' }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      # pup names the zip after the version, the commit time and the commit hash, and the shared
+      # zip workflow has no outputs, so the name is asked of pup again rather than rebuilt here.
+      # Same commands, same commit, same name.
+      - name: Find the zip
+        id: zip
+        env:
+          ZIP_URL: ${{ inputs.zip-url }}
+          ZIP_LINK_BASE: ${{ inputs.zip-link-base }}
+        run: |
+          if [ -n "$ZIP_URL" ]; then
+            echo "url=$ZIP_URL" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          composer run -q pup -- --version > /dev/null
+          version=$(php -d display_errors=0 bin/pup.phar get-version --dev)
+          name=$(php -d display_errors=0 bin/pup.phar zip-name "$version")
+          echo "url=${ZIP_LINK_BASE}${name}.zip" >> "$GITHUB_OUTPUT"
+
+      # Full path, never ./: in a called workflow a relative path resolves against the caller's
+      # repository. @main, like the callers: this repository publishes no releases.
+      - name: Post the links
+        uses: stellarwp/plugin-toolbox/.github/actions/playground-preview@main
+        with:
+          status: ready
+          zip-url: ${{ steps.zip.outputs.url }}
+          blueprints: ${{ inputs.blueprints }}
+          comment-marker: ${{ env.COMMENT_MARKER }}
+          time-zone: ${{ inputs.time-zone }}
+
+  # Without this, a failed build would leave "building" on the pull request for good. A run
+  # cancelled by a newer push is not a failure: the newer run's "building" replaces the comment.
+  failed:
+    name: Playground preview failed
+    needs: [pending, zip, button]
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Post "failed"
+        continue-on-error: true
+        uses: stellarwp/plugin-toolbox/.github/actions/playground-preview@main
+        with:
+          status: failed
+          comment-marker: ${{ env.COMMENT_MARKER }}
+          time-zone: ${{ inputs.time-zone }}

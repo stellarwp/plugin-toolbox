@@ -1,0 +1,48 @@
+name: Playground Preview
+
+# Adds a "Try in WordPress Playground" comment to every pull request, with links that open a
+# throwaway WordPress with the pull request's build installed, and a link to download the zip.
+#
+# A file to copy into .github/workflows/ of a plugin repository. The work is in
+# stellarwp/plugin-toolbox/.github/workflows/playground-preview.yml. The repository needs a .puprc
+# and a `pup` Composer script, and the bucket secrets below; see the playground-preview action's
+# README. Pull requests from forks get no preview: they cannot see the secrets.
+#
+# Run it locally: `node .github/actions/playground-preview/playground-preview.js --zip-url <url>
+# [blueprint.json ...]` from a checkout of stellarwp/plugin-toolbox prints the comment.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+# One run per pull request at a time. A push while a preview is still building cancels that build,
+# so an older zip can never overwrite a newer comment.
+concurrency:
+  group: playground-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  playground-preview:
+    # The most any job of the shared workflow asks for. A called workflow cannot go above this.
+    permissions:
+      contents: read # check out the repository
+      pull-requests: write # the sticky pull request comment
+    uses: stellarwp/plugin-toolbox/.github/workflows/playground-preview.yml@main
+    with:
+      # The oldest PHP the plugin supports, so vendor/ is built for it.
+      php-version: '7.4'
+      # Leave out for the default blueprint. Each file is one link in the comment.
+      # blueprints: |
+      #   .github/playground/blueprint.json
+      #   .github/playground/blueprint-sample-data.json
+    # Passed one by one, not with `secrets: inherit`: inherit only works inside one organization.
+    secrets:
+      s3-bucket: ${{ secrets.ZIP_S3_BUCKET }}
+      s3-access-key-id: ${{ secrets.ZIP_S3_ACCESS_KEY_ID }}
+      s3-secret-access-key: ${{ secrets.ZIP_S3_SECRET_ACCESS_KEY }}
+      s3-region: ${{ secrets.ZIP_S3_REGION }}
+      s3-endpoint: ${{ secrets.ZIP_S3_ENDPOINT }}
+      jenkins-secret: ${{ secrets.ZIP_JENKINS_SECRET }}
