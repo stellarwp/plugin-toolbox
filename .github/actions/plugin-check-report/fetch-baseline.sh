@@ -137,9 +137,12 @@ if [ -n "$sha" ]; then
     candidates=$(gh api "$runs?status=completed&head_sha=$sha&per_page=10" \
         | jq -r --arg repo "$repo" "$own_runs") || lookup_failed "runs for $sha"
 fi
-# Newest first by run id (ids only grow), not by the order the API happens to return. The 50
-# newest runs are plenty: if none of them has a baseline, an older one would be stale anyway.
-on_branch=$(gh api "$runs?status=completed&branch=$branch&per_page=50" \
+# Newest first by run id (ids only grow), not by the order the API happens to return. One page of
+# 100, the most the API gives, is plenty: if none of them has a baseline, an older one would be
+# stale anyway. Fork runs are dropped after the page is read, so a flood of them could push ours
+# off it; the result is then "no baseline", which passes with a warning, and no fork baseline is
+# taken.
+on_branch=$(gh api "$runs?status=completed&branch=$branch&per_page=100" \
     | jq -r --arg repo "$repo" "$own_runs" | sort -k1,1nr) || lookup_failed "runs on $branch"
 candidates+=${candidates:+$'\n'}$on_branch
 
