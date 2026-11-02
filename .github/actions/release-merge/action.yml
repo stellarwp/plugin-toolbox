@@ -30,7 +30,9 @@ inputs:
     required: false
     default: 'main'
   develop-branch:
-    description: 'The branch the base is merged back into after the release.'
+    description: >-
+      The branch the base is merged back into after the release. Pass an empty value for a repository
+      that has no develop branch: the release is merged into the base and nothing is merged back.
     required: false
     default: 'develop'
   publish:
@@ -64,7 +66,7 @@ outputs:
     value: ${{ steps.merge.outputs.base-sha }}
   conflict:
     description: >-
-      Which branch a merge conflicted on, `main` or `develop` for the defaults, or empty when both
+      Which branch a merge conflicted on, `main` or `develop` for the defaults, or empty when the
       merges went through. A conflict fails the step, so a caller reads this with `continue-on-error`
       or in a later `if: failure()` step.
     value: ${{ steps.merge.outputs.conflict }}

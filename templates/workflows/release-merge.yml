@@ -66,5 +66,6 @@ jobs:
           branch: ${{ inputs.branch }}
           version: ${{ inputs.version }}
           # base-branch: master
+          # develop-branch: '' # for a repository without a develop branch
 
       # The checkout is now on the merged base branch: build and deploy from here.

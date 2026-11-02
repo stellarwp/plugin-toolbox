@@ -15,9 +15,10 @@ branch back into develop, then the GitHub release for the version. **The base br
     version: ${{ inputs.version }}
 ```
 
-It is the part of a deploy that is the same for every plugin repository on a base branch plus
-`develop` model. Building the plugin, uploading it anywhere and announcing it are the caller's
-steps, after the action, on the checkout it leaves on the merged base branch.
+It is the part of a deploy that is the same for every plugin repository, on a base branch plus
+`develop` model or on a base branch alone (`develop-branch: ''` skips the merge back). Building the
+plugin, uploading it anywhere and announcing it are the caller's steps, after the action, on the
+checkout it leaves on the merged base branch.
 [`templates/workflows/release-merge.yml`](../../../templates/workflows/release-merge.yml) is a
 complete workflow around it, ready to copy into a plugin repository.
 
@@ -36,7 +37,8 @@ In this order, stopping at the first failure:
 4. Merges the **base branch** into develop as a merge commit, `Merge main back into develop
    (release/…)`, and pushes it. The base branch rather than the release branch, so develop
    descends from the base and consecutive releases bring one version bump each instead of
-   divergent copies of the same generated lines.
+   divergent copies of the same generated lines. Skipped when `develop-branch` is empty, for a
+   repository that has no develop branch.
 5. Publishes the GitHub release: tag and title are the version, the tag is made at the commit step
    3 left the base branch on (the merge commit, so a pull request merged into the base meanwhile is
    not what gets tagged), the notes are the ones GitHub generates from the pull requests since the
@@ -109,7 +111,7 @@ two lines git itself prints, `CONFLICT (…)` and `Automatic merge failed`, are 
   action goes on.
 
 The branches are checked too: each has to be a name git accepts, the base and develop have to be
-two different branches, and the release branch cannot be either of them.
+two different branches (when there is a develop), and the release branch cannot be either of them.
 
 ## Inputs
 
@@ -118,7 +120,7 @@ two different branches, and the release branch cannot be either of them.
 | `branch` | yes | | The release branch to merge, e.g. `release/M26.jigglypuff`. A branch name, fetched from `origin`. |
 | `version` | yes | | The version being released: three or four numeric parts. |
 | `base-branch` | no | `main` | The branch the release is merged into: `main`, or `master` where that is the repository's name for it. |
-| `develop-branch` | no | `develop` | The branch the base is merged back into. |
+| `develop-branch` | no | `develop` | The branch the base is merged back into. Empty for a repository without one: only the first merge is made. |
 | `publish` | no | `true` | `false` to do the two merges without the GitHub release. |
 | `token` | no | `github.token` | The token for the pushes and the release. Needs `contents: write`. See [The token](#the-token). |
 

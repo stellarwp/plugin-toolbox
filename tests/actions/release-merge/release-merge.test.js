@@ -268,6 +268,13 @@ describe('release-merge', () => {
   })
 
   describe('validateBranch', () => {
+    it('takes an empty value only for an optional input, as develop-branch is', () => {
+      assert.strictEqual(validateBranch('', 'develop-branch', { optional: true }), null)
+      assert.strictEqual(validateBranch('  ', 'develop-branch', { optional: true }), null)
+      assert.strictEqual(validateBranch('develop', 'develop-branch', { optional: true }), 'develop')
+      assert.throws(() => validateBranch('', 'base-branch'), /No base-branch was given/)
+    })
+
     it('accepts a branch name', () => {
       assert.strictEqual(validateBranch(' release/M26.test ', 'branch'), 'release/M26.test')
     })
@@ -422,6 +429,28 @@ describe('release-merge', () => {
         conflict: '',
       })
       assert.match(summary(), /release\/M26\.test.*main.*develop/s)
+    })
+
+    it('merges only into the base when develop-branch is empty, for a repository without develop', async (t) => {
+      const bare = remoteWith()
+      const cwd = checkoutOf(bare)
+      const develop = git(bare, 'rev-parse', 'develop')
+      const { github } = await octokitFor(UNTAGGED)
+      const { core, outputs, summary, logged } = await coreWithOutputs(t)
+      const { exec, calls } = await recordedRealExec()
+
+      await runMerge({ github, core, exec, env: mergeEnv({ INPUT_DEVELOP_BRANCH: '' }), cwd })
+
+      assert.strictEqual(fileOn(bare, 'main', 'plugin.php'), 'Version: 4.17.0')
+      // develop was neither fetched nor touched.
+      assert.strictEqual(git(bare, 'rev-parse', 'develop'), develop)
+      assert.ok(!sequence(calls).some((line) => line.includes('refs/heads/develop')), sequence(calls).join('\n'))
+      assert.strictEqual(calls.filter((call) => call.args[0] === 'push').length, 1)
+      assert.strictEqual(git(cwd, 'symbolic-ref', '--short', 'HEAD'), 'main')
+      assert.strictEqual(outputs()['develop-branch'], '')
+      assert.strictEqual(outputs().conflict, '')
+      assert.match(logged(), /develop-branch is empty/)
+      assert.match(summary(), /no develop branch/)
     })
 
     it('leaves the checkout on the merged base, for the steps that build from it', async (t) => {

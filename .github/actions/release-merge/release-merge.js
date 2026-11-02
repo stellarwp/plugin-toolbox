@@ -69,18 +69,25 @@ function validateVersion(version) {
 /**
  * Checks the shape of a branch input. Whether git accepts the name is checked by git, in runMerge.
  *
- * @param {string} branch The input value.
- * @param {string} input  Which input it is, for the message: `branch`, `base-branch` or
- *                        `develop-branch`.
+ * @param {string}  branch           The input value.
+ * @param {string}  input            Which input it is, for the message: `branch`, `base-branch` or
+ *                                   `develop-branch`.
+ * @param {object}  options
+ * @param {boolean} options.optional Whether an empty value is allowed, for `develop-branch`: a
+ *                                   repository without a develop branch leaves it empty.
  *
- * @throws {Error} When it is empty or a full ref.
+ * @throws {Error} When it is empty and required, or a full ref.
  *
- * @returns {string} The branch name, without surrounding whitespace.
+ * @returns {string|null} The branch name, without surrounding whitespace; null for an empty
+ *          optional one.
  */
-function validateBranch(branch, input) {
+function validateBranch(branch, input, { optional = false } = {}) {
   const trimmed = String(branch ?? '').trim()
 
   if (trimmed === '') {
+    if (optional) {
+      return null
+    }
     throw new Error(`No ${input} was given: pass a branch name, such as release/M26.test. Nothing was merged.`)
   }
 
@@ -388,7 +395,8 @@ async function mergeAndPush({ core, exec, cwd, authEnv, from, into, message, lab
  *
  * The base branch, not the release branch, is merged into develop: develop then descends from the
  * base, and consecutive releases bring one version bump each instead of divergent copies of the same
- * lines. Both merges are `--no-ff`, so each release is one merge commit in the history.
+ * lines. Both merges are `--no-ff`, so each release is one merge commit in the history. A repository
+ * without a develop branch leaves `develop-branch` empty, and only the first merge is made.
  *
  * The checkout is the caller's, on any branch and at any depth: the three branches are fetched, with
  * the full history when the checkout is shallow, and the checkout is left on the base branch at the
@@ -410,19 +418,20 @@ async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
   const branch = validateBranch(env.INPUT_BRANCH, 'branch')
   const version = validateVersion(env.INPUT_VERSION)
   const base = validateBranch(env.INPUT_BASE_BRANCH, 'base-branch')
-  const develop = validateBranch(env.INPUT_DEVELOP_BRANCH, 'develop-branch')
+  const develop = validateBranch(env.INPUT_DEVELOP_BRANCH, 'develop-branch', { optional: true })
   // Read by the publish step; checked here so a wrong value fails before anything is merged.
   readPublish(env.INPUT_PUBLISH)
   const { owner, repo } = readRepository(env, 'Nothing was merged.')
 
-  if (base === develop) {
+  if (develop !== null && base === develop) {
     throw new Error(`base-branch and develop-branch are both '${base}'; they have to be two branches. Nothing was merged.`)
   }
   if (branch === base || branch === develop) {
     throw new Error(`branch '${branch}' is also the ${branch === base ? 'base' : 'develop'} branch. Nothing was merged.`)
   }
 
-  for (const name of [branch, base, develop]) {
+  const branches = develop === null ? [branch, base] : [branch, base, develop]
+  for (const name of branches) {
     const check = await exec.getExecOutput('git', ['check-ref-format', `refs/heads/${name}`], {
       cwd,
       ignoreReturnCode: true,
@@ -444,7 +453,7 @@ async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
   // A shallow checkout, the actions/checkout default, has no history for the merges to find a base
   // in; `--unshallow` fetches it along with the branches.
   const shallow = (await exec.getExecOutput('git', ['rev-parse', '--is-shallow-repository'], { cwd, silent: true })).stdout.trim()
-  const refspecs = [branch, base, develop].map((name) => `+refs/heads/${name}:refs/remotes/origin/${name}`)
+  const refspecs = branches.map((name) => `+refs/heads/${name}:refs/remotes/origin/${name}`)
   if (tagged) {
     refspecs.push(`+refs/tags/${version}:refs/tags/${version}`)
   }
@@ -497,31 +506,34 @@ async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
   // at when it runs, and it is also the commit the caller builds from.
   const baseSha = (await gitOrFail(exec, ['rev-parse', 'HEAD'], { cwd, silent: true }, `Reading the merged ${base} commit`)).trim()
 
-  await gitOrFail(exec, ['checkout', '--quiet', '-B', develop, `origin/${develop}`], { cwd }, `Checking out ${develop}`)
-  const mergedDevelop = await mergeAndPush({
-    core,
-    exec,
-    cwd,
-    authEnv,
-    from: base,
-    into: develop,
-    message: `Merge ${base} back into ${develop} (${branch})`,
-    label: base,
-  })
-
-  await gitOrFail(exec, ['checkout', '--quiet', base], { cwd }, `Checking out ${base}`)
+  let mergedDevelop = null
+  if (develop === null) {
+    core.info(`develop-branch is empty: ${base} is not merged back into a develop branch.`)
+  } else {
+    await gitOrFail(exec, ['checkout', '--quiet', '-B', develop, `origin/${develop}`], { cwd }, `Checking out ${develop}`)
+    mergedDevelop = await mergeAndPush({
+      core,
+      exec,
+      cwd,
+      authEnv,
+      from: base,
+      into: develop,
+      message: `Merge ${base} back into ${develop} (${branch})`,
+      label: base,
+    })
+    await gitOrFail(exec, ['checkout', '--quiet', base], { cwd }, `Checking out ${base}`)
+  }
 
   core.setOutput('branch', branch)
   core.setOutput('version', version)
   core.setOutput('base-branch', base)
   core.setOutput('base-sha', baseSha)
-  core.setOutput('develop-branch', develop)
+  core.setOutput('develop-branch', develop ?? '')
   core.setOutput('conflict', '')
 
   const did = (merged, from, into) => (merged ? `merged \`${from}\` into \`${into}\`` : `\`${into}\` already had \`${from}\``)
-  await core.summary
-    .addRaw(`Release ${version}: ${did(mergedBase, branch, base)}, ${did(mergedDevelop, base, develop)}.`, true)
-    .write()
+  const developPart = develop === null ? 'no develop branch to merge back into' : did(mergedDevelop, base, develop)
+  await core.summary.addRaw(`Release ${version}: ${did(mergedBase, branch, base)}, ${developPart}.`, true).write()
 }
 
 /**
