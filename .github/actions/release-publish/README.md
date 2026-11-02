@@ -23,8 +23,10 @@ the title, the notes and the assets the caller chooses. It is the second half of
 
 `target` is the commit the release is made at: release-merge's `base-sha` output, or a branch name
 for a release a person merged by hand. The tag is made at that commit, whatever the branch points
-to by the time this runs. [`templates/workflows/release-merge.yml`](../../../templates/workflows/release-merge.yml)
-is a complete workflow around the two actions, ready to copy into a plugin repository.
+to by the time this runs. [`templates/workflows/release-publish.yml`](../../../templates/workflows/release-publish.yml)
+is a complete workflow around this action alone, for the hand-merged release, ready to copy into a
+plugin repository; a repository that merges with release-merge adds this action to that workflow,
+after its build, as above.
 
 ## What it does
 

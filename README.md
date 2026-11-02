@@ -169,7 +169,7 @@ Each phase ends with something people can actually use.
 - [ ] Add `setup-node` for the npm crowd.
 - [x] Add `release-prep`: version bump, TBD replacement and changelog through pup and the changelogger action, committed to the release branch through the GitHub API. A caller to copy is in `templates/workflows/release-prep.yml`.
 - [x] Add `release-merge`: the release branch into the base branch, the base back into develop, each step safe to rerun and a conflict reported with a `MERGE_CONFLICT` line. A caller to copy is in `templates/workflows/release-merge.yml`.
-- [x] Add `release-publish`: the GitHub release for a version at a commit, with a title, notes from a file and assets uploaded before the release is public, skipped when it already exists. The template above runs it after the build.
+- [x] Add `release-publish`: the GitHub release for a version at a commit, with a title, notes from a file and assets uploaded before the release is public, skipped when it already exists. A caller to copy is in `templates/workflows/release-publish.yml`; a repository that merges with `release-merge` runs it in that workflow, after its build.
 - [ ] Turn every hard-coded repo name, slug, or branch pattern into an input.
 - [ ] Self-checks: actionlint everything, unit test anything with real logic.
 - [ ] Tag `v1.0.0`.

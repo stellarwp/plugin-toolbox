@@ -25,7 +25,9 @@ for it**, set with `base-branch`:
 
 Publishing the GitHub release is [release-publish](../release-publish/README.md)'s, run after this
 action and after the caller's build, at the commit this action leaves on the base branch
-(`base-sha`), so the release can carry the build and is published only once it exists.
+(`base-sha`), so the release can carry the build and is published only once it exists. GiveWP's
+deploy workflow is that chain: release-merge, the build, the wordpress.org deploy, then
+release-publish with the zip attached.
 
 It is the part of a deploy that is the same for every plugin repository, on a base branch plus
 `develop` model or on a base branch alone (`develop-branch: ''` skips the merge back). Building the

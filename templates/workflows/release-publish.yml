@@ -1,0 +1,63 @@
+name: Release Publish
+
+# Publishes the GitHub release for a version at the tip of a branch: the tag and the release in one
+# step, with a title, the notes from a file in the checkout and assets. For a release a person merged
+# by hand. A repository whose release is merged by the release-merge action runs release-publish in
+# that same workflow instead, after its build, with `target: ${{ steps.merge.outputs.base-sha }}`.
+#
+# A file to copy into .github/workflows/ of a plugin repository, not a workflow to call.
+#
+# Run it locally: you cannot, it creates a tag and a release. Start it by hand with
+# `gh workflow run release-publish.yml -f branch=release/M26.jigglypuff -f version=4.17.0`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to publish at its tip, e.g. release/M26.jigglypuff'
+        required: true
+        type: string
+      version:
+        description: 'Version being released, e.g. 4.17.0. Becomes the tag'
+        required: true
+        type: string
+      title:
+        description: 'Release title. Empty: the version'
+        required: false
+        type: string
+        default: ''
+
+# One publish at a time for the repository: two runs for the same version would otherwise both pass
+# the "no tag yet" check and race to create it.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    # A release that reaches users should wait for a person: give this environment required reviewers
+    # in the repository settings.
+    environment: live
+    permissions:
+      contents: write # the action creates the tag and the release
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.branch }}
+          persist-credentials: false
+
+      # Build the zip to attach here, from the checkout, and write the notes file if the release
+      # notes come from the changelog rather than from GitHub's generated list.
+
+      - uses: stellarwp/plugin-toolbox/.github/actions/release-publish@v1
+        with:
+          version: ${{ inputs.version }}
+          target: ${{ inputs.branch }}
+          title: ${{ inputs.title }}
+          # notes-file: release-notes.md
+          # files: |
+          #   build/my-plugin.zip
