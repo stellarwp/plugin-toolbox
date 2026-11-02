@@ -1,9 +1,10 @@
 name: Release Publish
 
-# Publishes the GitHub release for a version at the tip of a branch: the tag and the release in one
-# step, with a title, the notes from a file in the checkout and assets. For a release a person merged
-# by hand. A repository whose release is merged by the release-merge action runs release-publish in
-# that same workflow instead, after its build, with `target: ${{ steps.merge.outputs.base-sha }}`.
+# Publishes the GitHub release for a version at the commit the workflow checked out from a branch:
+# the tag and the release in one step, with a title, the notes from a file in the checkout and
+# assets built from that same checkout. For a release a person merged by hand. A repository whose
+# release is merged by the release-merge action runs release-publish in that same workflow instead,
+# after its build, with `target: ${{ steps.merge.outputs.base-sha }}`.
 #
 # A file to copy into .github/workflows/ of a plugin repository, not a workflow to call.
 #
@@ -14,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: 'Branch to publish at its tip, e.g. release/M26.jigglypuff'
+        description: 'Branch to publish, at the commit checked out below, e.g. release/M26.jigglypuff'
         required: true
         type: string
       version:
@@ -50,13 +51,19 @@ jobs:
           ref: ${{ inputs.branch }}
           persist-credentials: false
 
+      # The commit to publish at: the one checked out, so the tag points at what the steps below
+      # build, even if the branch moves meanwhile. A branch name as `target` would be resolved to
+      # its tip when the action runs.
+      - id: head
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       # Build the zip to attach here, from the checkout, and write the notes file if the release
       # notes come from the changelog rather than from GitHub's generated list.
 
       - uses: stellarwp/plugin-toolbox/.github/actions/release-publish@v1
         with:
           version: ${{ inputs.version }}
-          target: ${{ inputs.branch }}
+          target: ${{ steps.head.outputs.sha }}
           title: ${{ inputs.title }}
           # notes-file: release-notes.md
           # files: |
