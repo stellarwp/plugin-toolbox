@@ -26,8 +26,6 @@ It is the part of a deploy that is the same for every plugin repository, on a ba
 `develop` model or on a base branch alone (`develop-branch: ''` skips the merge back). Building the
 plugin, uploading it anywhere and announcing it are the caller's steps, after the action, on the
 checkout it leaves on the merged base branch.
-[`templates/workflows/release-merge.yml`](../../../templates/workflows/release-merge.yml) is a
-complete workflow around it, ready to copy into a plugin repository.
 
 ## What it does
 
@@ -141,7 +139,7 @@ Two releases prepared with the same version, deployed at the same time, would me
 the second's changes would land on the base under a version the first had just published, and its
 publish would be skipped as already done. The action cannot stop that on its own, since both runs
 start before either has a tag to find. The caller does, with a `concurrency` group shared by every
-deploy of the repository, as the template sets:
+deploy of the repository:
 
 ```yaml
 concurrency:
@@ -168,7 +166,7 @@ direct push to the base branch and to develop. The merges are pushed, not opened
 so a base branch that only accepts pull requests refuses the push, with any token that is not on
 the rule's bypass list. GiveWP's rules are the reference shape: the branches are protected from
 deletion and non-fast-forward pushes, and `github.token` pushes the merges. The human gate is not
-the token: the caller template puts the job in an environment with required reviewers, and the
+the token: the caller puts the job in an environment with required reviewers, and the
 release branch reached this step after its review and QA approval. A repository whose rules still
 need another actor should pass a GitHub App installation token minted in the run rather than a
 personal access token. A release published with the default `github.token` triggers no `release`
