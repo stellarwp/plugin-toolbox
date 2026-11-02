@@ -29,10 +29,12 @@ on:
         default: ''
 
 # One publish at a time for the repository: two runs for the same version would otherwise both pass
-# the "no tag yet" check and race to create it.
+# the "no tag yet" check and race to create it. `queue: max` keeps every waiting run; the default
+# keeps one and cancels it when another arrives.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read
