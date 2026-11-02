@@ -16,12 +16,16 @@ for it**, set with `base-branch`:
   with:
     ref: ${{ steps.merge.outputs.base-sha }}
 
-# Build the plugin here, then publish the release at ${{ steps.merge.outputs.base-sha }}.
+# Build the plugin here, then publish the release at the merged commit:
+- uses: stellarwp/plugin-toolbox/.github/actions/release-publish@v1
+  with:
+    version: ${{ inputs.version }}
+    target: ${{ steps.merge.outputs.base-sha }}
 ```
 
-Publishing the GitHub release is not this action's: the caller does it after its build, at the
-commit this action leaves on the base branch (`base-sha`), so the release can carry the build and is
-published only once it exists.
+Publishing the GitHub release is [release-publish](../release-publish/README.md)'s, run after this
+action and after the caller's build, at the commit this action leaves on the base branch
+(`base-sha`), so the release can carry the build and is published only once it exists.
 
 It is the part of a deploy that is the same for every plugin repository, on a base branch plus
 `develop` model or on a base branch alone (`develop-branch: ''` skips the merge back). Building the
@@ -46,10 +50,10 @@ In this order, stopping at the first failure:
    same generated lines. Skipped when `develop-branch` is empty, for a repository that has no
    develop branch.
 
-The merge commit on the base branch is the `base-sha` output: what the caller checks out, builds
-from and tags. GitHub makes both merge commits under the identity of `token`, `github-actions[bot]`
-for the default token, and signs them. The API never fast-forwards, so each release is one merge
-commit in the history.
+The merge commit on the base branch is the `base-sha` output: what the caller checks out and builds
+from, and what release-publish tags. GitHub makes both merge commits under the identity of `token`,
+`github-actions[bot]` for the default token, and signs them. The API never fast-forwards, so each
+release is one merge commit in the history.
 
 The action reads and writes no checkout: it needs none before it, and leaves whatever checkout the
 job has as it was. Check out `base-sha` after it for the steps that build the release.
@@ -63,7 +67,7 @@ does:
   already contains the head, and nothing is written.
 - A version already published counts as a retry only when its tag contains the release branch,
   that is, when it was published from this branch. See [Versions it refuses](#versions-it-refuses).
-  The caller's publish then has nothing to do.
+  release-publish then skips the release.
 - A conflict resolved by hand on the branch, then pushed, is found as an already-merged branch on
   the next run, which goes on to the step that had not run.
 
@@ -109,8 +113,8 @@ fails the step without the marker; running the step again is enough.
 - **An empty version.** A tool that dispatches the workflow for a release with no version set sends
   an empty one. When the workflow declares `version` as required, GitHub refuses the dispatch
   itself; when it is optional, the action fails the run before merging.
-- **A version whose tag exists without a published release.** Publishing would release whatever
-  commit the tag points at. Delete the tag or release another version.
+- **A version whose tag exists without a published release.** release-publish would release
+  whatever commit the tag points at. Delete the tag or release another version.
 - **A version already released from another commit.** When the tag exists with a published release
   and does not contain the release branch, the version went out before this branch, and the branch
   was never bumped past it: a branch cut from `main` right after a release still carries that
@@ -150,7 +154,7 @@ this; without `head`, the tip at that moment is what merges.
 |---|---|
 | `version` | The version released. |
 | `branch` | The release branch merged. |
-| `base-sha` | The commit on the base branch that holds the release: the merge commit, or the base's tip on a retry that found the merge done. The commit to check out, build from and publish the release at. |
+| `base-sha` | The commit on the base branch that holds the release: the merge commit, or the base's tip on a retry that found the merge done. The commit to check out and build from; pass it to release-publish as `target`. |
 | `conflict` | The branch a merge conflicted on, or empty. A conflict fails the step, so read it with `continue-on-error` or in a later `if: failure()` step. |
 
 ## One deploy at a time
@@ -189,8 +193,8 @@ are protected from deletion and non-fast-forward pushes, and `github.token` writ
 human gate is not the token: the caller puts the job in an environment with required reviewers, and
 the release branch reached this step after its review and QA approval. A repository whose rules
 still need another actor should pass a GitHub App installation token minted in the run rather than
-a personal access token. A release published with the default `github.token` triggers no `release`
-workflow; one published with a personal access token or a GitHub App token does.
+a personal access token. What the token needs for the tag is in
+[release-publish → The token](../release-publish/README.md#the-token).
 
 ## How it runs
 

@@ -1,7 +1,8 @@
 # Merges a release: the release branch into the base branch (`main`, or `master` where that is the
 # name), then the base branch back into develop. The part of a deploy that is the same for every
-# plugin; what happens after the merge (building, publishing the GitHub release, wordpress.org,
-# announcements) is the caller's, at the commit this one leaves on the base (`base-sha`).
+# plugin; what happens after the merge (building, wordpress.org, announcements) is the caller's, and
+# publishing the GitHub release is the release-publish action's, at the commit this one leaves on the
+# base (`base-sha`).
 #
 # The checks and the merges live in release-merge.js, run by actions/github-script, so there is no
 # dependency to install and nothing to build. Everything goes through the GitHub API: the branch,
@@ -30,7 +31,7 @@ inputs:
       paths.versions is read, and a different version in any of them is refused. A pre-release such as
       4.17.0-beta.1 and an empty value are refused before anything is merged, and so is a version
       whose tag already exists, unless that tag's release was published from this branch, which makes
-      the run a retry. Publishing the release is the caller's, after this action.
+      the run a retry. The release itself is published by release-publish, after this action.
     required: true
   base-branch:
     description: 'The branch the release is merged into: `main`, or `master` where that is the name.'
@@ -62,8 +63,8 @@ outputs:
   base-sha:
     description: >-
       The commit on the base branch that holds the release: the merge commit, or the base's tip on a
-      retry that found the merge already done. The commit to check out, build from and publish the
-      release at.
+      retry that found the merge already done. The commit to check out and build from; pass it to
+      release-publish as `target`.
     value: ${{ steps.merge.outputs.base-sha }}
   conflict:
     description: >-

@@ -45,6 +45,28 @@ function jsonResponse({ status = 200, body = {}, headers = {} }) {
 }
 
 /**
+ * The body of a recorded request: JSON parsed, anything else (an asset upload) as it was sent.
+ *
+ * @param {*} body What the request carried.
+ *
+ * @returns {*} The parsed JSON, the raw body, or undefined for none.
+ */
+function parseBody(body) {
+  if (body === undefined || body === null) {
+    return undefined
+  }
+  if (typeof body === 'string') {
+    try {
+      return JSON.parse(body)
+    } catch {
+      return body
+    }
+  }
+
+  return body
+}
+
+/**
  * A `fetch` that answers from a list of rules and records every request it was given.
  *
  * A rule matches on `method` and on `path`, first match winning. A string path has to equal the
@@ -75,7 +97,7 @@ function recordingFetch(rules = []) {
       method,
       url: href,
       path: requestPath,
-      body: options.body ? JSON.parse(options.body) : undefined,
+      body: parseBody(options.body),
     })
 
     for (const [index, rule] of rules.entries()) {
