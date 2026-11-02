@@ -147,13 +147,13 @@ deploy of the repository, as the template sets:
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
-  queue: max
 ```
 
 The second run then waits for the first, finds the version tagged from another branch, and is
 refused before merging. A repository that also deploys from another workflow gives it the same
-group. `queue: max` keeps every waiting run, in the order they arrived; without it GitHub keeps one
-run waiting per group and cancels it when another arrives.
+group. GitHub keeps one run waiting per group: a third deploy started while one is already waiting
+cancels the waiting one, which is started again. (`queue: max` would keep every waiting run, but
+actionlint 1.7 does not know the key and the plugin repositories lint their workflows with it.)
 
 ## The token
 

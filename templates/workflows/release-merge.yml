@@ -30,12 +30,11 @@ on:
 # same version would otherwise merge side by side, and the second would land its changes under a
 # version the first has just published. Run one after the other, the second finds the tag published
 # and the action refuses it before merging. A repository that also deploys from another workflow
-# (an `on: release` workflow, for instance) gives both the same group. `queue: max` keeps every
-# waiting run; the default keeps one and cancels it when another arrives.
+# (an `on: release` workflow, for instance) gives both the same group. GitHub keeps one run
+# waiting per group and cancels it when another arrives; a cancelled deploy is started again.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
-  queue: max
 
 permissions:
   contents: read
