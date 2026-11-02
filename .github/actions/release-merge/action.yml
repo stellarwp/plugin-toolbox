@@ -1,13 +1,13 @@
 # Merges a release: the release branch into the base branch (`main`, or `master` where that is the
-# name), the base branch back into develop, then publishes the GitHub release for the version. The
-# part of a deploy that is the same for every plugin; what happens after the merge (building,
-# wordpress.org, announcements) is the caller's.
+# name), then the base branch back into develop. The part of a deploy that is the same for every
+# plugin; what happens after the merge (building, publishing the GitHub release, wordpress.org,
+# announcements) is the caller's, at the commit this one leaves on the base (`base-sha`).
 #
-# The checks, the merges and the publish live in release-merge.js, run by actions/github-script, so
-# there is no dependency to install and nothing to build. The merges are git in the caller's
-# checkout; the tag and release reads and the publish go through the GitHub API.
+# The checks and the merges live in release-merge.js, run by actions/github-script, so there is no
+# dependency to install and nothing to build. The merges are git in the caller's checkout; the tag
+# and release reads go through the GitHub API.
 name: Release merge
-description: Merges the release branch into the base and the base back into develop, then publishes the GitHub release
+description: Merges the release branch into the base and the base back into develop
 
 inputs:
   branch:
@@ -23,7 +23,7 @@ inputs:
       paths.versions is read, and a different version in any of them is refused. A pre-release such as
       4.17.0-beta.1 and an empty value are refused before anything is merged, and so is a version
       whose tag already exists, unless that tag's release was published from this branch, which makes
-      the run a retry.
+      the run a retry. Publishing the release is the caller's, after this action.
     required: true
   base-branch:
     description: 'The branch the release is merged into: `main`, or `master` where that is the name.'
@@ -36,19 +36,12 @@ inputs:
       it in the caller (`develop-branch: ''`); a workflow_dispatch input left empty takes its default.
     required: false
     default: 'develop'
-  publish:
-    description: >-
-      Whether to publish the GitHub release once both merges are pushed: `true` or `false`. Set it to
-      false to use the two merges on their own.
-    required: false
-    default: 'true'
   token:
     description: >-
-      Token the pushes and the release are made with. It needs `contents: write` on the repository, so
-      the job needs that permission too. It is handed to git through the environment of the fetch and
-      the pushes only, never written to the checkout's config, so the checkout can use
-      `persist-credentials: false`. A release published with the default token triggers no `release`
-      workflow: the run that merged the release is the one that deploys it.
+      Token the fetch and the pushes are made with, and the tag and release reads. It needs
+      `contents: write` on the repository, so the job needs that permission too. It is handed to git
+      through the environment of the fetch and the pushes only, never written to the checkout's
+      config, so the checkout can use `persist-credentials: false`.
     required: false
     default: ${{ github.token }}
 
@@ -62,7 +55,7 @@ outputs:
   base-sha:
     description: >-
       The commit on the base branch that holds the release: the merge commit, or the base's tip on a
-      retry that found the merge already done. The release is published at this commit, and it is the
+      retry that found the merge already done. The commit to publish the release at; it is also the
       commit the checkout is left on.
     value: ${{ steps.merge.outputs.base-sha }}
   conflict:
@@ -71,12 +64,6 @@ outputs:
       merges went through. A conflict fails the step, so a caller reads this with `continue-on-error`
       or in a later `if: failure()` step.
     value: ${{ steps.merge.outputs.conflict }}
-  published:
-    description: '`true` when the release was created, `skipped` when it already existed, `false` when publish was false.'
-    value: ${{ steps.publish.outputs.published }}
-  release-url:
-    description: 'The GitHub release page, empty when publish was false.'
-    value: ${{ steps.publish.outputs.release-url }}
 
 runs:
   using: 'composite'
@@ -95,8 +82,6 @@ runs:
         INPUT_VERSION: ${{ inputs.version }}
         INPUT_BASE_BRANCH: ${{ inputs.base-branch }}
         INPUT_DEVELOP_BRANCH: ${{ inputs.develop-branch }}
-        # Checked here too, so a wrong value fails before anything is merged.
-        INPUT_PUBLISH: ${{ inputs.publish }}
         INPUT_TOKEN: ${{ inputs.token }}
       with:
         # The tag and release reads go through github-script's own client, built from this token.
@@ -105,20 +90,3 @@ runs:
           const { runMerge } = require(`${process.env.ACTION_PATH}/release-merge.js`)
           await runMerge({ github, core, exec, env: process.env })
 
-    - name: Publish the GitHub release
-      id: publish
-      uses: actions/github-script@v9
-      env:
-        ACTION_PATH: ${{ github.action_path }}
-        # The values the merge step validated, not the raw inputs. base-branch and develop-branch
-        # are outputs of that step for this hand-over only; the action exposes neither. base-sha is
-        # the commit the release is published at.
-        INPUT_VERSION: ${{ steps.merge.outputs.version }}
-        INPUT_BASE_BRANCH: ${{ steps.merge.outputs.base-branch }}
-        INPUT_BASE_SHA: ${{ steps.merge.outputs.base-sha }}
-        INPUT_PUBLISH: ${{ inputs.publish }}
-      with:
-        github-token: ${{ inputs.token }}
-        script: |
-          const { runPublish } = require(`${process.env.ACTION_PATH}/release-merge.js`)
-          await runPublish({ github, core, env: process.env })

@@ -2,20 +2,19 @@
 
 /**
  * Merges a release: the release branch into the base branch (`main`, or `master` where that is the
- * name), the base branch back into develop, then publishes the GitHub release for the version.
+ * name), then the base branch back into develop. Publishing the GitHub release is the caller's,
+ * after this action and its build, at the commit this one leaves on the base (`base-sha`).
  *
- * The action runs in two github-script steps, so there are two entry points. runMerge checks the
- * inputs and the version against the repository's tags, then does the two merges with git in the
- * caller's checkout and pushes them; runPublish creates the GitHub release through the Octokit
- * github-script supplies. The functions they are built from are pure, apart from the git commands run
- * through `exec` and the API calls, so a test can run them against a local remote and assert the
- * requests.
+ * runMerge checks the inputs and the version against the repository's tags, then does the two
+ * merges with git in the caller's checkout and pushes them. The functions it is built from are pure,
+ * apart from the git commands run through `exec` and the API calls, so a test can run them against
+ * a local remote and assert the requests.
  *
  * Every step is safe to run again after a late failure: a branch that already holds the release
- * merges as a no-op, and a release that already exists is skipped.
+ * merges as a no-op.
  */
 
-const { STELLARWP_VERSION_PATTERN } = require('../../lib/versions.js')
+const { validateVersion: validateReleaseVersion } = require('../../lib/versions.js')
 const { readRepository, isNotFound, tagExists } = require('../../lib/github.js')
 const { runOrFail } = require('../../lib/exec.js')
 const { readVersionFiles, versionIn } = require('../../lib/puprc.js')
@@ -33,37 +32,16 @@ const BOT_IDENTITY = {
 const CONFLICT_OUTPUT = /CONFLICT \(|Automatic merge failed/
 
 /**
- * Reads the version to release, refusing anything but three or four numeric parts.
- *
- * A pre-release is refused: the version becomes the tag and the title of a published release, and a
- * beta or RC is not released this way. The release dashboard validates versions with this rule, and
- * release-prep does under the stellarwp changelog versioning.
+ * Reads the version to release: the shared rule, with this action's closing line.
  *
  * @param {string} version The `version` input.
  *
- * @throws {Error} When it is empty or not of that shape.
+ * @throws {Error} When it is empty or not three or four numeric parts.
  *
  * @returns {string} The version, without surrounding whitespace.
  */
 function validateVersion(version) {
-  const trimmed = String(version ?? '').trim()
-
-  if (trimmed === '') {
-    throw new Error(
-      'No version was given. The run was dispatched without one, which is what a release with no ' +
-        "version set sends: set the release's version and run this step again. Nothing was merged."
-    )
-  }
-
-  if (!STELLARWP_VERSION_PATTERN.test(trimmed)) {
-    throw new Error(
-      `'${trimmed}' is not a version this action can release. It takes three or four numeric parts, ` +
-        'such as 4.17.0 or 4.17.0.1: no pre-release suffix and no leading v, because the version ' +
-        'becomes the tag and the title of the published release. Nothing was merged.'
-    )
-  }
-
-  return trimmed
+  return validateReleaseVersion(version, 'Nothing was merged.')
 }
 
 /**
@@ -99,51 +77,6 @@ function validateBranch(branch, input, { optional = false } = {}) {
   }
 
   return trimmed
-}
-
-/**
- * Reads the commit the release is published at, the merge step's `base-sha` output.
- *
- * @param {string} sha The output value.
- *
- * @throws {Error} When it is not a full commit hash.
- *
- * @returns {string} The hash.
- */
-function validateSha(sha) {
-  const trimmed = String(sha ?? '').trim()
-
-  if (!/^[0-9a-f]{40}$/.test(trimmed)) {
-    throw new Error(
-      `'${trimmed}' is not the commit to publish at: expected the merge step's base-sha output, a full ` +
-        'commit hash. Nothing was published.'
-    )
-  }
-
-  return trimmed
-}
-
-/**
- * Reads the `publish` input.
- *
- * @param {string} input The input: empty, `true` or `false`.
- *
- * @throws {Error} When it is anything else.
- *
- * @returns {boolean} Whether to publish the GitHub release; true for an empty input.
- */
-function readPublish(input) {
-  const trimmed = String(input ?? '').trim().toLowerCase()
-
-  if (trimmed === '' || trimmed === 'true') {
-    return true
-  }
-
-  if (trimmed === 'false') {
-    return false
-  }
-
-  throw new Error(`publish '${trimmed}' is not a value this action takes: pass true or false.`)
 }
 
 /**
@@ -210,7 +143,7 @@ function isConflict(result) {
  * A version that was never tagged is the common case. One whose tag exists with a published release
  * may be a retry after a late failure; runMerge decides that once the tag is fetched, by checking
  * that the tag contains the branch. One whose tag exists without a release would make the publish
- * step reuse whatever commit the tag points at, so it is refused here, with the base and develop
+ * reuse whatever commit the tag points at, so it is refused here, with the base and develop
  * untouched.
  *
  * @param {object} options
@@ -419,8 +352,6 @@ async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
   const version = validateVersion(env.INPUT_VERSION)
   const base = validateBranch(env.INPUT_BASE_BRANCH, 'base-branch')
   const develop = validateBranch(env.INPUT_DEVELOP_BRANCH, 'develop-branch', { optional: true })
-  // Read by the publish step; checked here so a wrong value fails before anything is merged.
-  readPublish(env.INPUT_PUBLISH)
   const { owner, repo } = readRepository(env, 'Nothing was merged.')
 
   if (develop !== null && base === develop) {
@@ -486,7 +417,7 @@ async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
     if (ancestry.exitCode !== 0) {
       throw new Error(`Comparing ${branch} with the tag ${version} failed (exit code ${ancestry.exitCode}). Nothing was merged.`)
     }
-    core.info(`${version} is already published (${releaseUrl}) from ${branch}; the publish step will skip it.`)
+    core.info(`${version} is already published (${releaseUrl}) from ${branch}: nothing to publish again.`)
   }
 
   await gitOrFail(exec, ['checkout', '--quiet', '-B', base, `origin/${base}`], { cwd }, `Checking out ${base}`)
@@ -502,8 +433,9 @@ async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
   })
 
   // The commit the release is published at: the merge commit, or the base's tip on a retry that
-  // found the merge done. The publish step tags this commit, not whatever the base branch points
-  // at when it runs, and it is also the commit the caller builds from.
+  // found the merge done. The caller publishes the release at it, so the tag is made at this commit
+  // and not at whatever the base branch points to by then; it is also the commit the caller builds
+  // from.
   const baseSha = (await gitOrFail(exec, ['rev-parse', 'HEAD'], { cwd, silent: true }, `Reading the merged ${base} commit`)).trim()
 
   let mergedDevelop = null
@@ -536,92 +468,11 @@ async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
   await core.summary.addRaw(`Release ${version}: ${did(mergedBase, branch, base)}, ${developPart}.`, true).write()
 }
 
-/**
- * Publishes the GitHub release for the version, unless `publish` is false or it already exists.
- *
- * The release is read again here rather than taken from the merge step's outputs, so a release
- * created in between, by a retry or another run, is found. Its notes are the ones GitHub generates
- * from the pull requests since the previous release.
- *
- * @param {object} options
- * @param {object} options.github The Octokit github-script supplies, authenticated with the token.
- * @param {object} options.core   The @actions/core toolkit, for the log, the outputs and the summary.
- * @param {object} options.env    The environment the action manifest put the merge step's outputs in.
- *
- * @throws {Error} When `publish` is not true or false, the merged commit is missing, or an API call
- *                 fails.
- *
- * @returns {Promise<void>} Resolves once the release exists, or was found unnecessary.
- */
-async function runPublish({ github, core, env }) {
-  const publish = readPublish(env.INPUT_PUBLISH)
-  const version = validateVersion(env.INPUT_VERSION)
-  const base = validateBranch(env.INPUT_BASE_BRANCH, 'base-branch')
-  const sha = validateSha(env.INPUT_BASE_SHA)
-
-  if (!publish) {
-    core.info(`publish is false: the GitHub release for ${version} was not created.`)
-    core.setOutput('published', 'false')
-    core.setOutput('release-url', '')
-
-    return
-  }
-
-  const { owner, repo } = readRepository(env, 'Nothing was published.')
-
-  let existing = null
-  try {
-    existing = (await github.rest.repos.getReleaseByTag({ owner, repo, tag: version })).data
-  } catch (error) {
-    if (!isNotFound(error)) {
-      throw new Error(
-        `Reading the release for ${version} failed (HTTP ${error.status}): ${error.message}. Nothing was published.`
-      )
-    }
-  }
-
-  if (existing) {
-    core.info(`${version} is already published (${existing.html_url}): nothing to publish.`)
-    core.setOutput('published', 'skipped')
-    core.setOutput('release-url', existing.html_url)
-    await core.summary.addRaw(`Release ${version} was already published: ${existing.html_url}`, true).write()
-
-    return
-  }
-
-  // The tag is made at the commit the merge step left the base on, so it points at the release
-  // even if the base branch moved while this step ran.
-  const { data: notes } = await github.rest.repos.generateReleaseNotes({
-    owner,
-    repo,
-    tag_name: version,
-    target_commitish: sha,
-  })
-  const { data: release } = await github.rest.repos.createRelease({
-    owner,
-    repo,
-    tag_name: version,
-    target_commitish: sha,
-    name: version,
-    body: notes.body,
-  })
-
-  core.info(`Published ${version} at ${sha.slice(0, 7)}: ${release.html_url}`)
-  core.setOutput('published', 'true')
-  core.setOutput('release-url', release.html_url)
-  await core.summary
-    .addRaw(`Published release ${version} on \`${base}\` at \`${sha.slice(0, 7)}\`: ${release.html_url}`, true)
-    .write()
-}
-
 module.exports = {
   runMerge,
-  runPublish,
   runPreflight,
   validateVersion,
   validateBranch,
-  validateSha,
-  readPublish,
   authorizationHeader,
   gitAuthEnv,
   mergeMessage,

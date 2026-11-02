@@ -1,8 +1,8 @@
 # release-merge
 
-Merges a release and publishes it on GitHub: the release branch into the base branch, the base
-branch back into develop, then the GitHub release for the version. **The base branch is `main`, or
-`master` where that is the repository's name for it**, set with `base-branch`:
+Merges a release: the release branch into the base branch, then the base branch back into develop.
+**The base branch is `main`, or `master` where that is the repository's name for it**, set with
+`base-branch`:
 
 ```yaml
 - uses: actions/checkout@v6
@@ -10,10 +10,17 @@ branch back into develop, then the GitHub release for the version. **The base br
     persist-credentials: false
 
 - uses: stellarwp/plugin-toolbox/.github/actions/release-merge@v1
+  id: merge
   with:
     branch: ${{ inputs.branch }}
     version: ${{ inputs.version }}
+
+# Build the plugin here, then publish the release at ${{ steps.merge.outputs.base-sha }}.
 ```
+
+Publishing the GitHub release is not this action's: the caller does it after its build, at the
+commit this action leaves on the base branch (`base-sha`), so the release can carry the build and is
+published only once it exists.
 
 It is the part of a deploy that is the same for every plugin repository, on a base branch plus
 `develop` model or on a base branch alone (`develop-branch: ''` skips the merge back). Building the
@@ -39,13 +46,9 @@ In this order, stopping at the first failure:
    descends from the base and consecutive releases bring one version bump each instead of
    divergent copies of the same generated lines. Skipped when `develop-branch` is empty, for a
    repository that has no develop branch.
-5. Publishes the GitHub release: tag and title are the version, the tag is made at the commit step
-   3 left the base branch on (the merge commit, so a pull request merged into the base meanwhile is
-   not what gets tagged), the notes are the ones GitHub generates from the pull requests since the
-   previous release. Skipped with `publish: false`.
-
-The checkout is left on the base branch at the merged commit, clean. The merge commits are made by
-`github-actions[bot]`; the pushes and the release are made by the identity of `token`, also
+The checkout is left on the base branch at the merged commit, clean, and that commit is the
+`base-sha` output: what the caller builds from and tags. The merge commits are
+made by `github-actions[bot]`; the pushes are made by the identity of `token`, also
 `github-actions[bot]` for the default token.
 
 ## Running it again
@@ -54,14 +57,14 @@ Every step is safe to run again after a late failure, which is what a retry from
 does:
 
 - A branch that already holds the other merges as "Already up to date" and pushes nothing.
-- A release that already exists is skipped, and its URL is still reported in `release-url`. It
-  counts as a retry only when its tag contains the release branch, that is, when it was published
-  from this branch. See [Versions it refuses](#versions-it-refuses).
+- A version already published counts as a retry only when its tag contains the release branch,
+  that is, when it was published from this branch. See [Versions it refuses](#versions-it-refuses).
+  The caller's publish then has nothing to do.
 - A conflict resolved by hand on the branch, then pushed, is found as an already-merged branch on
   the next run, which goes on to the step that had not run.
 
-So a run that failed publishing, or after merging the base, is rerun as it is; nothing has to be
-undone first.
+So a run that failed after merging the base, or in a later step of the caller, is rerun as it is;
+nothing has to be undone first.
 
 ## When a merge conflicts
 
@@ -121,8 +124,7 @@ two different branches (when there is a develop), and the release branch cannot 
 | `version` | yes | | The version being released: three or four numeric parts. |
 | `base-branch` | no | `main` | The branch the release is merged into: `main`, or `master` where that is the repository's name for it. |
 | `develop-branch` | no | `develop` | The branch the base is merged back into. Empty for a repository without one: only the first merge is made. Write `develop-branch: ''` in the caller itself; a `workflow_dispatch` input left empty takes its default, so the empty value cannot be passed through one. |
-| `publish` | no | `true` | `false` to do the two merges without the GitHub release. |
-| `token` | no | `github.token` | The token for the pushes and the release. Needs `contents: write`. See [The token](#the-token). |
+| `token` | no | `github.token` | The token for the fetch, the pushes and the tag reads. Needs `contents: write`. See [The token](#the-token). |
 
 ## Outputs
 
@@ -130,13 +132,8 @@ two different branches (when there is a develop), and the release branch cannot 
 |---|---|
 | `version` | The version released. |
 | `branch` | The release branch merged. |
-| `base-sha` | The commit on the base branch that holds the release: the merge commit, or the base's tip on a retry that found the merge done. The release is published at it, and the checkout is left on it. |
+| `base-sha` | The commit on the base branch that holds the release: the merge commit, or the base's tip on a retry that found the merge done. The commit to publish the release at; the checkout is left on it. |
 | `conflict` | The branch a merge conflicted on, or empty. A conflict fails the step, so read it with `continue-on-error` or in a later `if: failure()` step. |
-| `published` | `true` when the release was created, `skipped` when it already existed, `false` when `publish` was false. |
-| `release-url` | The release page, empty when `publish` was false. |
-
-The merge step also sets `base-branch` and `develop-branch` as step outputs, for the publish step;
-the action does not expose them. `base-sha` is set the same way and is also an output of the action.
 
 ## One deploy at a time
 
@@ -159,27 +156,22 @@ cancels the waiting one, which has to be started again.
 
 ## The token
 
-The job needs `contents: write`, and the token is used for the fetch, the two pushes and the
-release. It is handed to git through the environment of those commands only (`GIT_CONFIG_*`, the
+The job needs `contents: write`, and the token is used for the fetch, the two pushes and the tag
+and release reads. It is handed to git through the environment of those commands only (`GIT_CONFIG_*`, the
 `http.<server>/.extraheader` header actions/checkout would store), so it is never in the checkout's
 `.git/config` and never on a command line in the log. Use `persist-credentials: false` on the
 checkout; it matters when later steps of the same job run third-party actions.
 
 The default `github.token` is enough when the repository's rules allow it what the action does: a
-direct push to the base branch and to develop (the merges are pushed, not opened as pull requests;
-a base branch that only accepts pull requests refuses the push, with any token that is not on the
-rule's bypass list), and creating a tag (a tag ruleset should block deletion and updates, not
-creation). GiveWP's rules are the reference shape: the branches are protected from deletion and
-non-fast-forward pushes, tags have no rule, and `github.token` does everything. The human gate is
-not the token: the caller template puts the job in an environment with required reviewers, and the
+direct push to the base branch and to develop. The merges are pushed, not opened as pull requests,
+so a base branch that only accepts pull requests refuses the push, with any token that is not on
+the rule's bypass list. GiveWP's rules are the reference shape: the branches are protected from
+deletion and non-fast-forward pushes, and `github.token` pushes the merges. The human gate is not
+the token: the caller template puts the job in an environment with required reviewers, and the
 release branch reached this step after its review and QA approval. A repository whose rules still
 need another actor should pass a GitHub App installation token minted in the run rather than a
-personal access token, and read the next paragraph.
-
-A release published with the default `github.token` triggers no `release` workflow: GitHub does not
-start workflows from events a workflow's own token caused. The run that merged the release is the
-one that deploys it, so a repository that also has an `on: release` deploy does
-not deploy it twice. A release that should trigger other workflows needs a token of its own.
+personal access token. A release published with the default `github.token` triggers no `release`
+workflow; one published with a personal access token or a GitHub App token does.
 
 ## The checkout
 
@@ -192,11 +184,11 @@ tags and the release are read and written.
 
 ## How it runs
 
-Two [actions/github-script](https://github.com/actions/github-script) steps run
-[`release-merge.js`](./release-merge.js): one for the checks and the merges, one for the release.
-The inputs reach the script through environment variables, never interpolated into it, so a crafted
-value is data rather than part of the program. The merges are git commands in the checkout; the tag
-and release reads and the publish go through github-script's Octokit.
+One [actions/github-script](https://github.com/actions/github-script) step runs
+[`release-merge.js`](./release-merge.js): the checks and the merges. The inputs reach the script
+through environment variables, never interpolated into it, so a crafted value is data rather than
+part of the program. The merges are git commands in the checkout; the tag and release reads go
+through github-script's Octokit.
 
 The tests, `node --test` from the repository root, run the merges with real git against a bare
 repository on disk and the API calls against a recorded client.

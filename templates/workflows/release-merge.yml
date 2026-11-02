@@ -1,9 +1,9 @@
 name: Release Merge
 
-# Merges a release and publishes it on GitHub: the release branch into the base branch (`main` here,
-# `master` in some repositories), the base branch back into develop, then the GitHub release for the
-# version. Nothing is built or deployed here; a plugin repository adds its own steps after the
-# action, on the checkout it leaves on the merged base branch.
+# Merges a release: the release branch into the base branch (`main` here, `master` in some
+# repositories), then the base branch back into develop. Nothing is built, published or deployed
+# here; a plugin repository adds its own steps after the action, on the checkout it leaves on the
+# merged base branch, and publishes the GitHub release at `steps.merge.outputs.base-sha`.
 #
 # A file to copy into .github/workflows/ of a plugin repository, not a workflow to call. Rename the
 # base branch below where it is `master`.
@@ -52,7 +52,7 @@ jobs:
     # dispatches on.
     environment: live
     permissions:
-      contents: write # the action pushes the merges and publishes the release
+      contents: write # the action pushes the merges; the caller's publish needs it too
     steps:
       - uses: actions/checkout@v6
         with:
@@ -61,11 +61,12 @@ jobs:
           persist-credentials: false
 
       - uses: stellarwp/plugin-toolbox/.github/actions/release-merge@v1
-        id: release
+        id: merge
         with:
           branch: ${{ inputs.branch }}
           version: ${{ inputs.version }}
           # base-branch: master
           # develop-branch: '' # for a repository without a develop branch
 
-      # The checkout is now on the merged base branch: build and deploy from here.
+      # The checkout is now on the merged base branch: build, publish the GitHub release at
+      # ${{ steps.merge.outputs.base-sha }}, and deploy from here.
