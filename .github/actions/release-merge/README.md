@@ -162,7 +162,7 @@ and release reads. It is handed to git through the environment of those commands
 `.git/config` and never on a command line in the log. Use `persist-credentials: false` on the
 checkout; it matters when later steps of the same job run third-party actions.
 
-The default `github.token` is enough when the repository's rules allow it what the action does: a
+The default `github.token` is enough when the repository's rules allow what the action does: a
 direct push to the base branch and to develop. The merges are pushed, not opened as pull requests,
 so a base branch that only accepts pull requests refuses the push, with any token that is not on
 the rule's bypass list. GiveWP's rules are the reference shape: the branches are protected from
