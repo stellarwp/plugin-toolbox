@@ -147,12 +147,13 @@ deploy of the repository, as the template sets:
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
+  queue: max
 ```
 
 The second run then waits for the first, finds the version tagged from another branch, and is
 refused before merging. A repository that also deploys from another workflow gives it the same
-group. GitHub keeps one run waiting per group: a third deploy started while one is already waiting
-cancels the waiting one, which has to be started again.
+group. `queue: max` keeps every waiting run, in the order they arrived; without it GitHub keeps one
+run waiting per group and cancels it when another arrives.
 
 ## The token
 
