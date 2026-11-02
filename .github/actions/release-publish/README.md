@@ -100,6 +100,14 @@ rules allow it to create a tag: a tag ruleset should block deletion and updates,
 GiveWP's rules are the reference shape (branches protected from deletion and non-fast-forward
 pushes, no tag rule), and `github.token` publishes there.
 
+One case the default token cannot cover: a release at a commit that adds or changes a file under
+`.github/workflows/` relative to the repository's default branch. GitHub requires a token allowed
+to modify workflows for that (a GitHub App installation token with the Workflows permission, or a
+personal access token with the `workflow` scope) and answers 404 to `github.token`. After
+release-merge the commit published is the base branch's own tip, so there is no such difference and
+`github.token` publishes; the case is the publish of a branch a person merged by hand, when that
+branch changed a workflow.
+
 A release published with the default `github.token` triggers no `release` workflow: GitHub does
 not start workflows from events a workflow's own token caused. The run that merged and published
 the release is the one that deploys it, so a repository that also has an `on: release` deploy does

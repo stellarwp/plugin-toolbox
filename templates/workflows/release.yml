@@ -12,8 +12,9 @@ name: Release
 #
 # The inputs are what the release dashboard sends for the deploy step: `branch` and `version`.
 #
-# Run it locally: you cannot, it pushes to two branches and publishes a release. Start it by hand with
-# `gh workflow run release.yml -f branch=release/M26.jigglypuff -f version=4.17.0`.
+# Run it locally: you cannot, it pushes to two branches and publishes a release. Start it by hand on
+# the release branch, as the dashboard does:
+# `gh workflow run release.yml --ref release/M26.jigglypuff -f branch=release/M26.jigglypuff -f version=4.17.0`.
 
 on:
   workflow_dispatch:
@@ -50,6 +51,19 @@ jobs:
     permissions:
       contents: write # release-merge pushes the merges, release-publish creates the tag and the release
     steps:
+      # The environment's branch policy protects the branch the run was started on, not the input.
+      # The two have to be the same branch, so the policy covers what is actually merged and
+      # published. A failing step, not an `if:` on the job: a skipped job reads as a success to the
+      # tool that dispatched the run.
+      - name: Check that the run is on the release branch it merges
+        env:
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          if [ "$BRANCH" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::This run is on '$GITHUB_REF_NAME' but was asked to release '$BRANCH'. Start it on the release branch (the dashboard does; by hand, pass --ref)."
+            exit 1
+          fi
+
       - uses: actions/checkout@v6
         with:
           # release-merge fetches the branches it merges and pushes them with the token it is given, so
