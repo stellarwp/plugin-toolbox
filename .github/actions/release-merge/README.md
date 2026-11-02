@@ -165,6 +165,17 @@ release. It is handed to git through the environment of those commands only (`GI
 `.git/config` and never on a command line in the log. Use `persist-credentials: false` on the
 checkout; it matters when later steps of the same job run third-party actions.
 
+The default `github.token` is enough when the repository's rules allow it what the action does: a
+direct push to the base branch and to develop (the merges are pushed, not opened as pull requests;
+a base branch that only accepts pull requests refuses the push, with any token that is not on the
+rule's bypass list), and creating a tag (a tag ruleset should block deletion and updates, not
+creation). GiveWP's rules are the reference shape: the branches are protected from deletion and
+non-fast-forward pushes, tags have no rule, and `github.token` does everything. The human gate is
+not the token: the caller template puts the job in an environment with required reviewers, and the
+release branch reached this step after its review and QA approval. A repository whose rules still
+need another actor should pass a GitHub App installation token minted in the run rather than a
+personal access token, and read the next paragraph.
+
 A release published with the default `github.token` triggers no `release` workflow: GitHub does not
 start workflows from events a workflow's own token caused. The run that merged the release is the
 one that deploys it, so a repository that also has an `on: release` deploy does
