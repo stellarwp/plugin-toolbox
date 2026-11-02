@@ -120,7 +120,7 @@ two different branches (when there is a develop), and the release branch cannot 
 | `branch` | yes | | The release branch to merge, e.g. `release/M26.jigglypuff`. A branch name, fetched from `origin`. |
 | `version` | yes | | The version being released: three or four numeric parts. |
 | `base-branch` | no | `main` | The branch the release is merged into: `main`, or `master` where that is the repository's name for it. |
-| `develop-branch` | no | `develop` | The branch the base is merged back into. Empty for a repository without one: only the first merge is made. |
+| `develop-branch` | no | `develop` | The branch the base is merged back into. Empty for a repository without one: only the first merge is made. Write `develop-branch: ''` in the caller itself; a `workflow_dispatch` input left empty takes its default, so the empty value cannot be passed through one. |
 | `publish` | no | `true` | `false` to do the two merges without the GitHub release. |
 | `token` | no | `github.token` | The token for the pushes and the release. Needs `contents: write`. See [The token](#the-token). |
 

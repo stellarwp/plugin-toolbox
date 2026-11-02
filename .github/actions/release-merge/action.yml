@@ -32,7 +32,8 @@ inputs:
   develop-branch:
     description: >-
       The branch the base is merged back into after the release. Pass an empty value for a repository
-      that has no develop branch: the release is merged into the base and nothing is merged back.
+      that has no develop branch: the release is merged into the base and nothing is merged back. Write
+      it in the caller (`develop-branch: ''`); a workflow_dispatch input left empty takes its default.
     required: false
     default: 'develop'
   publish:
