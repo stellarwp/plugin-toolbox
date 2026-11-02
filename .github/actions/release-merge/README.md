@@ -33,6 +33,9 @@ It is the part of a deploy that is the same for every plugin repository, on a ba
 `develop` model or on a base branch alone (`develop-branch: ''` skips the merge back). Building the
 plugin, uploading it anywhere and announcing it are the caller's steps, after the action, on a
 checkout of `base-sha`.
+[`templates/workflows/release.yml`](../../../templates/workflows/release.yml) is the complete deploy
+workflow, this action, the checkout, the build, then release-publish, ready to copy into a plugin
+repository.
 
 ## What it does
 

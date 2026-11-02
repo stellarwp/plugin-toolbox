@@ -21,12 +21,30 @@ the title, the notes and the assets the caller chooses. It is the second half of
       build/my-plugin.zip
 ```
 
-`target` is the commit the release is made at: release-merge's `base-sha` output, or a branch name
-for a release a person merged by hand. The tag is made at that commit, whatever the branch points
-to by the time this runs. [`templates/workflows/release-publish.yml`](../../../templates/workflows/release-publish.yml)
-is a complete workflow around this action alone, for the hand-merged release, ready to copy into a
-plugin repository; a repository that merges with release-merge adds this action to that workflow,
-after its build, as above.
+`target` is the commit the release is made at: release-merge's `base-sha` output, as above, which is
+also the commit the build between the two actions came from. The tag is made at that commit,
+whatever the base branch points to by the time this runs.
+[`templates/workflows/release.yml`](../../../templates/workflows/release.yml) is the complete deploy
+workflow around the two actions, ready to copy into a plugin repository.
+
+The action also runs on its own, for a release a person merged by hand: check out the branch,
+record its commit, and pass that as `target` (a branch name would be resolved to its tip when the
+action runs, after the checkout):
+
+```yaml
+- uses: actions/checkout@v6
+  with:
+    ref: ${{ inputs.branch }}
+    persist-credentials: false
+
+- id: head
+  run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+- uses: stellarwp/plugin-toolbox/.github/actions/release-publish@v1
+  with:
+    version: ${{ inputs.version }}
+    target: ${{ steps.head.outputs.sha }}
+```
 
 ## What it does
 
