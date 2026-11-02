@@ -95,6 +95,28 @@ function validateBranch(branch, input) {
 }
 
 /**
+ * Reads the commit the release is published at, the merge step's `base-sha` output.
+ *
+ * @param {string} sha The output value.
+ *
+ * @throws {Error} When it is not a full commit hash.
+ *
+ * @returns {string} The hash.
+ */
+function validateSha(sha) {
+  const trimmed = String(sha ?? '').trim()
+
+  if (!/^[0-9a-f]{40}$/.test(trimmed)) {
+    throw new Error(
+      `'${trimmed}' is not the commit to publish at: expected the merge step's base-sha output, a full ` +
+        'commit hash. Nothing was published.'
+    )
+  }
+
+  return trimmed
+}
+
+/**
  * Reads the `publish` input.
  *
  * @param {string} input The input: empty, `true` or `false`.
@@ -470,6 +492,11 @@ async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
     label: branch,
   })
 
+  // The commit the release is published at: the merge commit, or the base's tip on a retry that
+  // found the merge done. The publish step tags this commit, not whatever the base branch points
+  // at when it runs, and it is also the commit the caller builds from.
+  const baseSha = (await gitOrFail(exec, ['rev-parse', 'HEAD'], { cwd, silent: true }, `Reading the merged ${base} commit`)).trim()
+
   await gitOrFail(exec, ['checkout', '--quiet', '-B', develop, `origin/${develop}`], { cwd }, `Checking out ${develop}`)
   const mergedDevelop = await mergeAndPush({
     core,
@@ -487,6 +514,7 @@ async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
   core.setOutput('branch', branch)
   core.setOutput('version', version)
   core.setOutput('base-branch', base)
+  core.setOutput('base-sha', baseSha)
   core.setOutput('develop-branch', develop)
   core.setOutput('conflict', '')
 
@@ -508,7 +536,8 @@ async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
  * @param {object} options.core   The @actions/core toolkit, for the log, the outputs and the summary.
  * @param {object} options.env    The environment the action manifest put the merge step's outputs in.
  *
- * @throws {Error} When `publish` is not true or false, or an API call fails.
+ * @throws {Error} When `publish` is not true or false, the merged commit is missing, or an API call
+ *                 fails.
  *
  * @returns {Promise<void>} Resolves once the release exists, or was found unnecessary.
  */
@@ -516,6 +545,7 @@ async function runPublish({ github, core, env }) {
   const publish = readPublish(env.INPUT_PUBLISH)
   const version = validateVersion(env.INPUT_VERSION)
   const base = validateBranch(env.INPUT_BASE_BRANCH, 'base-branch')
+  const sha = validateSha(env.INPUT_BASE_SHA)
 
   if (!publish) {
     core.info(`publish is false: the GitHub release for ${version} was not created.`)
@@ -547,25 +577,29 @@ async function runPublish({ github, core, env }) {
     return
   }
 
+  // The tag is made at the commit the merge step left the base on, so it points at the release
+  // even if the base branch moved while this step ran.
   const { data: notes } = await github.rest.repos.generateReleaseNotes({
     owner,
     repo,
     tag_name: version,
-    target_commitish: base,
+    target_commitish: sha,
   })
   const { data: release } = await github.rest.repos.createRelease({
     owner,
     repo,
     tag_name: version,
-    target_commitish: base,
+    target_commitish: sha,
     name: version,
     body: notes.body,
   })
 
-  core.info(`Published ${version}: ${release.html_url}`)
+  core.info(`Published ${version} at ${sha.slice(0, 7)}: ${release.html_url}`)
   core.setOutput('published', 'true')
   core.setOutput('release-url', release.html_url)
-  await core.summary.addRaw(`Published release ${version} on \`${base}\`: ${release.html_url}`, true).write()
+  await core.summary
+    .addRaw(`Published release ${version} on \`${base}\` at \`${sha.slice(0, 7)}\`: ${release.html_url}`, true)
+    .write()
 }
 
 module.exports = {
@@ -574,6 +608,7 @@ module.exports = {
   runPreflight,
   validateVersion,
   validateBranch,
+  validateSha,
   readPublish,
   authorizationHeader,
   gitAuthEnv,

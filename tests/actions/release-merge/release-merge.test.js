@@ -13,6 +13,7 @@ const {
   runPreflight,
   validateVersion,
   validateBranch,
+  validateSha,
   readPublish,
   authorizationHeader,
   gitAuthEnv,
@@ -182,11 +183,15 @@ function publishEnv(overrides = {}) {
   return {
     INPUT_VERSION: '4.17.0',
     INPUT_BASE_BRANCH: 'main',
+    INPUT_BASE_SHA: MERGED_SHA,
     INPUT_PUBLISH: 'true',
     GITHUB_REPOSITORY: 'stellarwp/plugin',
     ...overrides,
   }
 }
+
+/** The merge commit the merge step hands the publish step, as `base-sha`. */
+const MERGED_SHA = '0123456789abcdef0123456789abcdef01234567'
 
 /** The .puprc of the fixture: the plugin header and the readme's Stable tag hold the version. */
 const PUPRC = {
@@ -273,6 +278,15 @@ describe('release-merge', () => {
 
     it('refuses a full ref, naming the branch to pass instead', () => {
       assert.throws(() => validateBranch('refs/heads/main', 'base-branch'), /pass the branch name.*'main'/s)
+    })
+  })
+
+  describe('validateSha', () => {
+    it('takes a full commit hash and nothing else', () => {
+      assert.strictEqual(validateSha(` ${MERGED_SHA} `), MERGED_SHA)
+      for (const value of ['', 'main', MERGED_SHA.slice(0, 7), MERGED_SHA.toUpperCase()]) {
+        assert.throws(() => validateSha(value), /not the commit to publish at/)
+      }
     })
   })
 
@@ -402,6 +416,8 @@ describe('release-merge', () => {
         branch: 'release/M26.test',
         version: '4.17.0',
         'base-branch': 'main',
+        // The merge commit on the remote: what the publish step tags and the caller builds from.
+        'base-sha': git(bare, 'rev-parse', 'main'),
         'develop-branch': 'develop',
         conflict: '',
       })
@@ -467,6 +483,8 @@ describe('release-merge', () => {
       assert.strictEqual(git(bare, 'rev-parse', 'develop'), develop)
       assert.match(retry.logged(), /main already has release\/M26\.test/)
       assert.strictEqual(retry.outputs().conflict, '')
+      // Nothing was merged, so the commit to publish at is the base's tip, the one holding the release.
+      assert.strictEqual(retry.outputs()['base-sha'], main)
     })
 
     it('says so when the release is already published from this branch, so the publish step is expected to skip it', async (t) => {
@@ -704,7 +722,7 @@ describe('release-merge', () => {
   })
 
   describe('runPublish', () => {
-    it('publishes the release on the base, titled with the version, with generated notes', async (t) => {
+    it('publishes the release at the merged commit, titled with the version, with generated notes', async (t) => {
       const { github, requests } = await octokitFor([
         { method: 'POST', path: API.notes, body: { name: '4.17.0', body: '## What changed\n* Fix (#12)' } },
         { method: 'POST', path: API.releases, status: 201, body: { html_url: RELEASE_URL } },
@@ -714,15 +732,17 @@ describe('release-merge', () => {
       await runPublish({ github, core, env: publishEnv() })
 
       assert.deepStrictEqual(requested(requests), [`GET ${API.releaseByTag}`, `POST ${API.notes}`, `POST ${API.releases}`])
-      assert.deepStrictEqual(requests[1].body, { tag_name: '4.17.0', target_commitish: 'main' })
+      // The merge step's commit, not the base branch's name: a commit pushed to main between the
+      // merge and this step is not what gets tagged.
+      assert.deepStrictEqual(requests[1].body, { tag_name: '4.17.0', target_commitish: MERGED_SHA })
       assert.deepStrictEqual(requests[2].body, {
         tag_name: '4.17.0',
-        target_commitish: 'main',
+        target_commitish: MERGED_SHA,
         name: '4.17.0',
         body: '## What changed\n* Fix (#12)',
       })
       assert.deepStrictEqual(outputs(), { published: 'true', 'release-url': RELEASE_URL })
-      assert.match(summary(), /Published.*4\.17\.0/s)
+      assert.match(summary(), /Published.*4\.17\.0.*0123456/s)
     })
 
     it('skips a release that already exists, so a retry succeeds', async (t) => {
@@ -745,6 +765,15 @@ describe('release-merge', () => {
       assert.deepStrictEqual(requests, [])
       assert.deepStrictEqual(outputs(), { published: 'false', 'release-url': '' })
       assert.match(logged(), /publish is false/)
+    })
+
+    it('refuses to publish without the merged commit, rather than tagging the base branch tip', async (t) => {
+      const { github, requests } = await octokitFor([])
+      const { core } = await coreWithOutputs(t)
+
+      await assert.rejects(runPublish({ github, core, env: publishEnv({ INPUT_BASE_SHA: '' }) }), /not the commit to publish at.*base-sha/s)
+      await assert.rejects(runPublish({ github, core, env: publishEnv({ INPUT_BASE_SHA: 'main' }) }), /'main' is not the commit/)
+      assert.deepStrictEqual(requests, [])
     })
 
     it('fails on an API error reading the release rather than publishing twice', async (t) => {

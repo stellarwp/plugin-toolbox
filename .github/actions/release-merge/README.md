@@ -37,9 +37,10 @@ In this order, stopping at the first failure:
    (release/…)`, and pushes it. The base branch rather than the release branch, so develop
    descends from the base and consecutive releases bring one version bump each instead of
    divergent copies of the same generated lines.
-5. Publishes the GitHub release: tag and title are the version, target is the base branch, the notes
-   are the ones GitHub generates from the pull requests since the previous release. Skipped with
-   `publish: false`.
+5. Publishes the GitHub release: tag and title are the version, the tag is made at the commit step
+   3 left the base branch on (the merge commit, so a pull request merged into the base meanwhile is
+   not what gets tagged), the notes are the ones GitHub generates from the pull requests since the
+   previous release. Skipped with `publish: false`.
 
 The checkout is left on the base branch at the merged commit, clean. The merge commits are made by
 `github-actions[bot]`; the pushes and the release are made by the identity of `token`, also
@@ -127,12 +128,13 @@ two different branches, and the release branch cannot be either of them.
 |---|---|
 | `version` | The version released. |
 | `branch` | The release branch merged. |
+| `base-sha` | The commit on the base branch that holds the release: the merge commit, or the base's tip on a retry that found the merge done. The release is published at it, and the checkout is left on it. |
 | `conflict` | The branch a merge conflicted on, or empty. A conflict fails the step, so read it with `continue-on-error` or in a later `if: failure()` step. |
 | `published` | `true` when the release was created, `skipped` when it already existed, `false` when `publish` was false. |
 | `release-url` | The release page, empty when `publish` was false. |
 
 The merge step also sets `base-branch` and `develop-branch` as step outputs, for the publish step;
-the action does not expose them.
+the action does not expose them. `base-sha` is set the same way and is also an output of the action.
 
 ## One deploy at a time
 

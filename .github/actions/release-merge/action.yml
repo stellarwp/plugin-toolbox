@@ -56,6 +56,12 @@ outputs:
   branch:
     description: 'The release branch merged.'
     value: ${{ steps.merge.outputs.branch }}
+  base-sha:
+    description: >-
+      The commit on the base branch that holds the release: the merge commit, or the base's tip on a
+      retry that found the merge already done. The release is published at this commit, and it is the
+      commit the checkout is left on.
+    value: ${{ steps.merge.outputs.base-sha }}
   conflict:
     description: >-
       Which branch a merge conflicted on, `main` or `develop` for the defaults, or empty when both
@@ -102,9 +108,11 @@ runs:
       env:
         ACTION_PATH: ${{ github.action_path }}
         # The values the merge step validated, not the raw inputs. base-branch and develop-branch
-        # are outputs of that step for this hand-over only; the action exposes neither.
+        # are outputs of that step for this hand-over only; the action exposes neither. base-sha is
+        # the commit the release is published at.
         INPUT_VERSION: ${{ steps.merge.outputs.version }}
         INPUT_BASE_BRANCH: ${{ steps.merge.outputs.base-branch }}
+        INPUT_BASE_SHA: ${{ steps.merge.outputs.base-sha }}
         INPUT_PUBLISH: ${{ inputs.publish }}
       with:
         github-token: ${{ inputs.token }}
