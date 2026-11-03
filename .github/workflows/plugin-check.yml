@@ -7,7 +7,7 @@ name: Plugin Check
 # templates/workflows/plugin-check.yml.
 #
 # The plugin is built with pup by default (`composer -- pup build`, then `pup package`), so the
-# repository's .puprc and .distignore decide what is checked, the same as the release. A repository
+# repository's .puprc and ignore files decide what is checked, the same as the release. A repository
 # without pup passes `build-command` instead; see the plugin-check-report README.
 #
 # Three jobs, so the third-party action never holds a token that can write. The comments are written
@@ -258,7 +258,7 @@ jobs:
           restore-keys: |
             plugin-check-${{ runner.os }}-${{ hashFiles('source/package-lock.json', 'source/bun.lock', 'source/bun.lockb') }}-
 
-      # The same pup steps the release zip uses, so .puprc and .distignore decide what is checked.
+      # The same pup steps the release zip uses, so .puprc and the ignore files decide what is checked.
       # The secrets reach this step only, never the job, so the third-party action later in this
       # job does not see them in its environment.
       - name: Build the plugin
@@ -308,7 +308,7 @@ jobs:
             line=$(echo "$line" | xargs)
             [ -n "$line" ] || continue
             if [ -e "$dir/$line" ]; then
-              echo "::error title=Plugin Check::The cache path $line is inside the built plugin. Add it to .distignore."
+              echo "::error title=Plugin Check::The cache path $line is inside the built plugin. Add it to .distignore or to .gitattributes with export-ignore."
               exit 1
             fi
           done <<< "$CACHE_PATHS"
