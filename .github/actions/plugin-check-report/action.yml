@@ -5,7 +5,8 @@
 #
 # It does not run Plugin Check and it does not post the comment. The reusable workflow
 # .github/workflows/plugin-check.yml does both, so this action stays usable with a results file
-# from anywhere.
+# from anywhere. It does write the comment's body, with the "Check Finished" badge, and a body that
+# says Plugin Check could not run when there was nothing to compare.
 #
 # The work is in one JavaScript file next to this file, plugin-check-report.js. Each step below is
 # an actions/github-script step that requires it by path, so there is nothing to build: the file in
@@ -44,10 +45,6 @@ inputs:
       leaves room for the work around the wait.
     required: false
     default: '1200'
-  badge-url:
-    description: 'Image URL shown under the status line of the comment. Empty shows none.'
-    required: false
-    default: ''
   token:
     description: >-
       Token that lists earlier runs and downloads their artifacts. It needs `actions: read`.
@@ -150,10 +147,25 @@ runs:
         COMMENT_MARKER: ${{ steps.paths.outputs.marker }}
         BASELINE_LABEL: ${{ steps.baseline.outputs.label }}
         BASELINE_URL: ${{ steps.baseline.outputs.url }}
-        COMMENT_BADGE: ${{ inputs.badge-url }}
         ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       with:
         script: |
           const { runCompare } = require(`${process.env.ACTION_PATH}/plugin-check-report.js`)
           process.exitCode = runCompare({ core, env: process.env })
+
+    # When the build or the check broke, the compare wrote no body. Say so, instead of leaving "in
+    # progress" behind. Runs after a failed step too, but not when the run was cancelled. A body the
+    # compare wrote is left as it is.
+    - name: Write the comment if the compare could not run
+      if: ${{ !cancelled() && inputs.comment-file != '' }}
+      uses: actions/github-script@v9
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        COMMENT_FILE: ${{ inputs.comment-file }}
+        COMMENT_MARKER: ${{ inputs.comment-marker || format('<!-- plugin-check:{0} -->', github.repository) }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      with:
+        script: |
+          const { runCouldNotRun } = require(`${process.env.ACTION_PATH}/plugin-check-report.js`)
+          process.exitCode = runCouldNotRun({ core, env: process.env })

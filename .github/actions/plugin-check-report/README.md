@@ -136,6 +136,13 @@ grows past 15 lines. Pull requests from forks get no comment: their token cannot
 The workflow writes it with the [pr-comment](../pr-comment/) action. The comment is found by its
 first line, not by its author.
 
+The action builds the body. Under the status line it puts a "Check Finished" badge with the time in
+Eastern Time (`06:08 PM EDT` in summer, `EST` in winter), made by `finishBadge()` in
+`plugin-check-report.js`, so no caller passes one. When the build or the check broke and there was
+nothing to compare, the action writes a short body instead, "Plugin Check could not run" with the
+same badge and a link to the run, so "in progress" never stays on the pull request. A body the
+compare wrote is never replaced.
+
 ## The check name
 
 A job in a called workflow reports as `<caller job id> / <job name>`. With the template's job id,
@@ -185,7 +192,6 @@ not start the run. The job that runs the Plugin Check action lowers itself to `c
 | `mode` | no | `baseline` | `baseline` or `strict` |
 | `comment-marker` | no | `<!-- plugin-check:<owner>/<repo> -->` | First line of the comment body |
 | `baseline-wait` | no | `1200` | Seconds to wait for the base commit's run. A whole number, or the check fails |
-| `badge-url` | no | none | Image under the status line |
 | `token` | no | `github.token` | Needs `actions: read` |
 
 | Output | What it is |
@@ -240,6 +246,8 @@ show with a hand-edited baseline or an odd results file, except the first two:
   to use.
 - The `workflow-file` input is gone. The runs that hold the baseline are the calling workflow's,
   which the run itself knows.
+- The `badge-url` input is gone. The action makes the "Check Finished" badge itself, and also writes
+  the "could not run" body that a shell step in the workflow wrote before. Both look as they did.
 - A rule with an empty code is counted like any other. Bash misread its row and showed wrong totals.
 - A count in the baseline that is not a whole number (such as `1.5`) fails the compare with exit
   status 1. Bash printed an arithmetic error and passed with zero totals. A count written as `1.0`
@@ -252,7 +260,7 @@ show with a hand-edited baseline or an odd results file, except the first two:
 ## How it is tested
 
 The work is in `plugin-check-report.js`: small functions that take plain values, so a test calls
-them directly. `tests/actions/plugin-check-report/` has three files, run with `node --test`:
+them directly. `tests/actions/plugin-check-report/` has four files, run with `node --test`:
 
 - `compare.test.js` runs the compare in-process on the sample results files in `fixtures/`, and
   checks the comment, the job summary and the annotations against the exact files in
@@ -260,6 +268,9 @@ them directly. `tests/actions/plugin-check-report/` has three files, run with `n
   JavaScript prints what it printed.
 - `fetch.test.js` runs the lookup against a real GitHub client with the network replaced by written
   answers, a fake clock for the wait, and a stand-in for the `gh` download.
-- `action.test.js` calls the four step functions the way `actions/github-script` does.
+- `action.test.js` calls the step functions the way `actions/github-script` does.
+- `badge.test.js` checks the badge URL against what the old shell step printed, from the real
+  `date` command, for both sides of both daylight saving changes, midnight, noon and the end of a
+  year. It also covers the "could not run" body.
 
 No `jq` or `bash` is needed.

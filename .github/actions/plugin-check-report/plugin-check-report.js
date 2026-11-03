@@ -1454,10 +1454,122 @@ async function runFetch({ github, core, exec, env, now, sleep }) {
  *
  * @returns {number} The exit status.
  */
-function runCompare({ core, env }) {
+function runCompare({ core, env, now }) {
   const args = env.COMMENT_FILE ? ['--comment-file', env.COMMENT_FILE] : []
 
-  return compare({ args: [...args, env.RESULTS ?? ''], env, log: actionLog(core) })
+  // The comment always shows the finish badge, so the action makes it: no caller passes one.
+  return compare({
+    args: [...args, env.RESULTS ?? ''],
+    env: { ...env, COMMENT_BADGE: finishBadge(now) },
+    log: actionLog(core),
+  })
+}
+
+/** The time zone of the time on the badges. */
+const BADGE_TIME_ZONE = 'America/New_York'
+
+/**
+ * The time on a badge, like `11/03 06:08 PM EST`: month and day, a 12-hour clock, and the zone's
+ * short name, which is EST in winter and EDT in summer. It is what `date '+%m/%d %I:%M %p %Z'` prints
+ * with `LC_ALL=C` and `TZ=America/New_York`.
+ *
+ * Tested for the default zone only. A zone whose short name Intl writes as `GMT+1` would need the
+ * `+` and the `-` of a shields.io badge escaped.
+ *
+ * @param {Date}   now      The moment.
+ * @param {string} timeZone An IANA time zone.
+ *
+ * @returns {string} The time, not yet escaped for a URL.
+ */
+function badgeStamp(now, timeZone) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+      timeZoneName: 'short',
+    })
+      .formatToParts(now)
+      .map(({ type, value }) => [type, value])
+  )
+
+  return `${parts.month}/${parts.day} ${parts.hour}:${parts.minute} ${parts.dayPeriod} ${parts.timeZoneName}`
+}
+
+/**
+ * The "Check Finished" badge shown under the status line of the comment: a shields.io image with
+ * the time the check finished. Only a space and a slash are escaped, as the shell step this
+ * replaced did, so the colon of the time stays as it is.
+ *
+ * The workflow's "Check Started" badge in the `start` job is made by a shell step of the same
+ * shape. That job has no checkout to run this file from.
+ *
+ * @param {Date}   now      The moment. Default: now.
+ * @param {string} timeZone An IANA time zone. Default: America/New_York.
+ *
+ * @returns {string} The image URL.
+ */
+function finishBadge(now = new Date(), timeZone = BADGE_TIME_ZONE) {
+  const stamp = badgeStamp(now, timeZone).replace(/ /g, '%20').replace(/\//g, '%2F')
+
+  return `https://img.shields.io/badge/Check%20Finished-${stamp}-darkgreen`
+}
+
+/**
+ * The comment for a run that could not compare anything: the build or the check broke before the
+ * results existed, or the compare refused its settings.
+ *
+ * @param {object} input
+ * @param {string} input.marker The hidden first line.
+ * @param {string} input.badge  The badge URL.
+ * @param {string} input.runUrl The link to the workflow run.
+ *
+ * @returns {string} The Markdown body, with a final line break.
+ */
+function couldNotRunComment({ marker, badge, runUrl }) {
+  return `${marker}\n❌ Plugin Check could not run\n\n![Plugin Check finished](${badge})\n\n📎 [Run](${runUrl})\n`
+}
+
+/**
+ * The step after the compare: when the compare wrote no comment body, says so, instead of leaving
+ * "in progress" on the pull request. A body that exists and is not empty is left alone, whatever
+ * the verdict was.
+ *
+ * @param {object} input
+ * @param {object} input.core The toolkit.
+ * @param {object} input.env  COMMENT_FILE, COMMENT_MARKER, RUN_URL and GITHUB_REPOSITORY.
+ * @param {Date}   input.now  Optional clock.
+ *
+ * @returns {number} 0, or 1 when the file cannot be written.
+ */
+function runCouldNotRun({ core, env, now }) {
+  const file = env.COMMENT_FILE ?? ''
+  if (!file) {
+    return 0
+  }
+
+  try {
+    if (fs.statSync(file).size > 0) {
+      return 0
+    }
+  } catch {
+    // No file: write it.
+  }
+
+  const marker = env.COMMENT_MARKER || `<!-- plugin-check:${env.GITHUB_REPOSITORY} -->`
+  try {
+    writeText(file, couldNotRunComment({ marker, badge: finishBadge(now), runUrl: env.RUN_URL ?? '' }), 'write')
+  } catch (error) {
+    core.error(error.message, { title: TITLE })
+
+    return 1
+  }
+  core.info('The compare wrote no comment, so the comment says Plugin Check could not run.')
+
+  return 0
 }
 
 /**
@@ -1566,7 +1678,9 @@ module.exports = {
   CheckFailure,
   MODES,
   actionLog,
+  BADGE_TIME_ZONE,
   asciiLower,
+  badgeStamp,
   buildComment,
   buildRows,
   change,
@@ -1577,11 +1691,13 @@ module.exports = {
   compareCodePoints,
   countPerCode,
   countRuns,
+  couldNotRunComment,
   cutBytes,
   describeBaseline,
   displayCode,
   evaluate,
   fetchBaseline,
+  finishBadge,
   formatBaseline,
   isOwnRun,
   linksLine,
@@ -1593,6 +1709,7 @@ module.exports = {
   readJsonValues,
   readWholeNumber,
   runCompare,
+  runCouldNotRun,
   runFetch,
   runPaths,
   runUpdate,
