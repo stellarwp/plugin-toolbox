@@ -201,34 +201,4 @@ function expectedFor(name) {
   }
 }
 
-/**
- * Writes the pinned files from a run of the script under test. Only the original bash script is
- * allowed to make them: run it once, review the diff, and commit.
- *
- * @param {object[]} outcomes `{name, result}` for each case.
- */
-function writeExpected(outcomes) {
-  fs.mkdirSync(EXPECTED, { recursive: true })
-  const statuses = {}
-
-  for (const { name, result } of outcomes) {
-    statuses[name] = result.status
-    for (const [extension, text] of [
-      ['out', result.stdout],
-      ['md', result.comment],
-      ['summary', result.summary],
-      ['json', result.baseline],
-    ]) {
-      const file = path.join(EXPECTED, `${name}.${extension}`)
-      if (text === '') {
-        fs.rmSync(file, { force: true })
-      } else {
-        fs.writeFileSync(file, text)
-      }
-    }
-  }
-
-  fs.writeFileSync(path.join(EXPECTED, 'status.json'), `${JSON.stringify(statuses, null, 2)}\n`)
-}
-
-module.exports = { CASES, FIXTURES, expectedFor, runCase, writeExpected }
+module.exports = { CASES, FIXTURES, expectedFor, runCase }
