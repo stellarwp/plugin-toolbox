@@ -4,8 +4,8 @@ name: Release
 # merges the release and publishes it on GitHub: the release branch into the base branch (`main`
 # here, `master` in some repositories), the base branch back into develop, then the GitHub release
 # for the version at the merged commit, with the build attached. The build itself is the plugin's:
-# add it between the two actions, on the checkout release-merge leaves on the base branch, and
-# attach its result with `files`.
+# add it between the checkout of the merged commit and release-publish, and attach its result with
+# `files`.
 #
 # A file to copy into .github/workflows/ of a plugin repository, not a workflow to call. Rename the
 # base branch below where it is `master`.
@@ -49,7 +49,7 @@ jobs:
     # dispatches on.
     environment: live
     permissions:
-      contents: write # release-merge pushes the merges, release-publish creates the tag and the release
+      contents: write # release-merge writes the merges, release-publish creates the tag and the release
     steps:
       # The environment's branch policy protects the branch the run was started on, not the input.
       # The two have to be the same branch, so the policy covers what is actually merged and
@@ -64,12 +64,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@v6
-        with:
-          # release-merge fetches the branches it merges and pushes them with the token it is given, so
-          # the checkout keeps no credentials in .git/config for a later step to find.
-          persist-credentials: false
-
+      # The merges go through the GitHub API: no checkout is needed before this step.
       - uses: stellarwp/plugin-toolbox/.github/actions/release-merge@v1
         id: merge
         with:
@@ -78,8 +73,12 @@ jobs:
           # base-branch: master
           # develop-branch: '' # for a repository without a develop branch
 
-      # The checkout is now on the merged base branch: build and deploy from here, so the release
-      # below is published only once the build exists, with it attached.
+      # The merged commit, the one the release is published at: build and deploy from it, so the
+      # release below is published only once the build exists, with it attached.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.merge.outputs.base-sha }}
+          persist-credentials: false
 
       - uses: stellarwp/plugin-toolbox/.github/actions/release-publish@v1
         id: release

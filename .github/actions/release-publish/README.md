@@ -11,7 +11,11 @@ the title, the notes and the assets the caller chooses. It is the second half of
     branch: ${{ inputs.branch }}
     version: ${{ inputs.version }}
 
-# Build the plugin here, from the checkout the merge left on the base branch.
+- uses: actions/checkout@v6
+  with:
+    ref: ${{ steps.merge.outputs.base-sha }}
+
+# Build the plugin here, from the merged commit.
 
 - uses: stellarwp/plugin-toolbox/.github/actions/release-publish@v1
   with:
@@ -22,7 +26,7 @@ the title, the notes and the assets the caller chooses. It is the second half of
 ```
 
 `target` is the commit the release is made at: release-merge's `base-sha` output, as above, which is
-also the commit the build between the two actions came from. The tag is made at that commit,
+also the commit checked out and built between the two actions. The tag is made at that commit,
 whatever the base branch points to by the time this runs.
 [`templates/workflows/release.yml`](../../../templates/workflows/release.yml) is the complete deploy
 workflow around the two actions, ready to copy into a plugin repository.
