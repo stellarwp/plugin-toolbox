@@ -242,7 +242,8 @@ show with a hand-edited baseline or an odd results file, except the first two:
   which the run itself knows.
 - A rule with an empty code is counted like any other. Bash misread its row and showed wrong totals.
 - A count in the baseline that is not a whole number (such as `1.5`) fails the compare with exit
-  status 1. Bash printed an arithmetic error and passed with zero totals.
+  status 1. Bash printed an arithmetic error and passed with zero totals. A count written as `1.0`
+  or `1e2` is read as the whole number it is.
 
 - A baseline count above 9007199254740991 (2^53 - 1) fails the compare with exit status 5 and says
   so. JavaScript cannot hold a larger number exactly, so a comment would show another number. Bash
