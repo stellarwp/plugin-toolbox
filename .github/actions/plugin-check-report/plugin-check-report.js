@@ -1572,6 +1572,159 @@ function runCouldNotRun({ core, env, now }) {
   return 0
 }
 
+/** The file a repository keeps its excluded checks in, at its root. */
+const EXCLUDE_FILE = '.plugin-check.json'
+
+/**
+ * The checks to skip, from the workflow input: one per line. A comma works too, because the Plugin
+ * Check action turns the lines into a comma list. Blank lines and repeats are dropped.
+ *
+ * @param {string} text The input.
+ *
+ * @returns {string[]} The check names, in order.
+ */
+function parseExcludeInput(text) {
+  return [...new Set(text.split(/[\r\n,]+/).map((line) => line.trim()).filter(Boolean))]
+}
+
+/**
+ * The checks to skip, from the repository's `.plugin-check.json`:
+ * `{"exclude-checks": ["check_a", "check_b"]}`. Other keys are ignored, so the file can grow. A
+ * missing `exclude-checks` key means none. Repeats are dropped.
+ *
+ * @param {string} text The file's contents.
+ * @param {string} name What to call the file in a message.
+ *
+ * @returns {string[]} The check names, in order.
+ *
+ * @throws {CheckFailure} When the file cannot be used. The message says what to fix.
+ */
+function parseExcludeFile(text, name = EXCLUDE_FILE) {
+  let data
+  try {
+    data = JSON.parse(text)
+  } catch (error) {
+    throw new CheckFailure(`${name} is not valid JSON: ${error.message}`, 1)
+  }
+
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    throw new CheckFailure(`${name} must hold a JSON object, like {"exclude-checks": ["check_name"]}.`, 1)
+  }
+
+  const list = data['exclude-checks']
+  if (list === undefined) {
+    return []
+  }
+  if (!Array.isArray(list)) {
+    throw new CheckFailure(`"exclude-checks" in ${name} must be a list of check names, like ["check_name"].`, 1)
+  }
+
+  const checks = []
+  for (const entry of list) {
+    const check = typeof entry === 'string' ? entry.trim() : ''
+    if (!check || /[\s,]/.test(check)) {
+      throw new CheckFailure(
+        `"exclude-checks" in ${name} has ${JSON.stringify(entry)}, which is not a check name. Each entry is one text without spaces or commas.`,
+        1
+      )
+    }
+    checks.push(check)
+  }
+
+  return [...new Set(checks)]
+}
+
+/**
+ * Which checks to skip. The workflow input wins when it names any: then the file is not even read.
+ * Otherwise the file is used. With neither, none.
+ *
+ * @param {object}      input
+ * @param {string}      input.input    The workflow input.
+ * @param {string|null} input.fileText The file's contents, or null when there is no file.
+ * @param {string}      input.fileName What to call the file in a message.
+ *
+ * @returns {{checks: string[], source: string}} The check names, and where they came from: `input`,
+ *          `file` or `none`.
+ *
+ * @throws {CheckFailure} When the file is used and cannot be.
+ */
+function excludedChecks({ input = '', fileText = null, fileName = EXCLUDE_FILE }) {
+  const fromInput = parseExcludeInput(input)
+  if (fromInput.length > 0) {
+    return { checks: fromInput, source: 'input' }
+  }
+  if (fileText === null) {
+    return { checks: [], source: 'none' }
+  }
+
+  const checks = parseExcludeFile(fileText, fileName)
+
+  return { checks, source: checks.length > 0 ? 'file' : 'none' }
+}
+
+/**
+ * The file's contents, or null when there is no such file.
+ *
+ * @param {string} file The path.
+ *
+ * @returns {string|null} The text.
+ *
+ * @throws {CheckFailure} When the file exists but cannot be read.
+ */
+function readIfFile(file) {
+  if (!file || !isFile(file)) {
+    return null
+  }
+
+  try {
+    return fs.readFileSync(file, 'utf8')
+  } catch (error) {
+    throw new CheckFailure(`Could not read ${file}: ${error.message}`, 1)
+  }
+}
+
+/**
+ * The step before the Plugin Check action: works out which checks to skip, from the workflow input
+ * or else the repository's `.plugin-check.json`.
+ *
+ * Sets the output `checks`: one name per line, the format the Plugin Check action takes.
+ *
+ * @param {object} input
+ * @param {object} input.core The toolkit.
+ * @param {object} input.env  EXCLUDE_CHECKS (the workflow input) and CONFIG_FILE (the path).
+ *
+ * @returns {number} 0, or 1 when the file cannot be used.
+ */
+function runExcludeChecks({ core, env }) {
+  const file = env.CONFIG_FILE ?? ''
+
+  try {
+    const { checks, source } = excludedChecks({
+      input: env.EXCLUDE_CHECKS ?? '',
+      // Not read when the input names checks: the input replaces the file.
+      fileText: parseExcludeInput(env.EXCLUDE_CHECKS ?? '').length > 0 ? null : readIfFile(file),
+      fileName: path.basename(file) || EXCLUDE_FILE,
+    })
+
+    core.setOutput('checks', checks.join('\n'))
+    core.info(
+      source === 'none'
+        ? 'No checks are excluded.'
+        : `Excluding ${checks.length} check(s) from the ${source === 'input' ? 'exclude-checks input' : path.basename(file)}: ${checks.join(', ')}`
+    )
+
+    return 0
+  } catch (error) {
+    if (error instanceof CheckFailure) {
+      core.error(error.message, { title: TITLE })
+
+      return error.exitCode
+    }
+
+    throw error
+  }
+}
+
 /**
  * A GitHub client for a run on a developer's machine. The token comes from GITHUB_TOKEN, else
  * GH_TOKEN, else the GitHub CLI.
@@ -1662,7 +1815,36 @@ async function main(
     return found.status
   }
 
-  io.err('Usage: plugin-check-report.js compare|fetch ...')
+  // Prints the flag `wp plugin check` takes, so a local run skips the same checks as CI:
+  // `wp plugin check my-plugin $(node plugin-check-report.js exclude-checks)`. Prints nothing when
+  // no check is excluded. EXCLUDE_CHECKS, when set, replaces the file, as the workflow input does.
+  if (command === 'exclude-checks') {
+    const file = args[0] ?? EXCLUDE_FILE
+
+    try {
+      const input = env.EXCLUDE_CHECKS ?? ''
+      const { checks } = excludedChecks({
+        input,
+        fileText: parseExcludeInput(input).length > 0 ? null : readIfFile(file),
+        fileName: file,
+      })
+      if (checks.length > 0) {
+        io.out(`--exclude-checks=${checks.join(',')}`)
+      }
+
+      return 0
+    } catch (error) {
+      if (error instanceof CheckFailure) {
+        log.err(error.message)
+
+        return error.exitCode
+      }
+
+      throw error
+    }
+  }
+
+  io.err('Usage: plugin-check-report.js compare|fetch|exclude-checks ...')
 
   return 2
 }
@@ -1679,6 +1861,7 @@ module.exports = {
   MODES,
   actionLog,
   BADGE_TIME_ZONE,
+  EXCLUDE_FILE,
   asciiLower,
   badgeStamp,
   buildComment,
@@ -1696,6 +1879,7 @@ module.exports = {
   describeBaseline,
   displayCode,
   evaluate,
+  excludedChecks,
   fetchBaseline,
   finishBadge,
   formatBaseline,
@@ -1703,13 +1887,17 @@ module.exports = {
   linksLine,
   main,
   orderCandidates,
+  parseExcludeFile,
+  parseExcludeInput,
   parseFetchArgs,
   parseResults,
   readBaseline,
+  readIfFile,
   readJsonValues,
   readWholeNumber,
   runCompare,
   runCouldNotRun,
+  runExcludeChecks,
   runFetch,
   runPaths,
   runUpdate,

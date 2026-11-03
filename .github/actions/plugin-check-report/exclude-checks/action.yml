@@ -1,0 +1,46 @@
+# Works out which Plugin Check checks to skip: the workflow's `exclude-checks` input when it names
+# any, else the `exclude-checks` list in the repository's .plugin-check.json. The result is in the
+# format wordpress/plugin-check-action takes for its own `exclude-checks` input: one check per
+# line. A bad file fails the step with a message that says what to fix.
+#
+# The work is in plugin-check-report.js, one folder up, which also prints the same list as the
+# `--exclude-checks=a,b` flag of `wp plugin check` for a local run. See the README of
+# plugin-check-report.
+name: Plugin Check excluded checks
+description: Lists the checks to skip, from the exclude-checks input or the repository's .plugin-check.json
+
+inputs:
+  exclude-checks:
+    description: >-
+      Checks to skip, one per line. When it names any check, it replaces the file: the file is not
+      even read.
+    required: false
+    default: ''
+  config-file:
+    description: >-
+      Path of the repository's config file, relative to the workspace. A missing file means no
+      checks are skipped.
+    required: false
+    default: '.plugin-check.json'
+
+outputs:
+  checks:
+    description: 'The checks to skip, one per line. Empty when there are none.'
+    value: ${{ steps.list.outputs.checks }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: List the excluded checks
+      id: list
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in.
+        ACTION_PATH: ${{ github.action_path }}
+        EXCLUDE_CHECKS: ${{ inputs.exclude-checks }}
+        CONFIG_FILE: ${{ inputs.config-file }}
+      with:
+        script: |
+          const { runExcludeChecks } = require(`${process.env.ACTION_PATH}/../plugin-check-report.js`)
+          process.exitCode = runExcludeChecks({ core, env: process.env })
