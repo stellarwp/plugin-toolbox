@@ -1,0 +1,2 @@
+::notice title=Plugin Check::WordPress.DB.DirectDatabaseQuery.DirectQuery has 3 warnings, the baseline has 1. Warnings do not fail the check.
+Plugin Check error counts are within the baseline.

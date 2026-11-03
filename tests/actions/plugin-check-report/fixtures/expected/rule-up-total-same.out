@@ -1,0 +1,3 @@
+::error title=Plugin Check::WordPress.Security.EscapeOutput.OutputNotEscaped has 3 errors, the baseline has 2. The full list is in the plugin-check-results artifact.
+::notice title=Plugin Check::WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents (errors) went down from 1 to 0.
+Plugin Check found more errors than the baseline allows.
