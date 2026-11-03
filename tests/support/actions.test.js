@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test')
 const assert = require('node:assert')
 
-const { actionsFor, coreWithOutputs, recordingExec, isLogWrite } = require('./actions.js')
+const { actionsFor, coreWithOutputs, octokitFor, recordingExec, isLogWrite } = require('./actions.js')
 
 describe('tests/support/actions', () => {
   describe('the captured log', () => {
@@ -50,6 +50,23 @@ describe('tests/support/actions', () => {
       await core.summary.addRaw('a summary line').write()
 
       assert.match(summary(), /a summary line/)
+    })
+  })
+
+  describe('recordingFetch', () => {
+    it('answers a 204 rule with an empty body, as a DELETE does', async () => {
+      const { github, requests } = await octokitFor([
+        { method: 'DELETE', path: '/repos/example-org/my-plugin/issues/comments/42', status: 204 },
+      ])
+
+      const response = await github.rest.issues.deleteComment({
+        owner: 'example-org',
+        repo: 'my-plugin',
+        comment_id: 42,
+      })
+
+      assert.equal(response.status, 204)
+      assert.equal(requests.length, 1)
     })
   })
 
