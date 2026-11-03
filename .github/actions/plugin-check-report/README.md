@@ -28,8 +28,8 @@ jobs:
 - A `.puprc` whose `build` makes the plugin as it ships, and whose `zip_name` equals `plugin-slug`.
   The zip's top folder is named after `zip_name`, and Plugin Check takes the slug from the folder
   name.
-- A `pup` Composer script that puts `pup.phar` in `bin/` and runs it, as Kadence Blocks
-  has:
+- A `pup` Composer script that downloads `pup.phar` when it is missing and then runs it, so one
+  `composer pup` both installs and runs pup. Kadence Blocks has:
 
   ```json
   "pup": [
@@ -38,7 +38,12 @@ jobs:
   ]
   ```
 
-- A `.distignore` (or pup's default ignore list) that keeps dev-only files out of the zip.
+  The script is what matters, but the path is not free yet: the workflow also runs
+  `php bin/pup.phar` itself, to ask pup for the version and the zip name, so keep the phar at
+  `bin/pup.phar`.
+
+- Ignore rules that keep dev-only files out of the zip: a `.distignore`, `export-ignore` lines in
+  `.gitattributes` (pup reads both), or pup's default ignore list.
 - The caller file named `plugin-check.yml`. See [The baseline](#the-baseline).
 
 The JavaScript toolchain comes from files the repository already has: `.nvmrc` sets up Node,
@@ -57,7 +62,7 @@ name=$(php -d display_errors=0 bin/pup.phar zip-name "$version")
 unzip -q "$name.zip" -d "$PLUGIN_CHECK_BUILD_DIR"
 ```
 
-So `.puprc` and `.distignore` decide what is checked. If the release needs a step the check should
+So `.puprc` and the ignore files decide what is checked. If the release needs a step the check should
 see too, such as making the POT file, put it in `.puprc`'s `build`, not in the workflow.
 
 ### `build-command`, for a repository without pup
