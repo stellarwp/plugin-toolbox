@@ -52,7 +52,9 @@ on:
         type: string
         default: ''
       runs-on:
-        description: 'Runner label for the job that builds and checks. The two small jobs run on ubuntu-latest.'
+        description: >-
+          Runner label for the job that builds and checks, of runner version 2.336.0 or newer: the
+          job uses the `$/` reference. The two small jobs run on ubuntu-latest.
         required: false
         type: string
         default: 'ubuntu-latest'
@@ -64,7 +66,10 @@ on:
         type: string
         default: '7.4'
       exclude-checks:
-        description: 'Checks to skip, one per line. Passed to wordpress/plugin-check-action as it is.'
+        description: >-
+          Checks to skip, one per line. When it names any, it replaces the `exclude-checks` list in
+          the repository's `.plugin-check.json`; when empty, that file is used. See the
+          plugin-check-report README.
         required: false
         type: string
         default: ''
@@ -167,6 +172,17 @@ jobs:
           submodules: ${{ inputs.submodules }}
           # Nothing here pushes over git, and the job goes on to run third-party code.
           persist-credentials: false
+
+      # The checks to skip: the `exclude-checks` input when it names any, else the list in the
+      # repository's .plugin-check.json. First, so a bad file fails in seconds, before the build, with
+      # a message that says what to fix. Like the report job, this needs a runner of version 2.336.0
+      # or newer for `$/`; the `runs-on` input says so.
+      - name: List the excluded checks
+        id: exclude
+        uses: $/.github/actions/plugin-check-report/exclude-checks
+        with:
+          exclude-checks: ${{ inputs.exclude-checks }}
+          config-file: ${{ github.workspace }}/source/.plugin-check.json
 
       # The action's wp-env pulls these images when it starts, and pulling them is part of the
       # time that step takes. Started now, in the background, the download overlaps with the
@@ -344,7 +360,7 @@ jobs:
         uses: wordpress/plugin-check-action@v1
         with:
           build-dir: ${{ github.workspace }}/build/${{ inputs.plugin-slug }}
-          exclude-checks: ${{ inputs.exclude-checks }}
+          exclude-checks: ${{ steps.exclude.outputs.checks }}
 
   report:
     name: Plugin Check

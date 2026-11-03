@@ -126,6 +126,39 @@ the caller.
 - `strict`: fail on any error. The comment still compares with the baseline. Switch to it once a
   plugin reaches zero errors; a new plugin with zero errors should start there.
 
+## Excluding checks
+
+Some Plugin Check checks do not fit a plugin. Name them in a `.plugin-check.json` at the root of
+the repository:
+
+```json
+{
+  "exclude-checks": ["late_escaping", "i18n_usage"]
+}
+```
+
+One check name per entry, with no spaces or commas. Other keys are ignored, so the file can hold
+more settings later. A missing file, a missing key or an empty list excludes nothing. A file that is
+not valid JSON, or whose entries are not check names, fails the run in seconds, before the build starts,
+with a message that says what to fix.
+
+The workflow's `exclude-checks` input does the same, one check per line. **When the input names any
+check, it replaces the file** (the file is not even read). When it is empty, the file is used.
+
+The same list is available for a local run. This prints the flag `wp plugin check` takes, or
+nothing when no check is excluded:
+
+```bash
+node .github/actions/plugin-check-report/plugin-check-report.js exclude-checks
+# --exclude-checks=late_escaping,i18n_usage
+
+npx wp-env run cli wp plugin check my-plugin --format=json \
+  $(node .github/actions/plugin-check-report/plugin-check-report.js exclude-checks) > results.txt
+```
+
+It reads `.plugin-check.json` in the current folder, or the file named after it. The environment
+variable `EXCLUDE_CHECKS` plays the part of the workflow input.
+
 ## The comment
 
 One comment per pull request, replaced on every run, found by a hidden first line:
@@ -155,9 +188,9 @@ the check to require in branch protection is `plugin-check / Plugin Check`.
 | `plugin-slug` | required | The plugin's folder name. Equals `zip_name` in `.puprc` |
 | `main-file` | `<plugin-slug>.php` | The main plugin file, checked after the build |
 | `build-command` | empty: pup | A bash command that builds the plugin instead of pup. See [`build-command`](#build-command-for-a-repository-without-pup) |
-| `runs-on` | `ubuntu-latest` | Runner of the job that builds and checks |
+| `runs-on` | `ubuntu-latest` | Runner of the job that builds and checks, of runner version 2.336.0 or newer (the job uses `$/`) |
 | `php-version` | `7.4` | PHP that builds `vendor/`. Use the oldest the plugin supports |
-| `exclude-checks` | empty | Checks to skip, one per line, passed to the Plugin Check action |
+| `exclude-checks` | empty | Checks to skip, one per line. Replaces `.plugin-check.json` when it names any. See [Excluding checks](#excluding-checks) |
 | `cache-paths` | empty | Build caches kept between runs, one path per line, relative to the repository |
 | `mode` | `baseline` | `baseline` or `strict`. See [Modes](#modes) |
 | `submodules` | `false` | Passed to `actions/checkout` |
@@ -203,7 +236,8 @@ not start the run. The job that runs the Plugin Check action lowers itself to `c
 
 You need Node 20 or newer, and for the baseline the GitHub CLI signed in (`gh auth login`). Run
 `npm install` once in the toolbox checkout, which installs the GitHub client the lookup uses. The
-command line takes the same arguments and environment variables as the two bash scripts did.
+`compare` and `fetch` commands take the same arguments and environment variables as the two bash
+scripts did.
 
 1. Build the plugin and run Plugin Check in a local WordPress, for example with wp-env:
 
@@ -260,7 +294,7 @@ show with a hand-edited baseline or an odd results file, except the first two:
 ## How it is tested
 
 The work is in `plugin-check-report.js`: small functions that take plain values, so a test calls
-them directly. `tests/actions/plugin-check-report/` has four files, run with `node --test`:
+them directly. `tests/actions/plugin-check-report/` has five files, run with `node --test`:
 
 - `compare.test.js` runs the compare in-process on the sample results files in `fixtures/`, and
   checks the comment, the job summary and the annotations against the exact files in
@@ -272,5 +306,7 @@ them directly. `tests/actions/plugin-check-report/` has four files, run with `no
 - `badge.test.js` checks the badge URL against what the old shell step printed, from the real
   `date` command, for both sides of both daylight saving changes, midnight, noon and the end of a
   year. It also covers the "could not run" body.
+- `exclude.test.js` covers the config file and the input, every way the file can be wrong, and the
+  command line.
 
 No `jq` or `bash` is needed.
