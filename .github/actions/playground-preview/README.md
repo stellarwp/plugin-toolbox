@@ -41,7 +41,9 @@ jobs:
 - A `.puprc` that builds the plugin, as for the release zip. The zip is built by
   [stellarwp/github-actions' `zip.yml`](https://github.com/stellarwp/github-actions/blob/main/.github/workflows/zip.yml)
   with pup.
-- A `pup` Composer script that puts `pup.phar` in `bin/` and runs it:
+- A `pup` Composer script that downloads `pup.phar` when it is missing and then runs it, so one
+  `composer pup` both installs and runs pup. The workflow also runs `php bin/pup.phar` itself, to
+  ask pup for the zip name, so keep the phar at `bin/pup.phar`:
 
   ```json
   "pup": [
