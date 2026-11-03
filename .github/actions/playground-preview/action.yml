@@ -7,7 +7,8 @@
 # anywhere.
 #
 # The work is in playground-preview.js, run by actions/github-script, so there is nothing to install
-# or build: the file in the repository is the file that runs.
+# or build: the file in the repository is the file that runs. The comment is written by
+# ../pr-comment/pr-comment.js.
 name: Playground preview
 description: Posts the pull request comment with WordPress Playground links for a plugin zip
 
