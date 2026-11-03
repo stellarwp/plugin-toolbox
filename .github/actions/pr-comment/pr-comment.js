@@ -311,7 +311,9 @@ function readNumber(name, value) {
  * @returns {Error} A clearer error for a 403, the same error for anything else.
  */
 function explain(error, target) {
-  if (error.status !== 403) {
+  // Only a refused write. A 403 on the read that lists comments is a missing read permission or a
+  // rate limit, and "cannot write" would send the reader the wrong way.
+  if (error.status !== 403 || !['POST', 'PATCH', 'DELETE'].includes(error.request?.method)) {
     return error
   }
 
@@ -366,7 +368,9 @@ async function run({ github, core, env }) {
   }
 
   const done = (result, comment) => {
-    core.setOutput('result', result)
+    // Not `result`: actions/github-script sets an output of that name itself after the script ends,
+    // which would replace this one with an empty value. action.yml maps `outcome` to `result`.
+    core.setOutput('outcome', result)
     core.setOutput('comment-id', comment?.id ?? '')
     core.setOutput('comment-url', comment?.url ?? comment?.html_url ?? '')
   }

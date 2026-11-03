@@ -358,7 +358,7 @@ describe('pr-comment', () => {
 
       await run({ github, core, env: envFor({ MARKER, BODY: 'text' }) })
 
-      assert.deepEqual(outputs(), { result: 'created', 'comment-id': '6', 'comment-url': 'https://x/6' })
+      assert.deepEqual(outputs(), { outcome: 'created', 'comment-id': '6', 'comment-url': 'https://x/6' })
     })
 
     it('updates when the marker is found', async (t) => {
@@ -369,7 +369,7 @@ describe('pr-comment', () => {
 
       await run({ github, core, env: envFor({ MARKER, BODY: 'new' }) })
 
-      assert.equal(outputs().result, 'updated')
+      assert.equal(outputs().outcome, 'updated')
       assert.equal(outputs()['comment-id'], '5')
     })
 
@@ -394,7 +394,7 @@ describe('pr-comment', () => {
 
       await run({ github, core, env: envFor({ OPERATION: 'find', MARKER }) })
 
-      assert.equal(outputs().result, 'found')
+      assert.equal(outputs().outcome, 'found')
       assert.equal(outputs()['comment-url'], 'https://x/5')
       assert.deepEqual(sequence(requests), [`GET ${COMMENTS}`])
     })
@@ -404,7 +404,7 @@ describe('pr-comment', () => {
 
       await run({ github, core, env: envFor({ OPERATION: 'find', MARKER }) })
 
-      assert.equal(outputs().result, 'not-found')
+      assert.equal(outputs().outcome, 'not-found')
       assert.equal(outputs()['comment-id'], '')
     })
 
@@ -416,7 +416,7 @@ describe('pr-comment', () => {
 
       await run({ github, core, env: envFor({ OPERATION: 'delete', MARKER }) })
 
-      assert.equal(outputs().result, 'deleted')
+      assert.equal(outputs().outcome, 'deleted')
       assert.deepEqual(sequence(requests), [`GET ${COMMENTS}`, `DELETE ${COMMENT(5)}`])
     })
 
@@ -427,7 +427,7 @@ describe('pr-comment', () => {
 
       await run({ github, core, env: envFor({ OPERATION: 'delete', COMMENT_ID: '5', ISSUE_NUMBER: '' }) })
 
-      assert.equal(outputs().result, 'deleted')
+      assert.equal(outputs().outcome, 'deleted')
       assert.deepEqual(sequence(requests), [`DELETE ${COMMENT(5)}`])
     })
 
@@ -436,7 +436,7 @@ describe('pr-comment', () => {
 
       await run({ github, core, env: envFor({ OPERATION: 'delete', MARKER }) })
 
-      assert.equal(outputs().result, 'not-found')
+      assert.equal(outputs().outcome, 'not-found')
     })
 
     it('fails update when there is nothing to update', async (t) => {
@@ -452,7 +452,7 @@ describe('pr-comment', () => {
 
       await run({ github, core, env: envFor({ OPERATION: 'create', BODY: 'one more' }) })
 
-      assert.equal(outputs().result, 'created')
+      assert.equal(outputs().outcome, 'created')
       assert.deepEqual(sequence(requests), ['POST /repos/example-org/my-plugin/issues/12/comments'])
     })
 
@@ -488,6 +488,17 @@ describe('pr-comment', () => {
       await assert.rejects(
         run({ github, core, env: envFor({ MARKER, BODY: 'x' }) }),
         /token cannot write comments on #12.*fork.*pull-requests: write.*Resource not accessible/s
+      )
+    })
+
+    it('does not call a refused read a refused write', async (t) => {
+      const { github, core } = await actionsFor(t, [
+        { method: 'GET', path: COMMENTS, status: 403, body: { message: 'API rate limit exceeded' } },
+      ])
+
+      await assert.rejects(
+        run({ github, core, env: envFor({ MARKER, BODY: 'x' }) }),
+        (error) => /rate limit/.test(error.message) && !/cannot write/.test(error.message)
       )
     })
 

@@ -60,7 +60,8 @@ outputs:
     value: ${{ steps.comment.outputs.comment-url }}
   result:
     description: '`created`, `updated`, `deleted`, `found` or `not-found`.'
-    value: ${{ steps.comment.outputs.result }}
+    # The script's `outcome`, not github-script's own `result`, which is set after the script ends.
+    value: ${{ steps.comment.outputs.outcome }}
 
 runs:
   using: 'composite'
