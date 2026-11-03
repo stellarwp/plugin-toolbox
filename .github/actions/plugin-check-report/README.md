@@ -128,6 +128,9 @@ One comment per pull request, replaced on every run, found by a hidden first lin
 result, the totals, up to five rules that went up, and links to the run and the artifact. It never
 grows past 15 lines. Pull requests from forks get no comment: their token cannot write.
 
+The workflow writes it with the [pr-comment](../pr-comment/) action. The comment is found by its
+first line, not by its author.
+
 ## The check name
 
 A job in a called workflow reports as `<caller job id> / <job name>`. With the template's job id,
