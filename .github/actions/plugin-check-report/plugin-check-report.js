@@ -37,8 +37,11 @@ const MAX_RULES_LISTED = 5
 /** The first unexpected line of a results file is shown cut to this many bytes. */
 const MAX_UNEXPECTED_BYTES = 200
 
-const MODES = ['ratchet', 'strict']
-const DEFAULT_MODE = 'ratchet'
+const MODES = ['baseline', 'strict']
+const DEFAULT_MODE = 'baseline'
+
+/** Modes that were renamed, so the message can say what to use now. */
+const RENAMED_MODES = { ratchet: 'baseline' }
 
 /** A line of Plugin Check output: a file name, a JSON array of its results, or the clean message. */
 const KNOWN_LINE = /^(FILE: |\[|Success:)/
@@ -401,7 +404,7 @@ function buildRows(now, base) {
  *
  * @param {object}  input
  * @param {object[]} input.rows       From buildRows.
- * @param {string}  input.mode        `ratchet` or `strict`.
+ * @param {string}  input.mode        `baseline` or `strict`.
  * @param {boolean} input.advisory    The baseline is from an older commit than the target, so more
  *                                    errors are only reported.
  * @param {boolean} input.noBaseline  There was nothing to compare with: only the totals count.
@@ -506,7 +509,7 @@ function change(now, base) {
  * The totals can go down while a rule goes up, so the status names the rules, not the totals.
  *
  * @param {object}  input
- * @param {string}  input.mode       `ratchet` or `strict`.
+ * @param {string}  input.mode       `baseline` or `strict`.
  * @param {boolean} input.failed     The check fails.
  * @param {boolean} input.noBaseline Nothing was compared.
  * @param {boolean} input.advisory   The baseline is from an older run of the target branch.
@@ -613,7 +616,7 @@ function buildComment({ marker, status, badge, column, noBaseline, totals, wentU
  * @param {object}   input
  * @param {string[]} input.args Arguments: `--update` and `--comment-file <path>` in any order, then
  *                              the results file.
- * @param {object}   input.env  Environment. PLUGIN_CHECK_MODE (`ratchet`, the default, or `strict`),
+ * @param {object}   input.env  Environment. PLUGIN_CHECK_MODE (`baseline`, the default, or `strict`),
  *                              COMMENT_MARKER, PLUGIN_CHECK_BASELINE (default: baseline.json next
  *                              to this file), BASELINE_LABEL, BASELINE_URL, PLUGIN_CHECK_ADVISORY
  *                              (`true` when the baseline is from an older commit than the target),
@@ -650,7 +653,8 @@ function compareOrThrow({ args, env, log }) {
   // Checked before anything else, so a typo in the caller never runs as the default.
   const mode = env.PLUGIN_CHECK_MODE || DEFAULT_MODE
   if (!MODES.includes(mode)) {
-    log.error(`Unknown mode '${mode}'. Use 'ratchet' or 'strict'.`)
+    const renamed = RENAMED_MODES[mode] ? ` '${mode}' is now called '${RENAMED_MODES[mode]}'.` : ''
+    log.error(`Unknown mode '${mode}'. Use 'baseline' or 'strict'.${renamed}`)
 
     return 1
   }
