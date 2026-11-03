@@ -26,7 +26,7 @@ name: Plugin Check
 #
 # Run it locally: see "Running it locally" in .github/actions/plugin-check-report/README.md. In
 # short, `wp plugin check <slug> --format=json > results.txt` in a local WordPress, then
-# `bash .github/actions/plugin-check-report/ratchet.sh results.txt`.
+# `node .github/actions/plugin-check-report/plugin-check-report.js compare results.txt`.
 
 on:
   workflow_call:
