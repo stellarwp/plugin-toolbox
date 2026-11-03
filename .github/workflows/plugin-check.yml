@@ -10,7 +10,8 @@ name: Plugin Check
 # repository's .puprc and .distignore decide what is checked, the same as the release. A repository
 # without pup passes `build-command` instead; see the plugin-check-report README.
 #
-# Three jobs, so the third-party action never holds a token that can write:
+# Three jobs, so the third-party action never holds a token that can write. The comments are written
+# by .github/actions/pr-comment, which calls the GitHub API itself:
 #   start   posts "in progress" on the pull request.
 #   check   builds the plugin and runs wordpress/plugin-check-action. Read-only token.
 #   report  compares the results with the baseline and replaces the comment with the result.
@@ -102,7 +103,7 @@ on:
 
 env:
   # Hidden line that marks the sticky pull request comment. The report action writes it as the
-  # first line of the body, and both comment steps search for it. Named after the repository, so
+  # first line of the body, and the pr-comment action searches for it. Named after the repository, so
   # two plugin repositories never share a marker.
   COMMENT_MARKER: '<!-- plugin-check:${{ github.repository }} -->'
   # Only pull requests from this repository get a comment: a fork's token is read-only.
@@ -128,22 +129,12 @@ jobs:
           stamp=${stamp//\//%2F}
           echo "url=https://img.shields.io/badge/Check%20Started-${stamp}-blue" >> "$GITHUB_OUTPUT"
 
-      - name: Find the Plugin Check comment
-        id: find_comment
-        continue-on-error: true
-        uses: peter-evans/find-comment@v4
-        with:
-          issue-number: ${{ github.event.pull_request.number }}
-          comment-author: 'github-actions[bot]'
-          body-includes: ${{ env.COMMENT_MARKER }}
-
+      # A failed API call here must not stop the check.
       - name: Post "in progress"
         continue-on-error: true
-        uses: peter-evans/create-or-update-comment@v5
+        uses: $/.github/actions/pr-comment
         with:
-          comment-id: ${{ steps.find_comment.outputs.comment-id }}
-          issue-number: ${{ github.event.pull_request.number }}
-          edit-mode: replace
+          marker: ${{ env.COMMENT_MARKER }}
           body: |
             ${{ env.COMMENT_MARKER }}
             ⏳ Plugin Check in progress
@@ -422,22 +413,10 @@ jobs:
             printf '%s\n❌ Plugin Check could not run\n\n![Plugin Check finished](%s)\n\n📎 [Run](%s)\n' "$COMMENT_MARKER" "$BADGE" "$RUN_URL" > "$COMMENT_BODY"
           fi
 
-      - name: Find the Plugin Check comment
-        id: find_comment
-        if: ${{ !cancelled() && env.COMMENT == 'true' }}
-        continue-on-error: true
-        uses: peter-evans/find-comment@v4
-        with:
-          issue-number: ${{ github.event.pull_request.number }}
-          comment-author: 'github-actions[bot]'
-          body-includes: ${{ env.COMMENT_MARKER }}
-
       - name: Post the result
         if: ${{ !cancelled() && env.COMMENT == 'true' }}
         continue-on-error: true
-        uses: peter-evans/create-or-update-comment@v5
+        uses: $/.github/actions/pr-comment
         with:
-          comment-id: ${{ steps.find_comment.outputs.comment-id }}
-          issue-number: ${{ github.event.pull_request.number }}
-          edit-mode: replace
-          body-path: ${{ env.COMMENT_BODY }}
+          marker: ${{ env.COMMENT_MARKER }}
+          body-file: ${{ env.COMMENT_BODY }}
