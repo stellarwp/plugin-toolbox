@@ -379,18 +379,14 @@ jobs:
           name: plugin-check-results
           path: ${{ runner.temp }}/results
 
-      - name: Make the finish badge
-        id: finish_badge
-        run: |
-          stamp=$(LC_ALL=C TZ='America/New_York' date '+%m/%d %I:%M %p %Z')
-          stamp=${stamp// /%20}
-          stamp=${stamp//\//%2F}
-          echo "url=https://img.shields.io/badge/Check%20Finished-${stamp}-darkgreen" >> "$GITHUB_OUTPUT"
-
       # `$/` is this repository at the commit that runs this workflow, so the action is always the
       # same revision as the workflow, whichever ref the caller used, and it needs no checkout. It
       # needs a runner of version 2.336.0 or newer; this job runs on ubuntu-latest. Not ./, which
       # in a called workflow resolves against the caller's repository.
+      #
+      # The action also writes the "Check Finished" badge into the body, and, when the build or the
+      # check broke and there was nothing to compare, a body that says Plugin Check could not run,
+      # so "in progress" never stays on the pull request.
       - name: Compare with the baseline
         uses: $/.github/actions/plugin-check-report
         with:
@@ -398,19 +394,6 @@ jobs:
           comment-file: ${{ env.COMMENT_BODY }}
           comment-marker: ${{ env.COMMENT_MARKER }}
           mode: ${{ inputs.mode }}
-          badge-url: ${{ steps.finish_badge.outputs.url }}
-
-      # When the build or the check broke, the action never wrote a body. Say so instead of leaving
-      # "in progress" behind.
-      - name: Prepare the comment
-        if: ${{ !cancelled() && env.COMMENT == 'true' }}
-        env:
-          BADGE: ${{ steps.finish_badge.outputs.url }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          if [ ! -s "$COMMENT_BODY" ]; then
-            printf '%s\n❌ Plugin Check could not run\n\n![Plugin Check finished](%s)\n\n📎 [Run](%s)\n' "$COMMENT_MARKER" "$BADGE" "$RUN_URL" > "$COMMENT_BODY"
-          fi
 
       - name: Post the result
         if: ${{ !cancelled() && env.COMMENT == 'true' }}
