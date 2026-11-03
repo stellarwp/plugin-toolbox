@@ -184,7 +184,6 @@ not start the run. The job that runs the Plugin Check action lowers itself to `c
 | `comment-file` | no | none | Where to write the comment body |
 | `mode` | no | `ratchet` | `ratchet` or `strict` |
 | `comment-marker` | no | `<!-- plugin-check:<owner>/<repo> -->` | First line of the comment body |
-| `workflow-file` | no | from `GITHUB_WORKFLOW_REF` | Whose runs hold the baseline |
 | `baseline-wait` | no | `1200` | Seconds to wait for the base commit's run. A whole number, or the check fails |
 | `badge-url` | no | none | Image under the status line |
 | `token` | no | `github.token` | Needs `actions: read` |
@@ -196,7 +195,9 @@ not start the run. The job that runs the Plugin Check action lowers itself to `c
 
 ## Running it locally
 
-You need `bash`, `jq`, and for the baseline the GitHub CLI signed in (`gh auth login`).
+You need Node 20 or newer, and for the baseline the GitHub CLI signed in (`gh auth login`). Run
+`npm install` once in the toolbox checkout, which installs the GitHub client the lookup uses. The
+command line takes the same arguments and environment variables as the two bash scripts did.
 
 1. Build the plugin and run Plugin Check in a local WordPress, for example with wp-env:
 
@@ -205,26 +206,29 @@ You need `bash`, `jq`, and for the baseline the GitHub CLI signed in (`gh auth l
    npx wp-env run cli wp plugin check my-plugin --format=json > results.txt
    ```
 
-   Keep only the command's output in the file. A notice from wp-env at the top fails the ratchet
+   Keep only the command's output in the file. A notice from wp-env at the top fails the compare
    with "not Plugin Check output", on purpose.
 
 2. Get a baseline from the branch you compare with:
 
    ```bash
    GITHUB_REPOSITORY=my-org/my-plugin \
-     bash .github/actions/plugin-check-report/fetch-baseline.sh develop baseline.json
+     node .github/actions/plugin-check-report/plugin-check-report.js fetch develop baseline.json
    ```
+
+   The token comes from `GITHUB_TOKEN`, else `GH_TOKEN`, else `gh auth token`. The exit status is 0
+   when a baseline was written, 1 when no run has one, and 2 when the lookup itself failed.
 
 3. Compare:
 
    ```bash
    PLUGIN_CHECK_BASELINE=baseline.json \
-     bash .github/actions/plugin-check-report/ratchet.sh --comment-file comment.md results.txt
+     node .github/actions/plugin-check-report/plugin-check-report.js compare --comment-file comment.md results.txt
    ```
 
    Exit 0 means the check passes. `comment.md` holds what the pull request would show. Add
    `PLUGIN_CHECK_MODE=strict` to see the strict result. Skip step 2 to see the counts with no
-   baseline.
+   baseline. `compare --update results.txt` writes the baseline for a results file instead.
 
 ## Differences from the earlier bash scripts
 
@@ -238,7 +242,15 @@ show with a hand-edited baseline or an odd results file:
 
 ## How it is tested
 
-`tests/actions/plugin-check-report/` runs both scripts with bash from `node --test`. `ratchet.sh`
-reads the sample results files in `fixtures/`; `fetch-baseline.sh` talks to a stand-in `gh` that
-answers from JSON files and records each call. Run `npm install` once, then `node --test`. They need
-`jq`, which GitHub's Ubuntu runners have.
+The work is in `plugin-check-report.js`: small functions that take plain values, so a test calls
+them directly. `tests/actions/plugin-check-report/` has three files, run with `node --test`:
+
+- `compare.test.js` runs the compare in-process on the sample results files in `fixtures/`, and
+  checks the comment, the job summary and the annotations against the exact files in
+  `fixtures/expected/`. Those files were written by the original bash script, so they pin that the
+  JavaScript prints what it printed.
+- `fetch.test.js` runs the lookup against a real GitHub client with the network replaced by written
+  answers, a fake clock for the wait, and a stand-in for the `gh` download.
+- `action.test.js` calls the four step functions the way `actions/github-script` does.
+
+No `jq` or `bash` is needed.
