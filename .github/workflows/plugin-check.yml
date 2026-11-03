@@ -78,12 +78,11 @@ on:
         default: ''
       mode:
         description: >-
-          `ratchet`: fail only when a rule has more errors than the baseline. `strict`: fail on any
-          error. Not called `strict` because wordpress/plugin-check-action has a `strict` input
-          that means something else.
+          `baseline`: fail only when a rule has more errors than the baseline. `strict`: fail on any
+          error. Not the `strict` input of wordpress/plugin-check-action, which means something else.
         required: false
         type: string
-        default: 'ratchet'
+        default: 'baseline'
       submodules:
         description: 'Passed to actions/checkout: `false`, `true` or `recursive`.'
         required: false

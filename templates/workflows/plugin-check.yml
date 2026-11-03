@@ -10,7 +10,7 @@ name: Plugin Check
 # plugin-check-report action's README.
 #
 # Run it locally: `wp plugin check <slug> --format=json > results.txt` in a local WordPress, then
-# the ratchet script on that file. See "Running it locally" in the action's README.
+# the compare command on that file. See "Running it locally" in the action's README.
 
 on:
   pull_request:

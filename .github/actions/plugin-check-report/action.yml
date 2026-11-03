@@ -1,6 +1,6 @@
 # Compares a WordPress.org Plugin Check results file with a baseline: the counts of an earlier run
 # of the same workflow, never a committed file. Only a rule with more errors than the baseline
-# fails (ratchet mode), or any error at all (strict mode). It also saves this run's counts as the
+# fails (baseline mode), or any error at all (strict mode). It also saves this run's counts as the
 # next baseline and writes the short body for the pull request comment.
 #
 # It does not run Plugin Check and it does not post the comment. The reusable workflow
@@ -27,10 +27,10 @@ inputs:
     default: ''
   mode:
     description: >-
-      `ratchet`: fail only when a rule has more errors than the baseline. `strict`: fail on any
+      `baseline`: fail only when a rule has more errors than the baseline. `strict`: fail on any
       error, baseline or not.
     required: false
-    default: 'ratchet'
+    default: 'baseline'
   comment-marker:
     description: >-
       Hidden first line of the comment body, which the caller searches for to find its own

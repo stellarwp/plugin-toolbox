@@ -43,7 +43,7 @@ function execute(args, env) {
  * @returns {{status: number, stdout: string, stderr: string, comment: string, summary: string}}
  *          The exit status, both streams, the comment file and the job summary it wrote.
  */
-function ratchet(args, env = {}) {
+function compareWith(args, env = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-check-compare-'))
   const comment = path.join(dir, 'comment.md')
   const summary = path.join(dir, 'summary.md')
@@ -142,7 +142,7 @@ describe('plugin-check-report compare, pinned output', () => {
 describe('plugin-check-report compare', () => {
   describe('results it refuses', () => {
     it('fails when the results file is missing', () => {
-      const run = ratchet([fixture('does-not-exist.txt')])
+      const run = compareWith([fixture('does-not-exist.txt')])
 
       assert.equal(run.status, 1)
       assert.match(run.stdout, /::error title=Plugin Check::Results file not found/)
@@ -150,28 +150,48 @@ describe('plugin-check-report compare', () => {
     })
 
     it('fails when the results file is not Plugin Check output', () => {
-      const run = ratchet([fixture('garbage.txt')])
+      const run = compareWith([fixture('garbage.txt')])
 
       assert.equal(run.status, 1)
       assert.match(run.stdout, /is not Plugin Check output.*First unexpected line: <!DOCTYPE html>/)
     })
 
     it('fails when the results file is empty', () => {
-      const run = ratchet([fixture('empty.txt')])
+      const run = compareWith([fixture('empty.txt')])
 
       assert.equal(run.status, 1)
       assert.match(run.stdout, /has no Plugin Check output/)
     })
 
     it('fails on a mode it does not know, before reading anything', () => {
-      const run = ratchet([fixture('clean.txt')], { PLUGIN_CHECK_MODE: 'strcit' })
+      const run = compareWith([fixture('clean.txt')], { PLUGIN_CHECK_MODE: 'strcit' })
 
       assert.equal(run.status, 1)
       assert.match(run.stdout, /Unknown mode 'strcit'/)
     })
 
+    it('refuses the old name ratchet, and says what to use', () => {
+      const run = compareWith([fixture('clean.txt')], { PLUGIN_CHECK_MODE: 'ratchet' })
+
+      assert.equal(run.status, 1)
+      assert.match(
+        run.stdout,
+        /::error title=Plugin Check::Unknown mode 'ratchet'\. Use 'baseline' or 'strict'\. 'ratchet' is now called 'baseline'\./
+      )
+      assert.equal(run.comment, '')
+    })
+
+    it('runs baseline mode when the mode is not set, and when it is empty', () => {
+      for (const env of [{}, { PLUGIN_CHECK_MODE: '' }, { PLUGIN_CHECK_MODE: 'baseline' }]) {
+        const run = compareWith([fixture('errors-up.txt')], { ...env, PLUGIN_CHECK_BASELINE: BASELINE })
+
+        assert.equal(run.status, 1, JSON.stringify(env))
+        assert.match(run.comment, /rule has more errors than the baseline allows/)
+      }
+    })
+
     it('fails on a mode it does not know, even with a missing results file', () => {
-      const run = ratchet([fixture('does-not-exist.txt')], { PLUGIN_CHECK_MODE: 'strcit' })
+      const run = compareWith([fixture('does-not-exist.txt')], { PLUGIN_CHECK_MODE: 'strcit' })
 
       assert.match(run.stdout, /Unknown mode/)
       assert.doesNotMatch(run.stdout, /Results file not found/)
@@ -194,20 +214,20 @@ describe('plugin-check-report compare', () => {
     })
 
     it('cuts the first unexpected line to 200 bytes', () => {
-      const run = ratchet([resultsFile(`${'x'.repeat(300)}\n`)])
+      const run = compareWith([resultsFile(`${'x'.repeat(300)}\n`)])
 
       assert.equal(run.status, 1)
       assert.match(run.stdout, new RegExp(`First unexpected line: x{200}\\n`))
     })
 
     it('does not count a line of white space as unexpected', () => {
-      const run = ratchet([resultsFile('FILE: plugin.php\n  \t \n[]\n\n')])
+      const run = compareWith([resultsFile('FILE: plugin.php\n  \t \n[]\n\n')])
 
       assert.equal(run.status, 0)
     })
 
     it('fails when a results line is not JSON', () => {
-      const run = ratchet([resultsFile('FILE: plugin.php\n[{"type":"ERROR"\n')])
+      const run = compareWith([resultsFile('FILE: plugin.php\n[{"type":"ERROR"\n')])
 
       assert.equal(run.status, 5)
       assert.match(run.stderr, /parse error/)
@@ -216,7 +236,7 @@ describe('plugin-check-report compare', () => {
 
     it('fails when a counted result has no rule code', () => {
       for (const code of [undefined, null, 5, true, { a: 1 }]) {
-        const run = ratchet([resultsOf([{ type: 'ERROR', code }])])
+        const run = compareWith([resultsOf([{ type: 'ERROR', code }])])
 
         assert.equal(run.status, 5, String(code))
         assert.match(run.stderr, /has no rule code/)
@@ -225,21 +245,21 @@ describe('plugin-check-report compare', () => {
 
     it('fails when a result is not an object, but skips null', () => {
       for (const item of [1, 'x', [1], true]) {
-        assert.equal(ratchet([resultsOf([item])]).status, 5, JSON.stringify(item))
+        assert.equal(compareWith([resultsOf([item])]).status, 5, JSON.stringify(item))
       }
 
-      assert.equal(ratchet([resultsOf([null])]).status, 0)
+      assert.equal(compareWith([resultsOf([null])]).status, 0)
     })
 
     it('ignores results that are neither ERROR nor WARNING', () => {
-      const run = ratchet([resultsOf([{ type: 'INFO' }, { type: 'error', code: 'a' }])])
+      const run = compareWith([resultsOf([{ type: 'INFO' }, { type: 'error', code: 'a' }])])
 
       assert.equal(run.status, 0)
       assert.match(run.comment, /\| Errors {3}\| 0 \|/)
     })
 
     it('reads several lists written on one line', () => {
-      const run = ratchet([resultsFile('FILE: a.php\n[{"type":"ERROR","code":"a"}] [{"type":"ERROR","code":"b"}]\n')], {
+      const run = compareWith([resultsFile('FILE: a.php\n[{"type":"ERROR","code":"a"}] [{"type":"ERROR","code":"b"}]\n')], {
         PLUGIN_CHECK_MODE: 'strict',
       })
 
@@ -250,7 +270,7 @@ describe('plugin-check-report compare', () => {
   describe('--update', () => {
     it('writes the counts per rule code', () => {
       const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-check-update-')), 'baseline.json')
-      const run = ratchet(['--update', fixture('errors-up.txt')], { PLUGIN_CHECK_BASELINE: out })
+      const run = compareWith(['--update', fixture('errors-up.txt')], { PLUGIN_CHECK_BASELINE: out })
 
       assert.equal(run.status, 0)
       assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')), {
@@ -264,7 +284,7 @@ describe('plugin-check-report compare', () => {
 
     it('writes empty counts for a clean run', () => {
       const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-check-update-')), 'baseline.json')
-      const run = ratchet(['--update', fixture('clean.txt')], { PLUGIN_CHECK_BASELINE: out })
+      const run = compareWith(['--update', fixture('clean.txt')], { PLUGIN_CHECK_BASELINE: out })
 
       assert.equal(run.status, 0)
       assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')), { errors: {}, warnings: {} })
@@ -272,23 +292,23 @@ describe('plugin-check-report compare', () => {
 
     it('writes no comment and no summary', () => {
       const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-check-update-')), 'baseline.json')
-      const run = ratchet(['--update', fixture('errors-up.txt')], { PLUGIN_CHECK_BASELINE: out })
+      const run = compareWith(['--update', fixture('errors-up.txt')], { PLUGIN_CHECK_BASELINE: out })
 
       assert.equal(run.comment, '')
       assert.equal(run.summary, '')
     })
 
     it('fails, with the reason, when the folder of the file does not exist', () => {
-      const run = ratchet(['--update', fixture('clean.txt')], { PLUGIN_CHECK_BASELINE: '/nonexistent/folder/baseline.json' })
+      const run = compareWith(['--update', fixture('clean.txt')], { PLUGIN_CHECK_BASELINE: '/nonexistent/folder/baseline.json' })
 
       assert.equal(run.status, 1)
       assert.match(run.stderr, /Could not write \/nonexistent\/folder\/baseline\.json/)
     })
   })
 
-  describe('compare in ratchet mode', () => {
+  describe('compare in baseline mode', () => {
     it('passes a clean run with no baseline, with a warning and the one-column table', () => {
-      const run = ratchet([fixture('clean.txt')])
+      const run = compareWith([fixture('clean.txt')])
 
       assert.equal(run.status, 0)
       assert.match(run.stdout, /::warning title=Plugin Check::No baseline to compare with/)
@@ -298,7 +318,7 @@ describe('plugin-check-report compare', () => {
     })
 
     it('passes when every count matches the baseline', () => {
-      const run = ratchet([fixture('same-as-baseline.txt')], { PLUGIN_CHECK_BASELINE: BASELINE })
+      const run = compareWith([fixture('same-as-baseline.txt')], { PLUGIN_CHECK_BASELINE: BASELINE })
 
       assert.equal(run.status, 0)
       assert.match(run.comment, /✅ Plugin Check passed/)
@@ -306,7 +326,7 @@ describe('plugin-check-report compare', () => {
     })
 
     it('fails when a rule has more errors than the baseline', () => {
-      const run = ratchet([fixture('errors-up.txt')], { PLUGIN_CHECK_BASELINE: BASELINE })
+      const run = compareWith([fixture('errors-up.txt')], { PLUGIN_CHECK_BASELINE: BASELINE })
 
       assert.equal(run.status, 1)
       assert.match(run.stdout, new RegExp(`::error title=Plugin Check::${ESCAPE} has 3 errors, the baseline has 2`))
@@ -315,7 +335,7 @@ describe('plugin-check-report compare', () => {
     })
 
     it('fails when a rule goes up even though the total stays the same', () => {
-      const run = ratchet([fixture('rule-up-total-same.txt')], { PLUGIN_CHECK_BASELINE: BASELINE })
+      const run = compareWith([fixture('rule-up-total-same.txt')], { PLUGIN_CHECK_BASELINE: BASELINE })
 
       assert.equal(run.status, 1)
       assert.match(run.comment, /\| Errors {3}\| 3 \| 3 \| ±0 \|/)
@@ -323,7 +343,7 @@ describe('plugin-check-report compare', () => {
     })
 
     it('passes with a notice when errors go down', () => {
-      const run = ratchet([fixture('errors-down.txt')], { PLUGIN_CHECK_BASELINE: BASELINE })
+      const run = compareWith([fixture('errors-down.txt')], { PLUGIN_CHECK_BASELINE: BASELINE })
 
       assert.equal(run.status, 0)
       assert.match(run.stdout, new RegExp(`::notice title=Plugin Check::${ESCAPE} \\(errors\\) went down from 2 to 1`))
@@ -331,7 +351,7 @@ describe('plugin-check-report compare', () => {
     })
 
     it('passes with a notice when only warnings go up', () => {
-      const run = ratchet([fixture('warnings-up.txt')], { PLUGIN_CHECK_BASELINE: BASELINE })
+      const run = compareWith([fixture('warnings-up.txt')], { PLUGIN_CHECK_BASELINE: BASELINE })
 
       assert.equal(run.status, 0)
       assert.match(run.stdout, /Warnings do not fail the check/)
@@ -339,7 +359,7 @@ describe('plugin-check-report compare', () => {
     })
 
     it('only warns when the baseline is from an older run of the target branch', () => {
-      const run = ratchet([fixture('errors-up.txt')], {
+      const run = compareWith([fixture('errors-up.txt')], {
         PLUGIN_CHECK_BASELINE: BASELINE,
         PLUGIN_CHECK_ADVISORY: 'true',
       })
@@ -350,14 +370,14 @@ describe('plugin-check-report compare', () => {
     })
 
     it('takes only the exact word true as advisory', () => {
-      const run = ratchet([fixture('errors-up.txt')], { PLUGIN_CHECK_BASELINE: BASELINE, PLUGIN_CHECK_ADVISORY: 'TRUE' })
+      const run = compareWith([fixture('errors-up.txt')], { PLUGIN_CHECK_BASELINE: BASELINE, PLUGIN_CHECK_ADVISORY: 'TRUE' })
 
       assert.equal(run.status, 1)
     })
 
     it('treats an empty baseline file, and null, as no counts at all', () => {
       for (const content of ['', 'null', '  \n']) {
-        const run = ratchet([fixture('errors-up.txt')], { PLUGIN_CHECK_BASELINE: baselineFile(content) })
+        const run = compareWith([fixture('errors-up.txt')], { PLUGIN_CHECK_BASELINE: baselineFile(content) })
 
         assert.equal(run.status, 1, JSON.stringify(content))
         assert.match(run.stdout, /has 3 errors, the baseline has 0/)
@@ -365,7 +385,7 @@ describe('plugin-check-report compare', () => {
     })
 
     it('treats a missing kind, and a null or false count, as zero', () => {
-      const run = ratchet([fixture('errors-up.txt')], {
+      const run = compareWith([fixture('errors-up.txt')], {
         PLUGIN_CHECK_BASELINE: baselineFile({ errors: { [ESCAPE]: null } }),
       })
 
@@ -373,7 +393,7 @@ describe('plugin-check-report compare', () => {
     })
 
     it('reads only the first value of a baseline file', () => {
-      const run = ratchet([fixture('same-as-baseline.txt')], {
+      const run = compareWith([fixture('same-as-baseline.txt')], {
         PLUGIN_CHECK_BASELINE: baselineFile(`${fs.readFileSync(BASELINE, 'utf8')}\n{"errors":{"x":9}}`),
       })
 
@@ -394,7 +414,7 @@ describe('plugin-check-report compare', () => {
       ]
 
       for (const [content, status] of cases) {
-        const run = ratchet([resultsOf([{ type: 'ERROR', code: 'a' }])], { PLUGIN_CHECK_BASELINE: baselineFile(content) })
+        const run = compareWith([resultsOf([{ type: 'ERROR', code: 'a' }])], { PLUGIN_CHECK_BASELINE: baselineFile(content) })
 
         assert.equal(run.status, status, content)
         assert.equal(run.comment, '', content)
@@ -403,14 +423,14 @@ describe('plugin-check-report compare', () => {
 
     it('fails on a count too large to compare exactly, instead of printing another number', () => {
       for (const content of ['{"errors":{"a":9007199254740993}}', '{"warnings":{"a":1e300}}', '{"errors":{"a":-9007199254740993}}']) {
-        const run = ratchet([resultsOf([{ type: 'ERROR', code: 'a' }])], { PLUGIN_CHECK_BASELINE: baselineFile(content) })
+        const run = compareWith([resultsOf([{ type: 'ERROR', code: 'a' }])], { PLUGIN_CHECK_BASELINE: baselineFile(content) })
 
         assert.equal(run.status, 5, content)
         assert.match(run.stderr, /more than 9007199254740991, which cannot be compared exactly/)
         assert.equal(run.comment, '', content)
       }
 
-      const largest = ratchet([resultsOf([{ type: 'ERROR', code: 'a' }])], {
+      const largest = compareWith([resultsOf([{ type: 'ERROR', code: 'a' }])], {
         PLUGIN_CHECK_BASELINE: baselineFile('{"errors":{"a":9007199254740991}}'),
       })
       assert.equal(largest.status, 0, 'the largest exact number still works')
@@ -418,7 +438,7 @@ describe('plugin-check-report compare', () => {
     })
 
     it('counts a rule with an empty code like any other', () => {
-      const run = ratchet([resultsOf([{ type: 'ERROR', code: '' }, { type: 'ERROR', code: '' }])], {
+      const run = compareWith([resultsOf([{ type: 'ERROR', code: '' }, { type: 'ERROR', code: '' }])], {
         PLUGIN_CHECK_BASELINE: baselineFile({ errors: { '': 1 }, warnings: {} }),
       })
 
@@ -427,13 +447,13 @@ describe('plugin-check-report compare', () => {
     })
 
     it('shows a rule code on one line, with a tab or a new line written out', () => {
-      const run = ratchet([resultsOf([{ type: 'ERROR', code: 'a\tb\\c' }])], { PLUGIN_CHECK_BASELINE: baselineFile({}) })
+      const run = compareWith([resultsOf([{ type: 'ERROR', code: 'a\tb\\c' }])], { PLUGIN_CHECK_BASELINE: baselineFile({}) })
 
       assert.match(run.stdout, /::error title=Plugin Check::a\\tb\\\\c has 1 errors/)
     })
 
     it('takes the links from GITHUB_RUN_ID when RUN_URL is not set', () => {
-      const run = ratchet([fixture('clean.txt')], {
+      const run = compareWith([fixture('clean.txt')], {
         GITHUB_RUN_ID: '42',
         GITHUB_SERVER_URL: 'https://github.com',
         GITHUB_REPOSITORY: 'example-org/my-plugin',
@@ -443,7 +463,7 @@ describe('plugin-check-report compare', () => {
     })
 
     it('shows the results file for a run on a developer machine', () => {
-      const run = ratchet([fixture('clean.txt')])
+      const run = compareWith([fixture('clean.txt')])
 
       assert.match(run.comment, /📎 Local run, see .*clean\.txt/)
     })
@@ -451,15 +471,15 @@ describe('plugin-check-report compare', () => {
 
   describe('compare in strict mode', () => {
     it('fails on any error, even with no baseline', () => {
-      const run = ratchet([fixture('errors-down.txt')], { PLUGIN_CHECK_MODE: 'strict' })
+      const run = compareWith([fixture('errors-down.txt')], { PLUGIN_CHECK_MODE: 'strict' })
 
       assert.equal(run.status, 1)
       assert.match(run.stdout, /2 errors found\. Strict mode fails on any error/)
       assert.match(run.comment, /❌ Plugin Check failed: 2 errors, and strict mode allows none/)
     })
 
-    it('fails on errors that went down, which ratchet mode would pass', () => {
-      const run = ratchet([fixture('errors-down.txt')], {
+    it('fails on errors that went down, which baseline mode would pass', () => {
+      const run = compareWith([fixture('errors-down.txt')], {
         PLUGIN_CHECK_MODE: 'strict',
         PLUGIN_CHECK_BASELINE: BASELINE,
       })
@@ -468,7 +488,7 @@ describe('plugin-check-report compare', () => {
     })
 
     it('passes a clean run', () => {
-      const run = ratchet([fixture('clean.txt')], { PLUGIN_CHECK_MODE: 'strict' })
+      const run = compareWith([fixture('clean.txt')], { PLUGIN_CHECK_MODE: 'strict' })
 
       assert.equal(run.status, 0)
       assert.match(run.comment, /✅ Plugin Check passed: no errors/)
@@ -486,13 +506,13 @@ describe('plugin-check-report compare', () => {
           return JSON.stringify(JSON.parse(line).filter((result) => result.type === 'WARNING'))
         })
 
-      const run = ratchet([resultsFile(lines.join('\n'))], { PLUGIN_CHECK_MODE: 'strict' })
+      const run = compareWith([resultsFile(lines.join('\n'))], { PLUGIN_CHECK_MODE: 'strict' })
 
       assert.equal(run.status, 0)
     })
 
     it('prints the per-rule messages before the strict one', () => {
-      const run = ratchet([fixture('errors-up.txt')], { PLUGIN_CHECK_MODE: 'strict', PLUGIN_CHECK_BASELINE: BASELINE })
+      const run = compareWith([fixture('errors-up.txt')], { PLUGIN_CHECK_MODE: 'strict', PLUGIN_CHECK_BASELINE: BASELINE })
       const lines = run.stdout.split('\n')
 
       assert.match(lines[0], /has 3 errors, the baseline has 2/)
@@ -502,20 +522,20 @@ describe('plugin-check-report compare', () => {
 
   describe('the comment', () => {
     it('starts with the default marker', () => {
-      const run = ratchet([fixture('clean.txt')])
+      const run = compareWith([fixture('clean.txt')])
 
       assert.equal(run.comment.split('\n')[0], '<!-- plugin-check -->')
     })
 
     it('starts with the marker the workflow passes', () => {
       const marker = '<!-- plugin-check:example-org/my-plugin -->'
-      const run = ratchet([fixture('clean.txt')], { COMMENT_MARKER: marker })
+      const run = compareWith([fixture('clean.txt')], { COMMENT_MARKER: marker })
 
       assert.equal(run.comment.split('\n')[0], marker)
     })
 
     it('names the baseline column after where it came from, with a link', () => {
-      const run = ratchet([fixture('same-as-baseline.txt')], {
+      const run = compareWith([fixture('same-as-baseline.txt')], {
         PLUGIN_CHECK_BASELINE: BASELINE,
         BASELINE_LABEL: 'Target branch',
         BASELINE_URL: 'https://github.com/o/r/actions/runs/1',
@@ -525,7 +545,7 @@ describe('plugin-check-report compare', () => {
     })
 
     it('lists at most five rules and never grows past fifteen lines', () => {
-      const run = ratchet([resultsWithNewCodes(7)], { PLUGIN_CHECK_BASELINE: BASELINE })
+      const run = compareWith([resultsWithNewCodes(7)], { PLUGIN_CHECK_BASELINE: BASELINE })
 
       assert.equal(run.status, 1)
       assert.match(run.comment, /Went up \(top 5 of 7\)/)
@@ -535,20 +555,20 @@ describe('plugin-check-report compare', () => {
 
     it('cuts a comment to fifteen lines when a value holds line breaks, and drops the empty end', () => {
       const marker = `${'\n'.repeat(20)}end`
-      const run = ratchet([fixture('clean.txt')], { COMMENT_MARKER: marker })
+      const run = compareWith([fixture('clean.txt')], { COMMENT_MARKER: marker })
 
       // The first fifteen lines are all empty, so nothing is left once the empty end is dropped.
       assert.equal(run.comment, '\n')
     })
 
     it('writes the same text to the job summary', () => {
-      const run = ratchet([fixture('errors-down.txt')], { PLUGIN_CHECK_BASELINE: BASELINE })
+      const run = compareWith([fixture('errors-down.txt')], { PLUGIN_CHECK_BASELINE: BASELINE })
 
       assert.equal(run.summary, run.comment)
     })
 
     it('writes a badge under the status line', () => {
-      const run = ratchet([fixture('clean.txt')], { COMMENT_BADGE: 'https://example.test/badge.svg' })
+      const run = compareWith([fixture('clean.txt')], { COMMENT_BADGE: 'https://example.test/badge.svg' })
 
       assert.match(run.comment, /\n!\[Plugin Check finished\]\(https:\/\/example\.test\/badge\.svg\)\n/)
     })

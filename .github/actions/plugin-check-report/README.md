@@ -120,7 +120,7 @@ the caller.
 
 ## Modes
 
-- `ratchet` (default): fail only when a rule has more errors than the baseline. More warnings, or
+- `baseline` (default): fail only when a rule has more errors than the baseline. More warnings, or
   fewer of either, only add a notice. The totals can go down while one rule goes up, so the check
   looks at each rule.
 - `strict`: fail on any error. The comment still compares with the baseline. Switch to it once a
@@ -152,7 +152,7 @@ the check to require in branch protection is `plugin-check / Plugin Check`.
 | `php-version` | `7.4` | PHP that builds `vendor/`. Use the oldest the plugin supports |
 | `exclude-checks` | empty | Checks to skip, one per line, passed to the Plugin Check action |
 | `cache-paths` | empty | Build caches kept between runs, one path per line, relative to the repository |
-| `mode` | `ratchet` | `ratchet` or `strict`. See [Modes](#modes) |
+| `mode` | `baseline` | `baseline` or `strict`. See [Modes](#modes) |
 | `submodules` | `false` | Passed to `actions/checkout` |
 
 | Secret | Becomes, in the build step only |
@@ -182,7 +182,7 @@ not start the run. The job that runs the Plugin Check action lowers itself to `c
 |---|---|---|---|
 | `results` | yes | | The results file. A missing file fails the compare |
 | `comment-file` | no | none | Where to write the comment body |
-| `mode` | no | `ratchet` | `ratchet` or `strict` |
+| `mode` | no | `baseline` | `baseline` or `strict` |
 | `comment-marker` | no | `<!-- plugin-check:<owner>/<repo> -->` | First line of the comment body |
 | `baseline-wait` | no | `1200` | Seconds to wait for the base commit's run. A whole number, or the check fails |
 | `badge-url` | no | none | Image under the status line |
@@ -234,7 +234,15 @@ command line takes the same arguments and environment variables as the two bash 
 
 The first version of this action was two bash scripts. The JavaScript that replaced them gives the
 same results on every input Plugin Check can produce. These differences are on purpose, and only
-show with a hand-edited baseline or an odd results file:
+show with a hand-edited baseline or an odd results file, except the first two:
+
+- The mode `ratchet` is now called `baseline`. The old word is refused, and the message says what
+  to use.
+- The `workflow-file` input is gone. The runs that hold the baseline are the calling workflow's,
+  which the run itself knows.
+- A rule with an empty code is counted like any other. Bash misread its row and showed wrong totals.
+- A count in the baseline that is not a whole number (such as `1.5`) fails the compare with exit
+  status 1. Bash printed an arithmetic error and passed with zero totals.
 
 - A baseline count above 9007199254740991 (2^53 - 1) fails the compare with exit status 5 and says
   so. JavaScript cannot hold a larger number exactly, so a comment would show another number. Bash
