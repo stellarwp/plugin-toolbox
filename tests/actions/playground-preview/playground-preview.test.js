@@ -21,7 +21,6 @@ const {
   buildComment,
   checkCommentLength,
   readyComment,
-  upsertComment,
   DEFAULT_BLUEPRINT,
   MAX_COMMENT_LENGTH,
 } = require('../../../.github/actions/playground-preview/playground-preview.js')
@@ -380,45 +379,6 @@ describe('playground-preview.js', () => {
     })
   })
 
-  describe('upsertComment', () => {
-    it('replaces the comment that starts with the marker, even on a later page', async () => {
-      const { github, requests } = await octokitFor([
-        {
-          method: 'GET',
-          path: /^\/repos\/example-org\/my-plugin\/issues\/12\/comments/,
-          responses: [
-            {
-              body: [{ id: 1, body: `> ${MARKER} quoted by a person` }],
-              headers: { link: '<https://api.github.com/repos/example-org/my-plugin/issues/12/comments?per_page=100&page=2>; rel="next"' },
-            },
-            { body: [{ id: 2, body: `${MARKER}\nold` }] },
-          ],
-        },
-        { method: 'PATCH', path: '/repos/example-org/my-plugin/issues/comments/2', body: { id: 2 } },
-      ])
-
-      const result = await upsertComment({ github, owner: 'example-org', repo: 'my-plugin', issue: 12, marker: MARKER, body: 'new' })
-
-      assert.deepEqual(result, { id: 2, created: false })
-      assert.deepEqual(requests.at(-1), {
-        method: 'PATCH',
-        url: 'https://api.github.com/repos/example-org/my-plugin/issues/comments/2',
-        path: '/repos/example-org/my-plugin/issues/comments/2',
-        body: { body: 'new' },
-      })
-    })
-
-    it('creates a comment when none starts with the marker', async () => {
-      const { github, requests } = await octokitFor(NO_COMMENT)
-
-      const result = await upsertComment({ github, owner: 'example-org', repo: 'my-plugin', issue: 12, marker: MARKER, body: 'new' })
-
-      assert.deepEqual(result, { id: 99, created: true })
-      assert.equal(requests.at(-1).method, 'POST')
-      assert.deepEqual(requests.at(-1).body, { body: 'new' })
-    })
-  })
-
   describe('run', () => {
     it('posts the links under the marker named after the repository', async (t) => {
       const { github, requests, core, summary } = await actionsFor(t, NO_COMMENT)
@@ -429,6 +389,18 @@ describe('playground-preview.js', () => {
       assert.ok(body.startsWith('<!-- playground-preview:example-org/my-plugin -->\n🎉 Playground preview ready for commit 15e470c\n'))
       assert.match(body, /Built-01%2F15%2005%3A43%20PM%20EST-darkgreen/)
       assert.match(summary(), /Playground preview ready/, 'the links are in the job summary too')
+    })
+
+    it('replaces the earlier preview comment rather than adding a second one', async (t) => {
+      const { github, requests, core } = await actionsFor(t, [
+        { method: 'GET', path: /^\/repos\/example-org\/my-plugin\/issues\/12\/comments/, body: [{ id: 5, body: `${MARKER}\nbuilding` }] },
+        { method: 'PATCH', path: '/repos/example-org/my-plugin/issues/comments/5', body: { id: 5 } },
+      ])
+
+      await run({ github, core, env: actionEnv({ INPUT_STATUS: 'building' }), now: WINTER })
+
+      assert.equal(requests.at(-1).method, 'PATCH')
+      assert.equal(requests.filter((request) => request.method === 'POST').length, 0)
     })
 
     it('uses the marker it is given', async (t) => {

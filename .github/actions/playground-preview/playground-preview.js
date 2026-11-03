@@ -23,11 +23,10 @@ const DEFAULT_BLUEPRINT = path.join(__dirname, 'blueprints', 'default.json')
 /** Where a blueprint in the URL hash opens. Playground reads JSON or base64 JSON from the hash. */
 const PLAYGROUND_URL = 'https://playground.wordpress.net/'
 
-/**
- * GitHub refuses a comment body longer than this. The hash is never sent to a server, so the
- * comment, not the link, is the limit that applies first.
- */
-const MAX_COMMENT_LENGTH = 65536
+// This file is loaded as an ordinary module, so a relative path resolves against it, both in the
+// tests and in the copy of the repository the runner downloads. The comment is written by the same
+// code every action here uses.
+const { upsertComment, MAX_COMMENT_LENGTH } = require('../pr-comment/pr-comment.js')
 
 /** A placeholder: a name in capitals between double braces. Anything else is left alone. */
 const PLACEHOLDER = /\{\{([A-Z][A-Z0-9_]*)\}\}/g
@@ -360,7 +359,8 @@ function buildComment({ status, marker, sha, stamp, variants = [], zipUrl = '', 
 
 /**
  * Fails when the comment is longer than GitHub accepts, naming each link's length, so the blueprint
- * to shorten is obvious.
+ * to shorten is obvious. The hash is never sent to a server, so the comment, not the link, is the
+ * limit that applies first.
  *
  * @param {string}   body     The comment.
  * @param {object[]} variants The variants in it.
@@ -404,40 +404,6 @@ function readyComment({ files, cwd, zipUrl, marker, sha, stamp }) {
   checkCommentLength(body, variants)
 
   return { body, variants }
-}
-
-/**
- * Replaces the comment that starts with the marker, or creates one.
- *
- * Found by its first line only, not by author, so it is still found when the caller passes a token
- * other than the workflow's own.
- *
- * @param {object} options
- * @param {object} options.github An Octokit.
- * @param {string} options.owner  Repository owner.
- * @param {string} options.repo   Repository name.
- * @param {number} options.issue  Pull request number.
- * @param {string} options.marker The first line to look for.
- * @param {string} options.body   The new body.
- *
- * @returns {Promise<{id: number, created: boolean}>} The comment, and whether it is new.
- */
-async function upsertComment({ github, owner, repo, issue, marker, body }) {
-  const comments = await github.paginate(github.rest.issues.listComments, {
-    owner,
-    repo,
-    issue_number: issue,
-    per_page: 100,
-  })
-  const existing = comments.find((comment) => typeof comment.body === 'string' && comment.body.startsWith(marker))
-
-  if (existing) {
-    await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body })
-    return { id: existing.id, created: false }
-  }
-
-  const { data } = await github.rest.issues.createComment({ owner, repo, issue_number: issue, body })
-  return { id: data.id, created: true }
 }
 
 /**
@@ -549,7 +515,6 @@ module.exports = {
   buildComment,
   checkCommentLength,
   readyComment,
-  upsertComment,
   DEFAULT_BLUEPRINT,
   MAX_COMMENT_LENGTH,
 }
