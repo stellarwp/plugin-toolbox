@@ -73,6 +73,9 @@ One comment per pull request, replaced on every push. It is found by a hidden fi
 `<!-- playground-preview:<owner>/<repo> -->`. Pull requests from forks get no preview: their runs
 cannot see the bucket secrets, and their token cannot write a comment.
 
+The comment is written by the shared [pr-comment](../pr-comment/) module, the same code every
+action in this repository uses to find and replace a comment.
+
 ## Blueprints
 
 A [blueprint](https://wordpress.github.io/wordpress-playground/blueprints/) is a JSON file that
@@ -206,5 +209,5 @@ the blueprint. A file that breaks a rule above exits 1 with the reason.
 
 `tests/actions/playground-preview/` loads the script in `node --test`, with the real
 `@actions/core` and a real Octokit whose network is replaced, so the tests assert the API requests
-the action would send. It also runs the script from the command line. Run `npm install` once, then
+the action would send. Finding and replacing the comment is tested with pr-comment. It also runs the script from the command line. Run `npm install` once, then
 `node --test`.
