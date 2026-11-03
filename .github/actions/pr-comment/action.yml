@@ -1,0 +1,89 @@
+# Finds, creates, updates or deletes a comment on a pull request or an issue. A comment a workflow
+# keeps up to date is found by a hidden marker, its first line, and replaced on every run.
+#
+# The work lives in pr-comment.js. actions/github-script runs it with a pre-authenticated Octokit,
+# so there is no dependency to install and nothing to build: the file in the repository is the file
+# that runs. Other actions' scripts require the same file, so every comment in this repository is
+# written by the same code.
+name: Pull request comment
+description: Finds, creates, updates or deletes a pull request comment by a hidden marker
+
+inputs:
+  operation:
+    description: >-
+      `upsert` (the default) replaces the comment that starts with `marker`, or creates one.
+      `create` always adds a comment. `update` and `delete` act on `comment-id`, or on the comment
+      that starts with `marker`. `find` only looks.
+    required: false
+    default: 'upsert'
+  marker:
+    description: >-
+      Hidden first line that finds the comment, e.g. `<!-- my-check:example-org/my-plugin -->`. It
+      is added to the body when the body does not start with it. An empty marker is refused when it
+      is needed to find a comment: it would match every comment.
+    required: false
+    default: ''
+  body:
+    description: 'The comment text. Give this or `body-file`, not both.'
+    required: false
+    default: ''
+  body-file:
+    description: 'Path of a file holding the comment text. Prefer it for long text.'
+    required: false
+    default: ''
+  comment-id:
+    description: 'The comment to update or delete, instead of searching by `marker`.'
+    required: false
+    default: ''
+  issue-number:
+    description: 'The pull request or issue. Defaults to the one of the event.'
+    required: false
+    default: ${{ github.event.pull_request.number || github.event.issue.number }}
+  repository:
+    description: 'The `<owner>/<repo>` of the comment. Defaults to the current repository.'
+    required: false
+    default: ''
+  token:
+    description: >-
+      Token that reads and writes the comment. It needs `pull-requests: write` for a pull request
+      or `issues: write` for an issue, so the job needs that permission too. On a pull request from
+      a fork the workflow token is read-only: skip the step there.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  comment-id:
+    description: 'The comment found, created, updated or deleted. Empty when there was none.'
+    value: ${{ steps.comment.outputs.comment-id }}
+  comment-url:
+    description: 'Link to the comment. Empty when there was none, and after a delete.'
+    value: ${{ steps.comment.outputs.comment-url }}
+  result:
+    description: '`created`, `updated`, `deleted`, `found` or `not-found`.'
+    value: ${{ steps.comment.outputs.result }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Write the comment
+      id: comment
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so a body is data and
+        # never part of the program.
+        INPUT_OPERATION: ${{ inputs.operation }}
+        INPUT_MARKER: ${{ inputs.marker }}
+        INPUT_BODY: ${{ inputs.body }}
+        INPUT_BODY_FILE: ${{ inputs.body-file }}
+        INPUT_COMMENT_ID: ${{ inputs.comment-id }}
+        INPUT_ISSUE_NUMBER: ${{ inputs.issue-number }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const { run } = require(`${process.env.ACTION_PATH}/pr-comment.js`)
+          await run({ github, core, env: process.env })
