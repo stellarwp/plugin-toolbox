@@ -226,6 +226,16 @@ You need `bash`, `jq`, and for the baseline the GitHub CLI signed in (`gh auth l
    `PLUGIN_CHECK_MODE=strict` to see the strict result. Skip step 2 to see the counts with no
    baseline.
 
+## Differences from the earlier bash scripts
+
+The first version of this action was two bash scripts. The JavaScript that replaced them gives the
+same results on every input Plugin Check can produce. These differences are on purpose, and only
+show with a hand-edited baseline or an odd results file:
+
+- A baseline count above 9007199254740991 (2^53 - 1) fails the compare with exit status 5 and says
+  so. JavaScript cannot hold a larger number exactly, so a comment would show another number. Bash
+  compared them exactly.
+
 ## How it is tested
 
 `tests/actions/plugin-check-report/` runs both scripts with bash from `node --test`. `ratchet.sh`

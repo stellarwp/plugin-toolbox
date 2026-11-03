@@ -334,8 +334,14 @@ function readBaseline(text) {
     for (const [code, count] of Object.entries(entries)) {
       if (count === null || count === false) {
         counts[kind].set(code, 0)
-      } else if (typeof count === 'number' && Number.isInteger(count)) {
+      } else if (Number.isSafeInteger(count)) {
         counts[kind].set(code, count)
+      } else if (Number.isInteger(count)) {
+        // JavaScript cannot hold it exactly, so a table or a message would show another number.
+        throw new CheckFailure(
+          `The baseline is not valid: the count of ${displayCode(code)} in "${kind}" is more than ${Number.MAX_SAFE_INTEGER}, which cannot be compared exactly.`,
+          5
+        )
       } else {
         throw new CheckFailure(
           `The baseline is not valid: the count of ${displayCode(code)} in "${kind}" must be a whole number.`,

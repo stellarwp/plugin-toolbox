@@ -401,6 +401,22 @@ describe('plugin-check-report compare', () => {
       }
     })
 
+    it('fails on a count too large to compare exactly, instead of printing another number', () => {
+      for (const content of ['{"errors":{"a":9007199254740993}}', '{"warnings":{"a":1e300}}', '{"errors":{"a":-9007199254740993}}']) {
+        const run = ratchet([resultsOf([{ type: 'ERROR', code: 'a' }])], { PLUGIN_CHECK_BASELINE: baselineFile(content) })
+
+        assert.equal(run.status, 5, content)
+        assert.match(run.stderr, /more than 9007199254740991, which cannot be compared exactly/)
+        assert.equal(run.comment, '', content)
+      }
+
+      const largest = ratchet([resultsOf([{ type: 'ERROR', code: 'a' }])], {
+        PLUGIN_CHECK_BASELINE: baselineFile('{"errors":{"a":9007199254740991}}'),
+      })
+      assert.equal(largest.status, 0, 'the largest exact number still works')
+      assert.match(largest.comment, /\| 1 \| 9007199254740991 \| -9007199254740990 \|/)
+    })
+
     it('counts a rule with an empty code like any other', () => {
       const run = ratchet([resultsOf([{ type: 'ERROR', code: '' }, { type: 'ERROR', code: '' }])], {
         PLUGIN_CHECK_BASELINE: baselineFile({ errors: { '': 1 }, warnings: {} }),
