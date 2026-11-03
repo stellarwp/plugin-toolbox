@@ -1,0 +1,3 @@
+::warning title=Plugin Check::No baseline to compare with (/nonexistent/baseline.json), so nothing was compared. Run the workflow on the target branch to make one.
+::error title=Plugin Check::2 errors found. Strict mode fails on any error.
+Plugin Check found errors, and strict mode allows none.
