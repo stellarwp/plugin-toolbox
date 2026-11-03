@@ -5,31 +5,17 @@
  * name), then the base branch back into develop. Publishing the GitHub release is the caller's,
  * after this action and its build, at the commit this one leaves on the base (`base-sha`).
  *
- * runMerge checks the inputs and the version against the repository's tags, then does the two
- * merges with git in the caller's checkout and pushes them. The functions it is built from are pure,
- * apart from the git commands run through `exec` and the API calls, so a test can run them against
- * a local remote and assert the requests.
+ * runMerge checks the inputs and the version against the repository's tags, then asks GitHub for
+ * the two merges. Everything goes through the Octokit github-script supplies: the action reads and
+ * writes no checkout, so a test runs it against a recorded client and asserts the requests.
  *
  * Every step is safe to run again after a late failure: a branch that already holds the release
  * merges as a no-op.
  */
 
 const { validateVersion: validateReleaseVersion } = require('../../lib/versions.js')
-const { readRepository, isNotFound, tagExists } = require('../../lib/github.js')
-const { runOrFail } = require('../../lib/exec.js')
+const { readRepository, isNotFound, readTag } = require('../../lib/github.js')
 const { readVersionFiles, versionIn } = require('../../lib/puprc.js')
-
-/** The identity the merge commits are made with: the one GitHub gives the default token. */
-const BOT_IDENTITY = {
-  name: 'github-actions[bot]',
-  email: '41898282+github-actions[bot]@users.noreply.github.com',
-}
-
-/**
- * The lines git prints when a merge stops on a conflict: one `CONFLICT (…)` per file, then the
- * closing line. The release dashboard reads the same two strings from the job log as its fallback.
- */
-const CONFLICT_OUTPUT = /CONFLICT \(|Automatic merge failed/
 
 /**
  * Reads the version to release: the shared rule, with this action's closing line.
@@ -45,7 +31,8 @@ function validateVersion(version) {
 }
 
 /**
- * Checks the shape of a branch input. Whether git accepts the name is checked by git, in runMerge.
+ * Checks the shape of a branch input. Whether the repository has the branch is checked against the
+ * API, in runMerge.
  *
  * @param {string}  branch           The input value.
  * @param {string}  input            Which input it is, for the message: `branch`, `base-branch` or
@@ -80,41 +67,6 @@ function validateBranch(branch, input, { optional = false } = {}) {
 }
 
 /**
- * The header git sends to authenticate as the token, the same one actions/checkout stores when it
- * persists credentials.
- *
- * @param {string} token The token.
- *
- * @returns {string} The `AUTHORIZATION: basic …` header.
- */
-function authorizationHeader(token) {
-  return `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`
-}
-
-/**
- * The environment that hands git the token for one command, scoped to the server the run is on.
- *
- * Git reads `GIT_CONFIG_COUNT` and the numbered key/value pairs as configuration for that process
- * only, so the token reaches the fetch and the pushes and nothing else: it is never written to
- * .git/config, where a later step of the same job would find it, and it is never on a command line,
- * which @actions/exec echoes into the log.
- *
- * @param {string} token     The token.
- * @param {string} serverUrl The GitHub server, `https://github.com` or a GitHub Enterprise URL.
- *
- * @returns {object} The three variables.
- */
-function gitAuthEnv(token, serverUrl) {
-  const server = String(serverUrl || 'https://github.com').replace(/\/+$/, '')
-
-  return {
-    GIT_CONFIG_COUNT: '1',
-    GIT_CONFIG_KEY_0: `http.${server}/.extraheader`,
-    GIT_CONFIG_VALUE_0: authorizationHeader(token),
-  }
-}
-
-/**
  * The message of a merge commit.
  *
  * @param {string} from The branch merged.
@@ -127,24 +79,26 @@ function mergeMessage(from, into) {
 }
 
 /**
- * Whether a failed `git merge` stopped on a conflict, as opposed to failing for any other reason.
+ * Whether a failed merge request is GitHub reporting a conflict, as opposed to any other refusal.
  *
- * @param {{exitCode: number, stdout: string, stderr: string}} result What the merge returned.
+ * The merge endpoint answers 409 for two things: a conflict between the branches, and a base that
+ * moved while the merge was being made. Only the first is a conflict for the caller to resolve.
+ *
+ * @param {Error} error The Octokit error.
  *
  * @returns {boolean} True for a conflict.
  */
-function isConflict(result) {
-  return result.exitCode !== 0 && CONFLICT_OUTPUT.test(`${result.stdout}\n${result.stderr}`)
+function isConflict(error) {
+  return error?.status === 409 && /conflict/i.test(String(error.message))
 }
 
 /**
  * Checks the version against the repository's tags before anything is merged.
  *
  * A version that was never tagged is the common case. One whose tag exists with a published release
- * may be a retry after a late failure; runMerge decides that once the tag is fetched, by checking
- * that the tag contains the branch. One whose tag exists without a release would make the publish
- * reuse whatever commit the tag points at, so it is refused here, with the base and develop
- * untouched.
+ * may be a retry after a late failure; runMerge decides that by checking that the tag contains the
+ * branch. One whose tag exists without a release would make the publish reuse whatever commit the
+ * tag points at, so it is refused here, with the base and develop untouched.
  *
  * @param {object} options
  * @param {object} options.github  The Octokit github-script supplies.
@@ -154,18 +108,19 @@ function isConflict(result) {
  *
  * @throws {Error} When the tag exists without a release, or a read fails for any reason but 404.
  *
- * @returns {Promise<{tagged: boolean, releaseUrl: string|null}>} Whether the tag exists, and the
- *          published release's URL when it does.
+ * @returns {Promise<{tagged: boolean, tagSha: string|null, releaseUrl: string|null}>} Whether the
+ *          tag exists, the commit it points at, and the published release's URL when it does.
  */
 async function runPreflight({ github, owner, repo, version }) {
-  if (!(await tagExists({ github, owner, repo, version, what: 'Nothing was merged.' }))) {
-    return { tagged: false, releaseUrl: null }
+  const tagSha = await readTag({ github, owner, repo, version, what: 'Nothing was merged.' })
+  if (tagSha === null) {
+    return { tagged: false, tagSha: null, releaseUrl: null }
   }
 
   try {
     const { data: release } = await github.rest.repos.getReleaseByTag({ owner, repo, tag: version })
 
-    return { tagged: true, releaseUrl: release.html_url }
+    return { tagged: true, tagSha, releaseUrl: release.html_url }
   } catch (error) {
     if (isNotFound(error)) {
       throw new Error(
@@ -182,19 +137,65 @@ async function runPreflight({ github, owner, repo, version }) {
 }
 
 /**
- * Reads a file from a ref of the checkout, without checking it out.
+ * Checks that the repository has a branch, and reads its tip.
  *
- * @param {object} exec The @actions/exec toolkit.
- * @param {string} cwd  The checkout.
- * @param {string} ref  The ref, e.g. `origin/release/M26.test`.
- * @param {string} file The path in the repository.
+ * Read before any file is read from the branch: a 404 on a file read cannot tell a missing file
+ * from a missing branch.
  *
- * @returns {Promise<string|null>} The contents, or null when the ref has no such file.
+ * @param {object} options
+ * @param {object} options.github The Octokit github-script supplies.
+ * @param {string} options.owner  The repository owner.
+ * @param {string} options.repo   The repository name.
+ * @param {string} options.branch The branch name.
+ *
+ * @throws {Error} When the repository has no such branch, or the read fails.
+ *
+ * @returns {Promise<string>} The commit the branch points at.
  */
-async function fileAt(exec, cwd, ref, file) {
-  const result = await exec.getExecOutput('git', ['show', `${ref}:${file}`], { cwd, ignoreReturnCode: true, silent: true })
+async function readBranchTip({ github, owner, repo, branch }) {
+  try {
+    return (await github.rest.repos.getBranch({ owner, repo, branch })).data.commit.sha
+  } catch (error) {
+    if (isNotFound(error)) {
+      throw new Error(`'${branch}' is not a branch of ${owner}/${repo}. Nothing was merged.`)
+    }
 
-  return result.exitCode === 0 ? result.stdout : null
+    throw new Error(`Reading branch ${branch} failed (HTTP ${error.status}): ${error.message}. Nothing was merged.`)
+  }
+}
+
+/**
+ * Reads a file from a branch of the repository.
+ *
+ * @param {object} options
+ * @param {object} options.github The Octokit github-script supplies.
+ * @param {string} options.owner  The repository owner.
+ * @param {string} options.repo   The repository name.
+ * @param {string} options.branch The branch, known to exist.
+ * @param {string} options.file   The path in the repository.
+ *
+ * @throws {Error} When the read fails for any reason but 404.
+ *
+ * @returns {Promise<string|null>} The contents, or null when the branch has no such file (or the
+ *          path is a directory).
+ */
+async function fileAt({ github, owner, repo, branch, file }) {
+  let data
+  try {
+    data = (await github.rest.repos.getContent({ owner, repo, path: file, ref: branch })).data
+  } catch (error) {
+    if (isNotFound(error)) {
+      return null
+    }
+
+    throw new Error(`Reading ${file} on ${branch} failed (HTTP ${error.status}): ${error.message}. Nothing was merged.`)
+  }
+
+  if (Array.isArray(data) || data.type !== 'file') {
+    return null
+  }
+
+  return Buffer.from(data.content, 'base64').toString('utf8')
 }
 
 /**
@@ -203,9 +204,10 @@ async function fileAt(exec, cwd, ref, file) {
  * than what release-prep wrote into the branch would publish the code under the wrong version.
  *
  * @param {object} options
- * @param {object} options.exec    The @actions/exec toolkit.
- * @param {string} options.cwd     The checkout.
- * @param {string} options.branch  The release branch, fetched as `origin/<branch>`.
+ * @param {object} options.github  The Octokit github-script supplies.
+ * @param {string} options.owner   The repository owner.
+ * @param {string} options.repo    The repository name.
+ * @param {string} options.branch  The release branch.
  * @param {string} options.version The version to release, validated.
  *
  * @throws {Error} When the branch has no usable .puprc, a version file holds no version, or any of
@@ -213,12 +215,12 @@ async function fileAt(exec, cwd, ref, file) {
  *
  * @returns {Promise<void>} Resolves when every version file holds `version`.
  */
-async function assertBranchHoldsVersion({ exec, cwd, branch, version }) {
-  const ref = `origin/${branch}`
-  const files = readVersionFiles(await fileAt(exec, cwd, ref, '.puprc'), 'Nothing was merged.')
+async function assertBranchHoldsVersion({ github, owner, repo, branch, version }) {
+  const read = (file) => fileAt({ github, owner, repo, branch, file })
+  const files = readVersionFiles(await read('.puprc'), 'Nothing was merged.')
 
   for (const { file, regex } of files) {
-    const content = await fileAt(exec, cwd, ref, file)
+    const content = await read(file)
     if (content === null) {
       throw new Error(`${file}, which .puprc lists under paths.versions, is not on ${branch}. Nothing was merged.`)
     }
@@ -247,107 +249,115 @@ async function assertBranchHoldsVersion({ exec, cwd, branch, version }) {
 }
 
 /**
- * Runs a git command in the checkout and fails with its output when it exits non-zero.
+ * Whether a commit contains a branch: the tag of a published version, against the release branch.
  *
- * @param {object}   exec    The @actions/exec toolkit.
- * @param {string[]} args    The git arguments.
- * @param {object}   options Options for @actions/exec, `cwd` among them.
- * @param {string}   what    What the command does, to open the error message.
+ * @param {object} options
+ * @param {object} options.github The Octokit github-script supplies.
+ * @param {string} options.owner  The repository owner.
+ * @param {string} options.repo   The repository name.
+ * @param {string} options.branch The branch.
+ * @param {string} options.sha    The commit; a hash rather than the tag's name, which a branch of
+ *                                the same name would shadow.
  *
- * @throws {Error} When git exits non-zero.
+ * @throws {Error} When the comparison fails.
  *
- * @returns {Promise<string>} What git printed to stdout.
+ * @returns {Promise<boolean>} True when the commit is the branch's tip or descends from it.
  */
-function gitOrFail(exec, args, options, what) {
-  return runOrFail(exec, 'git', args, options, what)
+async function commitContainsBranch({ github, owner, repo, branch, sha }) {
+  try {
+    const { data } = await github.rest.repos.compareCommitsWithBasehead({ owner, repo, basehead: `${branch}...${sha}` })
+
+    return data.status === 'ahead' || data.status === 'identical'
+  } catch (error) {
+    throw new Error(`Comparing ${branch} with ${sha} failed (HTTP ${error.status}): ${error.message}. Nothing was merged.`)
+  }
 }
 
 /**
- * Merges one branch into the branch the checkout is on, as a merge commit, and pushes it.
+ * Merges one branch, or commit, into another as a merge commit, through the API.
  *
- * A branch that already holds the other merges as "Already up to date" and pushes nothing, which is
- * what a retry after a late failure finds. A conflict abandons the merge, prints the MERGE_CONFLICT
- * marker on a line of its own, where the release dashboard looks for it, and fails.
+ * GitHub makes the merge commit under the token's identity and signs it. A base that already holds
+ * the head answers 204 and nothing is written, which is what a retry after a late failure finds. A
+ * conflict prints the MERGE_CONFLICT marker on a line of its own, where the release dashboard looks
+ * for it, and fails; nothing is written for that branch.
  *
  * @param {object} options
+ * @param {object} options.github  The Octokit github-script supplies.
  * @param {object} options.core    The @actions/core toolkit.
- * @param {object} options.exec    The @actions/exec toolkit.
- * @param {string} options.cwd     The checkout.
- * @param {object} options.authEnv The environment that hands git the token, for the push.
- * @param {string} options.from    The ref to merge, e.g. `origin/release/M26.test`.
- * @param {string} options.into    The branch the checkout is on, e.g. `main`.
+ * @param {string} options.owner   The repository owner.
+ * @param {string} options.repo    The repository name.
+ * @param {string} options.into    The branch merged into, e.g. `main`.
+ * @param {string} options.head    What is merged: a branch name or a commit hash.
  * @param {string} options.message The merge commit message.
- * @param {string} options.label   How to name `from` in the log, e.g. `release/M26.test`.
+ * @param {string} options.label   How to name `head` in the log, e.g. `release/M26.test`.
  *
- * @throws {Error} When the merge conflicts or fails, or the push fails.
+ * @throws {Error} When the merge conflicts or GitHub refuses it.
  *
- * @returns {Promise<boolean>} True when a merge commit was made, false when there was nothing to merge.
+ * @returns {Promise<{merged: boolean, sha: string}>} Whether a merge commit was made, and the commit
+ *          `into` points at afterwards: the merge commit, or its tip when there was nothing to merge.
  */
-async function mergeAndPush({ core, exec, cwd, authEnv, from, into, message, label }) {
-  const identity = ['-c', `user.name=${BOT_IDENTITY.name}`, '-c', `user.email=${BOT_IDENTITY.email}`]
-  const result = await exec.getExecOutput('git', [...identity, 'merge', '--no-ff', '-m', message, from], {
-    cwd,
-    ignoreReturnCode: true,
-  })
+async function mergeInto({ github, core, owner, repo, into, head, message, label }) {
+  let response
+  try {
+    response = await github.rest.repos.merge({ owner, repo, base: into, head, commit_message: message })
+  } catch (error) {
+    if (isConflict(error)) {
+      // core.info prints a plain line: the marker has to open an output line to count, see the README.
+      core.setOutput('conflict', into)
+      core.info(
+        `MERGE_CONFLICT: merging ${label} into ${into} conflicted. Resolve it on ${into} by hand and ` +
+          `push, then run this step again. Nothing was merged into ${into}.`
+      )
+      throw new Error(
+        `Merging ${label} into ${into} stopped on a conflict. Resolve it on ${into} by hand and push, ` +
+          `then run this step again: the merges already done are kept. Nothing was merged into ${into}.`
+      )
+    }
 
-  if (isConflict(result)) {
-    // The abort leaves the checkout clean, so a later step can still use it. core.info prints a
-    // plain line: the marker has to open an output line to count, see the README.
-    await exec.getExecOutput('git', ['merge', '--abort'], { cwd, ignoreReturnCode: true })
-    core.setOutput('conflict', into)
-    core.info(
-      `MERGE_CONFLICT: merging ${label} into ${into} conflicted. Resolve it on ${into} by hand and ` +
-        `push, then run this step again. Nothing was pushed to ${into}.`
-    )
-    throw new Error(
-      `Merging ${label} into ${into} stopped on a conflict. Resolve it on ${into} by hand and push, ` +
-        `then run this step again: the merges already done are kept. Nothing was pushed to ${into}.`
-    )
+    if (error?.status === 409) {
+      throw new Error(
+        `Merging ${label} into ${into} was refused: ${into} moved while the merge was being made ` +
+          `(${error.message}). Run this step again; the merges already done are kept.`
+      )
+    }
+
+    throw new Error(`Merging ${label} into ${into} failed (HTTP ${error?.status}): ${error?.message}`)
   }
 
-  if (result.exitCode !== 0) {
-    const output = [result.stdout, result.stderr].map((text) => text.trim()).filter(Boolean)
-
-    throw new Error(`Merging ${label} into ${into} failed (exit code ${result.exitCode}):\n${output.join('\n')}`)
-  }
-
-  const merged = !/Already up to date/.test(result.stdout)
-  if (!merged) {
+  if (response.status === 204) {
     core.info(`${into} already has ${label}: nothing to merge.`)
+
+    return { merged: false, sha: await readBranchTip({ github, owner, repo, branch: into }) }
   }
 
-  await gitOrFail(exec, ['push', 'origin', `HEAD:refs/heads/${into}`], { cwd, env: authEnv }, `Pushing ${into}`)
-
-  return merged
+  return { merged: true, sha: response.data.sha }
 }
 
 /**
  * Checks the inputs and the version, then merges the release branch into the base branch and the
- * base branch back into develop, pushing each. The version has to be the one the release branch
- * holds in every file its .puprc lists, so the tag matches the code.
+ * base branch back into develop. The version has to be the one the release branch holds in every
+ * file its .puprc lists, so the tag matches the code.
  *
  * The base branch, not the release branch, is merged into develop: develop then descends from the
  * base, and consecutive releases bring one version bump each instead of divergent copies of the same
- * lines. Both merges are `--no-ff`, so each release is one merge commit in the history. A repository
- * without a develop branch leaves `develop-branch` empty, and only the first merge is made.
+ * lines. The API always makes a merge commit, never a fast-forward, so each release is one merge
+ * commit in the history. A repository without a develop branch leaves `develop-branch` empty, and
+ * only the first merge is made.
  *
- * The checkout is the caller's, on any branch and at any depth: the three branches are fetched, with
- * the full history when the checkout is shallow, and the checkout is left on the base branch at the
- * merged commit, for the steps that build the release from it.
+ * Nothing is read from or written to a checkout: the caller checks out `base-sha` afterwards for
+ * the steps that build the release from it.
  *
  * @param {object} options
- * @param {object} options.github The Octokit github-script supplies, for the tag and release reads.
+ * @param {object} options.github The Octokit github-script supplies, built from the token.
  * @param {object} options.core   The @actions/core toolkit, for the log, the outputs and the summary.
- * @param {object} options.exec   The @actions/exec toolkit.
  * @param {object} options.env    The environment the action manifest put its inputs in.
- * @param {string} options.cwd    The checkout, the working directory by default.
  *
- * @throws {Error} When an input is wrong, the tag exists without a release, a merge conflicts or
- *                 fails, or a fetch or push fails.
+ * @throws {Error} When an input is wrong, a branch is missing, the tag exists without a release, a
+ *                 merge conflicts, or a read or a merge fails.
  *
- * @returns {Promise<void>} Resolves once both branches are pushed and the outputs are set.
+ * @returns {Promise<void>} Resolves once both merges are made and the outputs are set.
  */
-async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
+async function runMerge({ github, core, env }) {
   const branch = validateBranch(env.INPUT_BRANCH, 'branch')
   const version = validateVersion(env.INPUT_VERSION)
   const base = validateBranch(env.INPUT_BASE_BRANCH, 'base-branch')
@@ -361,99 +371,59 @@ async function runMerge({ github, core, exec, env, cwd = process.cwd() }) {
     throw new Error(`branch '${branch}' is also the ${branch === base ? 'base' : 'develop'} branch. Nothing was merged.`)
   }
 
-  const branches = develop === null ? [branch, base] : [branch, base, develop]
-  for (const name of branches) {
-    const check = await exec.getExecOutput('git', ['check-ref-format', `refs/heads/${name}`], {
-      cwd,
-      ignoreReturnCode: true,
-      silent: true,
-    })
-    if (check.exitCode !== 0) {
-      throw new Error(`'${name}' is not a valid branch name. Nothing was merged.`)
-    }
+  const { tagged, tagSha, releaseUrl } = await runPreflight({ github, owner, repo, version })
+
+  for (const name of develop === null ? [branch, base] : [branch, base, develop]) {
+    await readBranchTip({ github, owner, repo, branch: name })
   }
 
-  const { tagged, releaseUrl } = await runPreflight({ github, owner, repo, version })
-
-  const token = String(env.INPUT_TOKEN || '')
-  const authEnv = { ...env, ...gitAuthEnv(token, env.GITHUB_SERVER_URL) }
-  if (token) {
-    core.setSecret(authorizationHeader(token))
-  }
-
-  // A shallow checkout, the actions/checkout default, has no history for the merges to find a base
-  // in; `--unshallow` fetches it along with the branches.
-  const shallow = (await exec.getExecOutput('git', ['rev-parse', '--is-shallow-repository'], { cwd, silent: true })).stdout.trim()
-  const refspecs = branches.map((name) => `+refs/heads/${name}:refs/remotes/origin/${name}`)
-  if (tagged) {
-    refspecs.push(`+refs/tags/${version}:refs/tags/${version}`)
-  }
-  await gitOrFail(
-    exec,
-    ['fetch', ...(shallow === 'true' ? ['--unshallow'] : []), 'origin', ...refspecs],
-    { cwd, env: authEnv },
-    'Fetching the branches'
-  )
-
-  await assertBranchHoldsVersion({ exec, cwd, branch, version })
+  await assertBranchHoldsVersion({ github, owner, repo, branch, version })
 
   // A tag with a published release is a retry only when that release came from this branch: its
   // commit then contains the branch, and the merges below find nothing to do. A tag that does not
   // contain the branch is an earlier release of the same version, which the branch was never bumped
   // past; merging it would put a second set of changes under a version that is already out.
   if (tagged) {
-    const ancestry = await exec.getExecOutput(
-      'git',
-      ['merge-base', '--is-ancestor', `origin/${branch}`, `refs/tags/${version}^{commit}`],
-      { cwd, ignoreReturnCode: true, silent: true }
-    )
-    if (ancestry.exitCode === 1) {
+    if (!(await commitContainsBranch({ github, owner, repo, branch, sha: tagSha }))) {
       throw new Error(
         `The tag ${version} already exists and does not contain ${branch}: ${version} was released ` +
           `from another commit, and the branch was never bumped past it. Give the release a new ` +
           'version and prepare the branch again. Nothing was merged.'
       )
     }
-    if (ancestry.exitCode !== 0) {
-      throw new Error(`Comparing ${branch} with the tag ${version} failed (exit code ${ancestry.exitCode}). Nothing was merged.`)
-    }
     core.info(`${version} is already published (${releaseUrl}) from ${branch}: nothing to publish again.`)
   }
 
-  await gitOrFail(exec, ['checkout', '--quiet', '-B', base, `origin/${base}`], { cwd }, `Checking out ${base}`)
-  const mergedBase = await mergeAndPush({
+  const { merged: mergedBase, sha: baseSha } = await mergeInto({
+    github,
     core,
-    exec,
-    cwd,
-    authEnv,
-    from: `origin/${branch}`,
+    owner,
+    repo,
     into: base,
+    head: branch,
     message: mergeMessage(branch, base),
     label: branch,
   })
 
-  // The commit the release is published at: the merge commit, or the base's tip on a retry that
-  // found the merge done. The caller publishes the release at it, so the tag is made at this commit
-  // and not at whatever the base branch points to by then; it is also the commit the caller builds
-  // from.
-  const baseSha = (await gitOrFail(exec, ['rev-parse', 'HEAD'], { cwd, silent: true }, `Reading the merged ${base} commit`)).trim()
-
+  // base-sha is the commit the release is published at and built from: the merge commit, or the
+  // base's tip on a retry that found the merge done. The second merge takes that commit, not the
+  // base's name, so develop receives exactly what is being released even if the base moves on.
   let mergedDevelop = null
   if (develop === null) {
     core.info(`develop-branch is empty: ${base} is not merged back into a develop branch.`)
   } else {
-    await gitOrFail(exec, ['checkout', '--quiet', '-B', develop, `origin/${develop}`], { cwd }, `Checking out ${develop}`)
-    mergedDevelop = await mergeAndPush({
-      core,
-      exec,
-      cwd,
-      authEnv,
-      from: base,
-      into: develop,
-      message: `Merge ${base} back into ${develop} (${branch})`,
-      label: base,
-    })
-    await gitOrFail(exec, ['checkout', '--quiet', base], { cwd }, `Checking out ${base}`)
+    mergedDevelop = (
+      await mergeInto({
+        github,
+        core,
+        owner,
+        repo,
+        into: develop,
+        head: baseSha,
+        message: `Merge ${base} back into ${develop} (${branch})`,
+        label: base,
+      })
+    ).merged
   }
 
   core.setOutput('branch', branch)
@@ -473,9 +443,6 @@ module.exports = {
   runPreflight,
   validateVersion,
   validateBranch,
-  authorizationHeader,
-  gitAuthEnv,
   mergeMessage,
   isConflict,
-  BOT_IDENTITY,
 }

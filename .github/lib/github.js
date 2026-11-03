@@ -37,7 +37,7 @@ function isNotFound(error) {
 }
 
 /**
- * Reads a tag of the repository.
+ * Reads a tag of the repository: the commit it points at.
  *
  * @param {object} options
  * @param {object} options.github  The Octokit github-script supplies.
@@ -46,23 +46,47 @@ function isNotFound(error) {
  * @param {string} options.version The tag, a version.
  * @param {string} options.what    What was not done, to close the error message.
  *
- * @throws {Error} When the read fails for any reason but 404, so an API error is never taken for an
+ * @throws {Error} When a read fails for any reason but 404, so an API error is never taken for an
  *                 absent tag.
  *
- * @returns {Promise<boolean>} Whether the tag exists.
+ * @returns {Promise<string|null>} The commit the tag points at, through the tag object when the tag
+ *          is annotated; null when there is no such tag.
  */
-async function tagExists({ github, owner, repo, version, what }) {
+async function readTag({ github, owner, repo, version, what }) {
+  let ref
   try {
-    await github.rest.git.getRef({ owner, repo, ref: `tags/${version}` })
-
-    return true
+    ref = (await github.rest.git.getRef({ owner, repo, ref: `tags/${version}` })).data
   } catch (error) {
     if (isNotFound(error)) {
-      return false
+      return null
     }
 
     throw new Error(`Reading tag ${version} failed (HTTP ${error.status}): ${error.message}. ${what}`)
   }
+
+  if (ref.object.type !== 'tag') {
+    return ref.object.sha
+  }
+
+  // An annotated tag is an object of its own; the commit is what it points at.
+  try {
+    return (await github.rest.git.getTag({ owner, repo, tag_sha: ref.object.sha })).data.object.sha
+  } catch (error) {
+    throw new Error(`Reading the tag object of ${version} failed (HTTP ${error.status}): ${error.message}. ${what}`)
+  }
 }
 
-module.exports = { readRepository, isNotFound, tagExists }
+/**
+ * Whether a tag of the repository exists.
+ *
+ * @param {object} options Passed to readTag.
+ *
+ * @throws {Error} When the read fails for any reason but 404.
+ *
+ * @returns {Promise<boolean>} Whether the tag exists.
+ */
+async function tagExists(options) {
+  return (await readTag(options)) !== null
+}
+
+module.exports = { readRepository, isNotFound, readTag, tagExists }

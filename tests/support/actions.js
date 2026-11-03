@@ -32,10 +32,13 @@ const path = require('node:path')
  * @returns {Response} The response for the fetch to return.
  */
 function jsonResponse({ status = 200, body = {}, headers = {} }) {
-  // A 204 or 304 has no body, and Response refuses one.
-  const content = status === 204 || status === 304 ? null : JSON.stringify(body)
+  // A 204 carries no body, and Response refuses one: the merge endpoint answers it when the base
+  // already contains the head.
+  if (status === 204 || status === 205 || status === 304) {
+    return new Response(null, { status, headers })
+  }
 
-  return new Response(content, {
+  return new Response(JSON.stringify(body), {
     status,
     headers: { 'content-type': 'application/json', ...headers },
   })
