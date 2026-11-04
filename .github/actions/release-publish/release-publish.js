@@ -21,7 +21,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const { STELLARWP_VERSION_PATTERN, compareVersions, validateVersion: validateReleaseVersion } = require('../../lib/versions.js')
-const { readRepository, isNotFound, tagExists } = require('../../lib/github.js')
+const { readRepository, isNotFound, readTag, tagExists } = require('../../lib/github.js')
 
 /** Closes every error message: nothing of this action's was done. */
 const NOTHING = 'Nothing was published.'
@@ -380,6 +380,11 @@ async function runPublish({ github, core, env, cwd = process.cwd() }) {
     ).data.body
   }
 
+  // GitHub ignores target_commitish when the tag already exists, so a tag named after the version
+  // that someone creates between the check above and the publish attaches the release to that
+  // commit. The tag is read again at the point it would matter: here, after the release is public,
+  // the failure names the commit the release is at; with files, before the draft is published,
+  // where the draft can still be deleted.
   let release
   if (files.length === 0) {
     release = (
@@ -393,6 +398,16 @@ async function runPublish({ github, core, env, cwd = process.cwd() }) {
         make_latest: latest,
       })
     ).data
+
+    const tagSha = await readTag({ github, owner, repo, version, what: `The release is public at ${release.html_url}.` })
+    if (tagSha !== null && tagSha !== sha) {
+      await core.summary.addRaw(`Release ${version} was published at \`${tagSha.slice(0, 7)}\`, not at \`${sha.slice(0, 7)}\`: ${release.html_url}`, true).write()
+      throw new Error(
+        `The tag ${version} was created at ${tagSha} between the check and the publish, and the release is ` +
+          `attached to it, not to ${sha}. The release is public at ${release.html_url}: delete it and the tag, or ` +
+          'release another version.'
+      )
+    }
   } else {
     // A draft makes no tag, so a failed upload can be undone by deleting it, and the release is
     // never public without its files.
@@ -425,6 +440,15 @@ async function runPublish({ github, core, env, cwd = process.cwd() }) {
         )
       }
       core.info(`Attached ${asset.name}.`)
+    }
+
+    const tagSha = await readTag({ github, owner, repo, version, what: NOTHING })
+    if (tagSha !== null) {
+      const deleted = await deleteDraft({ github, owner, repo, draft })
+      throw new Error(
+        `The tag ${version} was created at ${tagSha} while the files were uploading, so publishing the draft ` +
+          `would release that commit, not ${sha}. ${deleted} Delete the tag or release another version. ${NOTHING}`
+      )
     }
 
     // Publishing the draft is what makes the tag, so this is the call a tag ruleset refuses. The

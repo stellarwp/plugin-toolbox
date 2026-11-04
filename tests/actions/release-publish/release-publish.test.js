@@ -223,6 +223,8 @@ describe('release-publish', () => {
         `GET ${API.list}`,
         `POST ${API.notes}`,
         `POST ${API.releases}`,
+        // The tag, read again once the release exists: it has to point at the commit asked for.
+        `GET ${API.tag}`,
       ])
       // The notes start at the published version right below this one, chosen here rather than
       // left to GitHub.
@@ -284,7 +286,7 @@ describe('release-publish', () => {
 
       // No generated notes were asked for: the file is the body.
       assert.ok(!requested(requests).includes(`POST ${API.notes}`))
-      assert.deepStrictEqual(requests.at(-1).body, {
+      assert.deepStrictEqual(requests.find((request) => request.method === 'POST' && request.path === API.releases).body, {
         tag_name: '4.17.0',
         target_commitish: SHA,
         name: 'Maintenance Release 4.17.0',
@@ -304,7 +306,7 @@ describe('release-publish', () => {
 
       await runPublish({ github, core, env: publishEnv(), cwd: checkoutWith() })
 
-      assert.strictEqual(requests.at(-1).body.make_latest, 'false')
+      assert.strictEqual(requests.find((request) => request.method === 'POST' && request.path === API.releases).body.make_latest, 'false')
       assert.match(logged(), /below the current latest release/)
       // The notes start at the release below the hotfix, not at the newer 4.18.0.
       assert.strictEqual(requests.find((request) => request.path === API.notes).body.previous_tag_name, '4.16.0')
@@ -320,7 +322,7 @@ describe('release-publish', () => {
 
       await runPublish({ github, core, env: publishEnv(), cwd: checkoutWith() })
 
-      assert.strictEqual(requests.at(-1).body.make_latest, 'true')
+      assert.strictEqual(requests.find((request) => request.method === 'POST' && request.path === API.releases).body.make_latest, 'true')
     })
 
     it('uploads the files to a draft and publishes it last, so the release is never public without them', async (t) => {
@@ -344,6 +346,8 @@ describe('release-publish', () => {
         `POST ${API.releases}`,
         'POST uploads:/repos/stellarwp/plugin/releases/77/assets?name=plugin.zip',
         'POST uploads:/repos/stellarwp/plugin/releases/77/assets?name=plugin.pot',
+        // The tag, read again before the draft is published: one made meanwhile would take over.
+        `GET ${API.tag}`,
         `PATCH ${API.release}`,
       ])
       // Created as a draft, with no make_latest yet: that is decided when it is published.
@@ -355,7 +359,7 @@ describe('release-publish', () => {
         draft: true,
       })
       assert.strictEqual(String(requests[6].body), 'PK zip bytes')
-      assert.deepStrictEqual(requests[8].body, { draft: false, make_latest: 'true' })
+      assert.deepStrictEqual(requests[9].body, { draft: false, make_latest: 'true' })
       assert.deepStrictEqual(outputs(), { published: 'true', 'release-url': RELEASE_URL, sha: SHA })
       assert.match(logged(), /Attached plugin\.zip.*Attached plugin\.pot/s)
       assert.match(summary(), /with `plugin\.zip`, `plugin\.pot`/)
@@ -378,6 +382,62 @@ describe('release-publish', () => {
 
       assert.deepStrictEqual(requested(requests).slice(-2), ['POST uploads:/repos/stellarwp/plugin/releases/77/assets?name=plugin.zip', `DELETE ${API.release}`])
       assert.deepStrictEqual(outputs(), {})
+    })
+
+    it('deletes the draft and refuses when the tag appeared while the files were uploading', async (t) => {
+      // The tag is absent at the first check and present before the draft is published: someone
+      // made it meanwhile. Publishing would attach the release to that commit.
+      const cwd = checkoutWith({ 'build/plugin.zip': 'zip' })
+      const { github, requests } = await octokitFor([
+        {
+          method: 'GET',
+          path: API.tag,
+          responses: [
+            { status: 404, body: { message: 'Not Found' } },
+            { body: { ref: 'refs/tags/4.17.0', object: { sha: 'abcabcabcabcabcabcabcabcabcabcabcabcabca', type: 'commit' } } },
+          ],
+        },
+        ...FRESH,
+        { method: 'POST', path: API.releases, status: 201, body: { id: 77, html_url: RELEASE_URL } },
+        { method: 'POST', path: API.assets, status: 201, body: { id: 1 } },
+        { method: 'DELETE', path: API.release, status: 204, body: {} },
+      ])
+      const { core, outputs } = await coreWithOutputs(t)
+
+      await assert.rejects(
+        runPublish({ github, core, env: publishEnv({ INPUT_FILES: 'build/plugin.zip' }), cwd }),
+        /The tag 4\.17\.0 was created at abcabca.* while the files were uploading.*not 0123456.*The draft was deleted and no tag was made.*Nothing was published/s
+      )
+
+      assert.deepStrictEqual(requested(requests).slice(-2), [`GET ${API.tag}`, `DELETE ${API.release}`])
+      assert.ok(!requested(requests).includes(`PATCH ${API.release}`), 'the draft is never published')
+      assert.deepStrictEqual(outputs(), {})
+    })
+
+    it('fails naming the commit when a tag made between the check and the publish took the release', async (t) => {
+      // Without files there is no draft: the release is public by the time the tag is read again.
+      const { github, requests } = await octokitFor([
+        {
+          method: 'GET',
+          path: API.tag,
+          responses: [
+            { status: 404, body: { message: 'Not Found' } },
+            { body: { ref: 'refs/tags/4.17.0', object: { sha: 'abcabcabcabcabcabcabcabcabcabcabcabcabca', type: 'commit' } } },
+          ],
+        },
+        ...FRESH,
+        { method: 'POST', path: API.releases, status: 201, body: { id: 77, html_url: RELEASE_URL } },
+      ])
+      const { core, outputs, summary } = await coreWithOutputs(t)
+
+      await assert.rejects(
+        runPublish({ github, core, env: publishEnv(), cwd: checkoutWith() }),
+        /The tag 4\.17\.0 was created at abcabca.* between the check and the publish.*not to 0123456.*The release is public at https:\/\/github\.com\/stellarwp\/plugin\/releases\/tag\/4\.17\.0: delete it and the tag/s
+      )
+
+      assert.strictEqual(requested(requests).at(-1), `GET ${API.tag}`)
+      assert.deepStrictEqual(outputs(), {})
+      assert.match(summary(), /published at `abcabca`, not at `0123456`/)
     })
 
     it('deletes the draft when publishing it fails, as when a tag ruleset refuses the tag', async (t) => {
@@ -430,7 +490,7 @@ describe('release-publish', () => {
 
       await runPublish({ github, core, env: publishEnv(), cwd: checkoutWith() })
 
-      assert.deepStrictEqual(requested(requests).slice(4), ['DELETE /repos/stellarwp/plugin/releases/70', `POST ${API.notes}`, `POST ${API.releases}`])
+      assert.deepStrictEqual(requested(requests).slice(4), ['DELETE /repos/stellarwp/plugin/releases/70', `POST ${API.notes}`, `POST ${API.releases}`, `GET ${API.tag}`])
       assert.match(logged(), /Deleted a draft of 4\.17\.0 left behind by an earlier run/)
       assert.strictEqual(outputs().published, 'true')
     })

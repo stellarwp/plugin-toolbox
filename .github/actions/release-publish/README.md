@@ -50,6 +50,10 @@ action runs, after the checkout):
     target: ${{ steps.head.outputs.sha }}
 ```
 
+Give that workflow the `concurrency` group the template has, so one publish of a version runs at a
+time: two at once race for the tag, and the action refuses the second (see
+[Tags it refuses](#tags-it-refuses)).
+
 ## What it does
 
 In this order, stopping at the first failure:
@@ -93,6 +97,19 @@ In this order, stopping at the first failure:
 | `published` | `true` when the release was created, `skipped` when it already existed. |
 | `release-url` | The release page. |
 | `sha` | The commit the release was created at; empty when it already existed. |
+
+## Tags it refuses
+
+A tag named after the version that exists before the action runs, without a published release, is
+refused: publishing would release whatever commit the tag points at. GitHub ignores the commit
+asked for when the tag already exists, so a tag created by someone else between that check and the
+publish would do the same. The action reads the tag again where it matters:
+
+- With `files`, before the draft is published. A tag that appeared while the files were uploading
+  makes the action delete the draft and fail, naming the tag's commit; nothing is published.
+- Without `files`, right after the release is created. A tag that points at another commit makes
+  the action fail, naming the commit the release is at and its URL: the release is public by then,
+  so the failure says what to delete rather than undoing it.
 
 ## Running it again
 
