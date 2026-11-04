@@ -1,13 +1,12 @@
 name: Plugin Check
 
 # Runs WordPress.org's Plugin Check on the plugin as it ships, and compares the error counts with
-# an earlier run: a pull request with the branch it targets, a push with the run before it.
+# the baseline the repository commits, `.plugin-check-baseline.json`.
 #
-# A file to copy into .github/workflows/ of a plugin repository. Keep the file name
-# plugin-check.yml: earlier runs of this file hold the baselines, and a new name starts with none.
-# The work is in stellarwp/plugin-toolbox/.github/workflows/plugin-check.yml. The repository needs
-# a .puprc whose zip_name equals plugin-slug; pup itself is installed by the workflow. See the
-# plugin-check-report action's README.
+# A file to copy into .github/workflows/ of a plugin repository, under any name. The work is in
+# stellarwp/plugin-toolbox/.github/workflows/plugin-check.yml. The repository needs a .puprc whose
+# zip_name equals plugin-slug; pup itself is installed by the workflow. See the plugin-check-report
+# action's README.
 #
 # Checks that do not fit the plugin go in a .plugin-check.json at the repository root, as
 # {"exclude-checks": ["check_name"]}; or pass the `exclude-checks` input, which replaces the file.
@@ -17,7 +16,7 @@ name: Plugin Check
 
 on:
   pull_request:
-  # The branches pull requests target. A push there makes the baseline those pull requests read.
+  # The branches pull requests target. A push there keeps them honest after a merge.
   push:
     branches: [main]
   workflow_dispatch:
@@ -34,7 +33,6 @@ jobs:
   plugin-check:
     # The most any job of the shared workflow asks for. A called workflow cannot go above this.
     permissions:
-      actions: read # read earlier runs and download their baseline
       contents: read # check out the repository
       issues: write # the sticky pull request comment
       pull-requests: write # the sticky pull request comment

@@ -1,7 +1,8 @@
-# Compares a WordPress.org Plugin Check results file with a baseline: the counts of an earlier run
-# of the same workflow, never a committed file. Only a rule with more errors than the baseline
-# fails (baseline mode), or any error at all (strict mode). It also saves this run's counts as the
-# next baseline and writes the short body for the pull request comment.
+# Compares a WordPress.org Plugin Check results file with a baseline: the counts per rule in a file
+# the repository commits, `.plugin-check-baseline.json`. Only a rule with more errors than the
+# baseline fails (baseline mode), or any error at all (strict mode). It also saves this run's counts
+# as a new baseline, to copy into the repository, and writes the short body for the pull request
+# comment.
 #
 # It does not run Plugin Check and it does not post the comment. The reusable workflow
 # .github/workflows/plugin-check.yml does both, so this action stays usable with a results file
@@ -12,7 +13,7 @@
 # an actions/github-script step that requires it by path, so there is nothing to build: the file in
 # the repository is the file that runs. The same file runs from a command line; see the README.
 name: Plugin Check report
-description: Compares Plugin Check results with an earlier run's baseline, and saves a new baseline
+description: Compares Plugin Check results with the repository's baseline file, and saves a new baseline
 
 inputs:
   results:
@@ -38,34 +39,23 @@ inputs:
       comment. Empty uses `<!-- plugin-check:<owner>/<repo> -->`.
     required: false
     default: ''
-  baseline-wait:
+  baseline-file:
     description: >-
-      Seconds a pull request waits for the run of its base commit to finish, when that run is
-      still going. The reusable workflow lets its report job run for 30 minutes, so the default
-      leaves room for the work around the wait.
+      Path of the baseline file the repository commits: `{"errors": {code: n}, "warnings": {code: n}}`.
+      A relative path is read from the working directory.
     required: false
-    default: '1200'
-  token:
-    description: >-
-      Token that lists earlier runs and downloads their artifacts. It needs `actions: read`.
-    required: false
-    default: ${{ github.token }}
+    default: '.plugin-check-baseline.json'
 
 outputs:
   artifact-url:
     description: 'Link to the plugin-check-report artifact this run uploaded. Empty when there was nothing to upload.'
     value: ${{ steps.artifact.outputs.artifact-url }}
-  baseline-url:
-    description: 'Link to the run the baseline came from. Empty when there was no baseline.'
-    value: ${{ steps.baseline.outputs.url }}
 
 runs:
   using: 'composite'
   steps:
     # One folder per run under RUNNER_TEMP, cleared first, so a second use of the action in the same
-    # job never reads the first one's files. Also finds out which workflow's runs hold the baseline:
-    # in a called workflow GITHUB_WORKFLOW_REF is the caller's, and the runs belong to that file, not
-    # to the toolbox's workflow.
+    # job never reads the first one's files.
     - name: Set file paths
       id: paths
       uses: actions/github-script@v9
@@ -79,8 +69,8 @@ runs:
           const { runPaths } = require(`${process.env.ACTION_PATH}/plugin-check-report.js`)
           process.exitCode = runPaths({ core, env: process.env })
 
-    # A baseline made from this run, uploaded even when the compare below fails. Later runs
-    # download it as their baseline: pull requests into this branch, and the next push.
+    # A baseline made from this run, uploaded even when the compare below fails. It is the easy way
+    # to update the committed file: download the artifact and copy its baseline.json.
     - name: Write a new baseline
       uses: actions/github-script@v9
       env:
@@ -92,9 +82,7 @@ runs:
           const { runUpdate } = require(`${process.env.ACTION_PATH}/plugin-check-report.js`)
           process.exitCode = runUpdate({ core, env: process.env })
 
-    # The name and the baseline.json inside it are what the lookup in plugin-check-report.js looks
-    # for. Keep both: repositories that ran an earlier copy of this check upload the same names, so
-    # their old baselines keep working.
+    # The comment links to this artifact: the results, and the new baseline.json.
     - name: Upload the report
       id: artifact
       uses: actions/upload-artifact@v7
@@ -102,35 +90,6 @@ runs:
         name: plugin-check-report
         path: ${{ steps.paths.outputs.report }}
         if-no-files-found: ignore
-
-    # The baseline: what the branch the code goes into looks like now, from the artifact of an
-    # earlier run on it. A pull request takes the run for its base commit; for a stacked pull
-    # request that is the run of the pull request below it. When that run is still going, it is
-    # waited for. When it has no baseline (it was cancelled by a newer push, say), the latest run on
-    # the base branch is used instead, and more errors than it are only reported, not failed: that
-    # run is older than the target. A push takes the run before it on the same branch, so a merge
-    # that adds errors fails there, where the whole team sees it.
-    # With no run to take it from, the compare checks nothing and passes with a warning. A failed
-    # lookup (GitHub API or download error) fails the step instead, so an outage never passes as
-    # "no baseline".
-    - name: Get the baseline
-      id: baseline
-      uses: actions/github-script@v9
-      env:
-        ACTION_PATH: ${{ github.action_path }}
-        # The GitHub CLI downloads the artifact, and reads its token from here.
-        GH_TOKEN: ${{ inputs.token }}
-        EVENT: ${{ github.event_name }}
-        BASE_REF: ${{ github.event.pull_request.base.ref }}
-        BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        WAIT: ${{ inputs.baseline-wait }}
-        WORKFLOW: ${{ steps.paths.outputs.workflow }}
-        BASELINE: ${{ steps.paths.outputs.baseline }}
-      with:
-        github-token: ${{ inputs.token }}
-        script: |
-          const { runFetch } = require(`${process.env.ACTION_PATH}/plugin-check-report.js`)
-          process.exitCode = await runFetch({ github, core, exec, env: process.env })
 
     # Fails the step when the mode says so. Also writes the comment body and the same text to the
     # job summary. The step ends with an exit status, not an extra error annotation: the messages
@@ -142,11 +101,8 @@ runs:
         RESULTS: ${{ inputs.results }}
         COMMENT_FILE: ${{ inputs.comment-file }}
         PLUGIN_CHECK_MODE: ${{ inputs.mode }}
-        PLUGIN_CHECK_BASELINE: ${{ steps.paths.outputs.baseline }}
-        PLUGIN_CHECK_ADVISORY: ${{ steps.baseline.outputs.advisory }}
+        PLUGIN_CHECK_BASELINE: ${{ inputs.baseline-file }}
         COMMENT_MARKER: ${{ steps.paths.outputs.marker }}
-        BASELINE_LABEL: ${{ steps.baseline.outputs.label }}
-        BASELINE_URL: ${{ steps.baseline.outputs.url }}
         ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       with:
