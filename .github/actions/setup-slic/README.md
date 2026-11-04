@@ -352,7 +352,7 @@ Three independent settings control different kinds of debugging:
 
 | Setting | Action | Default | Effect |
 |---|---|---|---|
-| `slic-debug` | `setup-slic` | `'true'` | Slic diagnostic logging and configuration output |
+| `slic-debug` | `setup-slic` | `'true'` | Slic diagnostic logging |
 | `xdebug` | `setup-slic` | `'false'` | PHP Xdebug extension in the test containers |
 | `debug` | `run-slic-suite` | `'false'` | Codeception's `--debug` output for that suite |
 

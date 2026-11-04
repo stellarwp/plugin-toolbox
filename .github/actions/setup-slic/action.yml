@@ -279,7 +279,6 @@ runs:
       run: |
         if [ "${SLIC_DEBUG}" == "true" ]; then
           "${SLIC_BIN}" debug on
-          "${SLIC_BIN}" config
         else
           "${SLIC_BIN}" debug off
         fi
