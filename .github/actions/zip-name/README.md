@@ -86,8 +86,10 @@ Before anything is downloaded or run:
 
 - `production` that is not `yes` or `no`. The template declares it as a `choice` of the two, but the
   action checks the value itself, so a dispatch by hand or by a tool gets the same answer.
-- `prerelease` that is not `dev`, `alpha`, `beta` or `rc`. Empty counts as `dev`.
-- `sequence` that is not empty or digits from 1 with no leading zero: `0`, `02`, `abc`, `rc-2`.
+- On a QA build (`production: no`), `prerelease` that is not `dev`, `alpha`, `beta` or `rc`. Empty
+  counts as `dev`.
+- On a QA build, `sequence` that is not empty or digits from 1 with no leading zero: `0`, `02`,
+  `abc`, `rc-2`.
 - `working-directory` that is not a directory of the workspace.
 - A missing `.puprc`, one that is not JSON, or one with no `paths.versions`.
 - `pup-version` that is neither a release number such as `2.0.0` nor `latest`.
@@ -104,9 +106,10 @@ After the version is read, before the suffix is built:
 And at the end, a name from `pup zip-name` that does not end in `.<version>`, which means the name
 is not the one the S3 check and the upload would look for.
 
-With `production: yes`, `prerelease` and `sequence` are ignored, not refused: the action writes a
-warning saying so, and names the clean zip. `production` is the master switch; a form filled in by
-habit still produces the right production build.
+With `production: yes`, `prerelease` and `sequence` are ignored whatever they hold, not read and
+not refused: the action writes a warning naming what the form carried, and names the clean zip.
+`production` is the master switch; a form filled in by habit, or with a typo in `sequence`, still
+produces the right production build.
 
 ## Inputs
 

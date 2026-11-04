@@ -21,14 +21,16 @@ inputs:
     description: >-
       The label a QA build is named with: `dev`, `alpha`, `beta` or `rc`. `dev` with no `sequence`
       is `-dev-<timestamp>-<hash>`, the suffix `pup get-version --dev` gives, so the default name is
-      the one every QA build had until now. Anything else fails before anything runs.
+      the one every QA build had until now. On a QA build anything else fails before anything runs;
+      a production build ignores it.
     required: false
     default: 'dev'
   sequence:
     description: >-
       The number of a build numbered by hand, digits from 1 with no leading zero: `2` names the build
       `<version>-rc-2`. Empty names it after the commit, `<version>-rc-<timestamp>-<hash>`, unique
-      per commit. Anything else fails before anything runs.
+      per commit. On a QA build anything else fails before anything runs; a production build
+      ignores it.
     required: false
     default: ''
   expected-version:

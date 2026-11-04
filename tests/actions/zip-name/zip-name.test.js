@@ -300,6 +300,23 @@ describe('zip-name', () => {
       }
     })
 
+    it('ignores a prerelease or sequence it would refuse on a QA build, when production is yes', async (t) => {
+      // production is the master switch: a typo in the form must not hold up a production zip.
+      const { core, outputs, logged } = await coreWithOutputs(t)
+      const { exec } = recordingExec(allSucceed())
+      const cwd = checkoutWith({ '.puprc': PUPRC })
+
+      await runZipName({ core, exec, env: nameEnv({ INPUT_PRODUCTION: 'yes', INPUT_PRERELEASE: 'nightly', INPUT_SEQUENCE: 'abc' }), cwd })
+
+      assert.match(logged(), /::warning::production is yes, so prerelease 'nightly' and sequence 'abc' are ignored/)
+      assert.deepEqual(outputs(), {
+        'base-version': '4.19.0.1',
+        version: '4.19.0.1',
+        'zip-name': 'give.4.19.0.1',
+        prerelease: '',
+      })
+    })
+
     it('stops before downloading or running anything when production, prerelease or sequence is wrong', async (t) => {
       const cases = [
         [{ INPUT_PRODUCTION: 'true' }, /production 'true' is not yes or no/],

@@ -196,8 +196,11 @@ async function readCommitStamp(exec, cwd) {
  */
 async function runZipName({ core, exec, env, cwd: workspace = process.cwd(), fetchImpl = globalThis.fetch }) {
   const production = readYesNo(env.INPUT_PRODUCTION, 'production')
-  const prerelease = readPrerelease(env.INPUT_PRERELEASE)
-  const sequence = readSequence(env.INPUT_SEQUENCE)
+  // production is the master switch: a production build ignores prerelease and sequence whatever
+  // they hold, so a form filled in by habit, or with a typo, never holds up a production zip. They
+  // are read, and refused when wrong, on a QA build only.
+  const prerelease = production ? 'dev' : readPrerelease(env.INPUT_PRERELEASE)
+  const sequence = production ? null : readSequence(env.INPUT_SEQUENCE)
   const expected = String(env.INPUT_EXPECTED_VERSION ?? '').trim()
   const cwd = readWorkingDirectory(env.INPUT_WORKING_DIRECTORY, { base: workspace, what: WHAT })
 
@@ -205,18 +208,23 @@ async function runZipName({ core, exec, env, cwd: workspace = process.cwd(), fet
   // before pup is downloaded.
   readVersionFiles(readCheckoutFile(cwd, '.puprc'), WHAT)
 
-  if (production && (prerelease !== 'dev' || sequence !== null)) {
+  if (production) {
+    // The raw values, since they were not read: the warning names what the form carried.
+    const rawPrerelease = String(env.INPUT_PRERELEASE ?? '').trim()
+    const rawSequence = String(env.INPUT_SEQUENCE ?? '').trim()
     const ignored = [
-      prerelease !== 'dev' ? `prerelease '${prerelease}'` : null,
-      sequence !== null ? `sequence '${sequence}'` : null,
+      rawPrerelease !== '' && rawPrerelease.toLowerCase() !== 'dev' ? `prerelease '${rawPrerelease}'` : null,
+      rawSequence !== '' ? `sequence '${rawSequence}'` : null,
     ]
       .filter(Boolean)
       .join(' and ')
 
-    core.warning(
-      `production is yes, so ${ignored} ${ignored.includes(' and ') ? 'are' : 'is'} ignored: a production ` +
-        'build is the clean <slug>.<version>.zip. Set production to no for a pre-release build.'
-    )
+    if (ignored !== '') {
+      core.warning(
+        `production is yes, so ${ignored} ${ignored.includes(' and ') ? 'are' : 'is'} ignored: a production ` +
+          'build is the clean <slug>.<version>.zip. Set production to no for a pre-release build.'
+      )
+    }
   }
 
   const { pup } = await setupPup({ exec, env, core, fetchImpl, what: WHAT })
