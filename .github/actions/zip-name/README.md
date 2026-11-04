@@ -93,7 +93,7 @@ Before anything is downloaded or run:
   counts as `dev`.
 - On a QA build, `sequence` that is not empty or digits from 1 with no leading zero: `0`, `02`,
   `abc`, `rc-2`.
-- `working-directory` that is not a directory of the workspace.
+- `working-directory` that is not a directory.
 - A missing `.puprc`, one that is not JSON, or one with no `paths.versions`.
 - `pup-version` that is neither a release number such as `2.0.0` nor `latest`.
 
@@ -122,7 +122,7 @@ produces the right production build.
 | `prerelease` | no | `dev` | The label of a QA build: `dev`, `alpha`, `beta` or `rc` |
 | `sequence` | no | | The number of a build numbered by hand, in place of the timestamp and hash. One scheme per pre-release cycle; see [What it names](#what-it-names) |
 | `expected-version` | no | | The version the files have to hold; see [What it refuses](#what-it-refuses) |
-| `working-directory` | no | the workspace | Where the repository is checked out, relative to the workspace, e.g. `source`. The `.puprc`, the version files and the commit are read there |
+| `working-directory` | no | the workspace | Where the repository is checked out, relative to the workspace or absolute, e.g. `source`. The `.puprc`, the version files and the commit are read there. The caller's own value, trusted like the checkout's `ref` |
 | `pup-version` | no | `latest` | The pup release to run: a number such as `2.0.0`, or `latest`. See [Which pup runs](#which-pup-runs) |
 | `token` | no | `github.token` | Authenticates the `latest` lookup. A pinned `pup-version` never uses it |
 

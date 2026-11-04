@@ -501,7 +501,7 @@ describe('zip-name', () => {
 
       await assert.rejects(
         runZipName({ core, exec, env: nameEnv({ INPUT_WORKING_DIRECTORY: 'source' }), cwd }),
-        /working-directory 'source' is not a directory of the workspace.*No zip name was resolved/s
+        /working-directory 'source' is not a directory \(.*\/source\).*No zip name was resolved/s
       )
       assert.deepEqual(calls, [])
       assert.deepEqual(outputs(), {})

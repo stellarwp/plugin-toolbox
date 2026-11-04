@@ -33,10 +33,10 @@ inputs:
     default: 'yes'
   working-directory:
     description: >-
-      Where the repository is checked out, relative to the workspace, for a workflow that checks it
-      out somewhere other than the workspace itself (`source/`). pup runs there and writes the zip
-      there; `zip-path` is still an absolute path. Empty is the workspace. A directory that is not
-      there fails before anything runs.
+      Where the repository is checked out, relative to the workspace or absolute, for a workflow
+      that checks it out somewhere other than the workspace itself (`source/`, or a directory under
+      the runner's temp). pup runs there and writes the zip there; `zip-path` is still an absolute
+      path. Empty is the workspace. A directory that is not there fails before anything runs.
     required: false
     default: ''
   pup-version:

@@ -44,10 +44,10 @@ inputs:
     default: ''
   working-directory:
     description: >-
-      Where the repository is checked out, relative to the workspace, for a workflow that checks it
-      out somewhere other than the workspace itself (`source/`). The .puprc, the version files and
-      the commit are read there. Empty is the workspace. A directory that is not there fails before
-      anything runs.
+      Where the repository is checked out, relative to the workspace or absolute, for a workflow
+      that checks it out somewhere other than the workspace itself (`source/`, or a directory under
+      the runner's temp). The .puprc, the version files and the commit are read there. Empty is the
+      workspace. A directory that is not there fails before anything runs.
     required: false
     default: ''
   pup-version:

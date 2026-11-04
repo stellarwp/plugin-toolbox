@@ -236,7 +236,7 @@ describe('release-zip', () => {
 
       await assert.rejects(
         runZip({ core, exec, env: zipEnv({ INPUT_WORKING_DIRECTORY: 'missing' }), cwd }),
-        /working-directory 'missing' is not a directory of the workspace.*No zip was built/s
+        /working-directory 'missing' is not a directory \(.*\/missing\).*No zip was built/s
       )
       assert.deepEqual(calls, [])
       assert.deepEqual(outputs(), {})
