@@ -69,6 +69,10 @@ on:
 permissions:
   contents: read
 
+# No concurrency group: two runs of the same commit build the same zip under the same name, and the
+# bucket sync writes the same bytes twice; two pre-release runs are two artifacts, which is the point.
+# Nothing here is written to a branch or a tag.
+
 jobs:
   zip:
     # pup runs on the PHP set up below, which also serves the plugin's own build. Give runs on
