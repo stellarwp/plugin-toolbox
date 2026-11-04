@@ -1,2 +1,2 @@
-::warning title=Plugin Check::No baseline to compare with (/nonexistent/baseline.json), so nothing was compared. Run the workflow on the target branch to make one.
+No baseline file. Strict mode does not need one.
 Plugin Check ran with no baseline, so nothing was compared.

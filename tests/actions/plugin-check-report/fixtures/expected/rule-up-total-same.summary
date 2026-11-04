@@ -7,6 +7,13 @@
 | Warnings | 1 | 1 | ±0 |
 
 Went up: `WordPress.Security.EscapeOutput.OutputNotEscaped` (+1)
-Rules that went down: 1.
+Rules that went down: 1. Update the baseline file, see the job summary.
 
 📎 [Run](https://example.test/actions/runs/1)
+
+Error counts went down. To lower the baseline, replace baseline.json with the file from this run:
+
+```bash
+gh run download <run-id> --repo <owner>/<repo> --name plugin-check-report --dir /tmp/plugin-check
+cp /tmp/plugin-check/baseline.json baseline.json
+```

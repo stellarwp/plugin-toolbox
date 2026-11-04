@@ -1,5 +1,5 @@
 <!-- plugin-check:example-org/my-plugin -->
-⚠️ Plugin Check ran, but there was no baseline to compare with
+⚠️ Plugin Check ran, but there is no baseline file yet
 
 |          | Now |
 |:--|--:|

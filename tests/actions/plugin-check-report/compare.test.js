@@ -311,10 +311,89 @@ describe('plugin-check-report compare', () => {
       const run = compareWith([fixture('clean.txt')])
 
       assert.equal(run.status, 0)
-      assert.match(run.stdout, /::warning title=Plugin Check::No baseline to compare with/)
-      assert.match(run.comment, /⚠️ Plugin Check ran, but there was no baseline to compare with/)
+      assert.match(
+        run.stdout,
+        /::warning title=Plugin Check::No baseline file at no-baseline\.json, so nothing was compared\. To start one, commit the baseline\.json from this run's plugin-check-report artifact as no-baseline\.json\./
+      )
+      assert.match(run.comment, /⚠️ Plugin Check ran, but there is no baseline file yet/)
       assert.match(run.comment, /\| Errors {3}\| 0 \|/)
       assert.doesNotMatch(run.comment, /Change/)
+    })
+
+    it('says nothing about a missing baseline file in strict mode, which does not use one', () => {
+      const run = compareWith([fixture('clean.txt')], { PLUGIN_CHECK_MODE: 'strict' })
+
+      assert.equal(run.status, 0)
+      assert.doesNotMatch(run.stdout, /::warning/)
+      assert.match(run.stdout, /No baseline file\. Strict mode does not need one\./)
+      assert.match(run.comment, /✅ Plugin Check passed: no errors/)
+      assert.equal(run.summary, run.comment, 'nothing to update, so the summary is the comment')
+    })
+
+    it('asks for the baseline file to be lowered when an error count went down', () => {
+      const run = compareWith([fixture('errors-down.txt')], { PLUGIN_CHECK_BASELINE: BASELINE })
+
+      assert.equal(run.status, 0)
+      assert.match(
+        run.stdout,
+        /::notice title=Plugin Check::Error counts went down\. Lower the baseline so they cannot come back: commit the baseline\.json from this run's plugin-check-report artifact as baseline\.json\./
+      )
+      assert.match(run.comment, /Rules that went down: \d+\. Update the baseline file, see the job summary\./)
+    })
+
+    it('does not ask for an update when only warnings went down, or in strict mode', () => {
+      const warningsDown = baselineFile({ ...JSON.parse(fs.readFileSync(BASELINE, 'utf8')), warnings: { [DIRECT_QUERY]: 9 } })
+      const quiet = compareWith([fixture('same-as-baseline.txt')], { PLUGIN_CHECK_BASELINE: warningsDown })
+
+      assert.match(quiet.comment, /Rules that went down: 1\.\n/)
+      assert.doesNotMatch(quiet.stdout, /Error counts went down/)
+      assert.equal(quiet.summary, quiet.comment)
+
+      const strict = compareWith([fixture('errors-down.txt')], { PLUGIN_CHECK_BASELINE: BASELINE, PLUGIN_CHECK_MODE: 'strict' })
+
+      assert.doesNotMatch(strict.stdout, /Error counts went down/)
+      assert.doesNotMatch(strict.comment, /Update the baseline file/)
+    })
+
+    it('puts the command to update the baseline in the job summary, not in the comment', () => {
+      const run = compareWith([fixture('errors-down.txt')], {
+        PLUGIN_CHECK_BASELINE: BASELINE,
+        GITHUB_RUN_ID: '42',
+        GITHUB_REPOSITORY: 'example-org/my-plugin',
+        GITHUB_SERVER_URL: 'https://github.com',
+      })
+
+      assert.ok(run.summary.startsWith(run.comment))
+      assert.match(run.summary, /Error counts went down\. To lower the baseline, replace baseline\.json with the file from this run:/)
+      assert.match(run.summary, /gh run download 42 --repo example-org\/my-plugin --name plugin-check-report --dir \/tmp\/plugin-check/)
+      assert.match(run.summary, /cp \/tmp\/plugin-check\/baseline\.json baseline\.json/)
+      assert.doesNotMatch(run.comment, /gh run download/)
+    })
+
+    it('tells the author how to raise a count on purpose when the check fails', () => {
+      const run = compareWith([fixture('errors-up.txt')], { PLUGIN_CHECK_BASELINE: BASELINE })
+
+      assert.equal(run.status, 1)
+      assert.match(run.summary, /raise their counts in baseline\.json in this pull request, so reviewers see it/)
+      assert.match(run.summary, /gh run download <run-id> --repo <owner>\/<repo> /, 'placeholders outside a run')
+    })
+
+    it('fails with the file named, as an error annotation, when the baseline file is not valid', () => {
+      const cases = {
+        'not JSON': ['{"errors": ', /it is not JSON: /],
+        'a merge conflict': ['<<<<<<< HEAD\n{"errors":{}}\n=======\n{"errors":{"a":1}}\n>>>>>>> branch\n', /it is not JSON: /],
+        'the wrong shape': ['[1]', /it must be an object with "errors" and "warnings"\./],
+      }
+
+      for (const [what, [content, reason]] of Object.entries(cases)) {
+        const run = compareWith([fixture('clean.txt')], { PLUGIN_CHECK_BASELINE: baselineFile(content) })
+
+        assert.notEqual(run.status, 0, what)
+        assert.match(run.stdout, /::error title=Plugin Check::The baseline file baseline\.json is not valid: /, what)
+        assert.match(run.stdout, reason, what)
+        assert.match(run.stdout, /Fix it, or replace it with the baseline\.json from this run's plugin-check-report artifact\./, what)
+        assert.equal(run.comment, '', what)
+      }
     })
 
     it('passes when every count matches the baseline', () => {
@@ -409,7 +488,7 @@ describe('plugin-check-report compare', () => {
         const run = compareWith([resultsOf([{ type: 'ERROR', code: 'a' }])], { PLUGIN_CHECK_BASELINE: baselineFile(content) })
 
         assert.equal(run.status, 5, content)
-        assert.match(run.stderr, /more than 9007199254740991, which cannot be compared exactly/)
+        assert.match(run.stdout, /::error title=Plugin Check::The baseline file baseline\.json is not valid: .*more than 9007199254740991, which cannot be compared exactly/)
         assert.equal(run.comment, '', content)
       }
 
@@ -535,7 +614,7 @@ describe('plugin-check-report compare', () => {
     })
 
     it('writes the same text to the job summary', () => {
-      const run = compareWith([fixture('errors-down.txt')], { PLUGIN_CHECK_BASELINE: BASELINE })
+      const run = compareWith([fixture('same-as-baseline.txt')], { PLUGIN_CHECK_BASELINE: BASELINE })
 
       assert.equal(run.summary, run.comment)
     })
@@ -577,5 +656,63 @@ describe('the baseline file text', () => {
     const counts = report.countPerCode([{ type: 'WARNING', code: '__proto__' }])
 
     assert.equal(report.formatBaseline(counts), '{\n  "errors": {},\n  "warnings": {\n    "__proto__": 1\n  }\n}\n')
+  })
+})
+
+describe('the compare command line', () => {
+  /**
+   * Runs the command line in a new folder, so the default baseline path lands there.
+   *
+   * @param {string[]} argv The arguments after the script name.
+   *
+   * @returns {Promise<{status: number, lines: string[], dir: string}>} The status, what it printed and the folder.
+   */
+  async function inNewFolder(argv) {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-check-cli-')))
+    const before = process.cwd()
+    const lines = []
+
+    process.chdir(dir)
+    try {
+      const status = await report.main(argv, {}, { out: (line) => lines.push(line), err: (line) => lines.push(line) })
+
+      return { status, lines, dir }
+    } finally {
+      process.chdir(before)
+    }
+  }
+
+  const pinned = () => fs.readFileSync(path.join(FIXTURES, 'expected', 'update-errors-up.json'), 'utf8')
+
+  it('writes .plugin-check-baseline.json in the current folder by default', async () => {
+    const { status, lines, dir } = await inNewFolder(['compare', '--update', fixture('errors-up.txt')])
+
+    assert.equal(status, 0)
+    assert.equal(fs.readFileSync(path.join(dir, '.plugin-check-baseline.json'), 'utf8'), pinned())
+    assert.match(lines.join('\n'), /Wrote .*\.plugin-check-baseline\.json: 2 error codes, 1 warning codes/)
+  })
+
+  it('takes `update` as a short name for `compare --update`', async () => {
+    const { status, dir } = await inNewFolder(['update', fixture('errors-up.txt')])
+
+    assert.equal(status, 0)
+    assert.equal(fs.readFileSync(path.join(dir, '.plugin-check-baseline.json'), 'utf8'), pinned())
+  })
+
+  it('compares with the file it wrote', async () => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-check-cli-')))
+    fs.writeFileSync(path.join(dir, '.plugin-check-baseline.json'), pinned())
+    const before = process.cwd()
+    const lines = []
+
+    process.chdir(dir)
+    try {
+      const status = await report.main(['compare', fixture('errors-up.txt')], {}, { out: (line) => lines.push(line), err: (line) => lines.push(line) })
+
+      assert.equal(status, 0)
+      assert.match(lines.join('\n'), /within the baseline/)
+    } finally {
+      process.chdir(before)
+    }
   })
 })
