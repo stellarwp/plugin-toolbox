@@ -5,9 +5,17 @@
  *
  * One implementation lives here so every action orders versions the same way. The actions load
  * this file through a path relative to their own directory, so it ships inside the same
- * repository checkout the runner already fetches for the action — there is nothing to publish
+ * repository checkout the runner already fetches for the action: there is nothing to publish
  * and nothing for a caller to install.
  */
+
+/**
+ * Three or four numeric parts, the shape the stellarwp changelog versioning accepts and the one the
+ * release-merge action publishes. That strategy also accepts an empty part (it reads it as 0, so it
+ * would take 2.1..21); this pattern rejects that. A version of this shape is also always a valid tag
+ * name.
+ */
+const STELLARWP_VERSION_PATTERN = /^\d+\.\d+\.\d+(\.\d+)?$/
 
 /**
  * Splits a version into its numbers, for comparing one part against another.
@@ -54,4 +62,39 @@ function compareVersions(a, b) {
   return 0
 }
 
-module.exports = { toParts, compareVersions }
+/**
+ * Reads a version to release, refusing anything but three or four numeric parts.
+ *
+ * A pre-release is refused: the version becomes the tag and the title of a published release, and a
+ * beta or RC is not released this way. The release dashboard validates versions with this rule, and
+ * release-prep does under the stellarwp changelog versioning.
+ *
+ * @param {string} version The `version` input.
+ * @param {string} what    What was not done, to close the message, e.g. `Nothing was merged.`
+ *
+ * @throws {Error} When it is empty or not of that shape.
+ *
+ * @returns {string} The version, without surrounding whitespace.
+ */
+function validateVersion(version, what) {
+  const trimmed = String(version ?? '').trim()
+
+  if (trimmed === '') {
+    throw new Error(
+      'No version was given. The run was dispatched without one, which is what a release with no ' +
+        `version set sends: set the release's version and run this step again. ${what}`
+    )
+  }
+
+  if (!STELLARWP_VERSION_PATTERN.test(trimmed)) {
+    throw new Error(
+      `'${trimmed}' is not a version this action can release. It takes three or four numeric parts, ` +
+        'such as 4.17.0 or 4.17.0.1: no pre-release suffix and no leading v, because the version ' +
+        `becomes the tag and the title of the published release. ${what}`
+    )
+  }
+
+  return trimmed
+}
+
+module.exports = { toParts, compareVersions, validateVersion, STELLARWP_VERSION_PATTERN }

@@ -1,0 +1,86 @@
+# Publishes the GitHub release for a version at a given commit: tag and release in one step, with the
+# title, the notes and the assets the caller chooses. The second half of a deploy: release-merge
+# merges the release and leaves the commit to publish at in its `base-sha` output, the caller builds
+# from the checkout, then this action publishes with the build attached.
+#
+# The logic lives in release-publish.js, run by actions/github-script, so there is no dependency to
+# install and nothing to build. Everything goes through the GitHub API; the checkout is only read,
+# for the notes file and the assets.
+name: Release publish
+description: Publishes the GitHub release for a version at a commit, with a title, notes and assets
+
+inputs:
+  version:
+    description: >-
+      The version being released: three or four numeric parts, such as 4.17.0 or 4.17.0.1. It becomes
+      the tag. A pre-release such as 4.17.0-beta.1 is refused, and so is a version whose tag already
+      exists without a published release. A version already published is skipped, so a run can be
+      repeated after a late failure.
+    required: true
+  target:
+    description: >-
+      The commit to publish at: a full commit hash, or a branch name, which is resolved to its tip
+      when the action runs. After release-merge, pass its `base-sha` output. For a release a person
+      merged by hand, pass the commit of the checkout the assets were built from, not the branch: a
+      push after the checkout would be tagged with assets built from another commit. The README
+      shows how.
+    required: true
+  title:
+    description: 'The release title. The version when empty.'
+    required: false
+    default: ''
+  notes-file:
+    description: >-
+      A file in the checkout whose contents are the release notes, e.g. the changelog entry of this
+      version. When empty, GitHub generates the notes from the pull requests since the previous
+      release.
+    required: false
+    default: ''
+  files:
+    description: >-
+      Assets to attach, one path per line, relative to the checkout. With assets the release is created
+      as a draft, the files are uploaded, and the draft is published last: a draft makes no tag, so an
+      upload that fails leaves nothing behind. Every path is checked before anything is created.
+    required: false
+    default: ''
+  token:
+    description: >-
+      Token the release is created with. It needs `contents: write` on the repository, so the job
+      needs that permission too. A release published with the default token triggers no `release`
+      workflow; one published with a personal access token or a GitHub App token does.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  published:
+    description: '`true` when the release was created, `skipped` when it already existed.'
+    value: ${{ steps.publish.outputs.published }}
+  release-url:
+    description: 'The GitHub release page.'
+    value: ${{ steps.publish.outputs.release-url }}
+  sha:
+    description: 'The commit the release was created at; empty when it already existed.'
+    value: ${{ steps.publish.outputs.sha }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Publish the GitHub release
+      id: publish
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so an input is data and
+        # never part of the program.
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_TARGET: ${{ inputs.target }}
+        INPUT_TITLE: ${{ inputs.title }}
+        INPUT_NOTES_FILE: ${{ inputs.notes-file }}
+        INPUT_FILES: ${{ inputs.files }}
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const { runPublish } = require(`${process.env.ACTION_PATH}/release-publish.js`)
+          await runPublish({ github, core, env: process.env })

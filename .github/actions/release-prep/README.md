@@ -111,6 +111,11 @@ any, it writes nothing and accepts any version. The action's check does not depe
   GitHub refuses the dispatch itself with HTTP 422 and no run starts. When the workflow declares it
   optional, the run starts and the action fails it with "No version was given". Either way the
   release needs a version before the step runs again.
+- **A version the repository has already tagged is refused.** A release branch cut from `main` right
+  after a release still carries that version, and preparing it again would put the next changes
+  under a version that is already tagged. Only the tag is checked, not whether a release was
+  published for it. It is read through the GitHub API with `token`, so the check works on the
+  shallow checkout the template makes. Give the release a new version.
 - **A version lower than the branch's is refused.** pup reads the version the branch already has
   (`pup get-version`, the first file in `paths.versions`), and preparing `4.17.0` on a branch at
   `4.18.0` would bump the plugin backwards: either the version or the branch is wrong. The same
@@ -170,7 +175,7 @@ download.
 | `branch-prefixes` | no | `["release/", "hotfix/", "bucket/"]` | The prefixes `branch` has to start with, as a JSON array. Empty keeps the default; `[]` turns the check off. See [Branches it refuses](#branches-it-refuses) |
 | `version` | yes | | The version to prepare, e.g. `4.17.0`. See [Versions it refuses](#versions-it-refuses) |
 | `date` | no | today, in UTC | The changelog date as `YYYY-MM-DD`. Empty or `today` writes today |
-| `token` | no | `github.token` | The token the commit is created with. See [Committing](#committing) |
+| `token` | no | `github.token` | The token the tag is read with and the commit is created with. See [Versions it refuses](#versions-it-refuses) and [Committing](#committing) |
 | `pup-version` | no | `latest` | The pup release to run: a number such as `2.0.0`, or `latest` for the newest. See [Which pup runs](#which-pup-runs) |
 
 ## Outputs
@@ -210,8 +215,9 @@ branch already has — runs on the phar path only; the TS contract does not defi
 ## Running it again
 
 Preparing a version the branch already holds changes nothing: the versions match, no TBDs are left
-and `changelog/` is empty. The action commits nothing, calls no API, and succeeds, so a retry of a
-finished preparation is safe.
+and `changelog/` is empty. The action commits nothing and succeeds, so a retry of a finished
+preparation is safe, as long as the version has not been tagged in between: once the tag exists,
+preparing its version again is refused.
 
 ## The date
 
@@ -260,8 +266,9 @@ a commit made with `GITHUB_TOKEN`.
 ## How it runs
 
 Two [actions/github-script](https://github.com/actions/github-script) steps run `release-prep.js`,
-with the changelogger action between them. The first validates the inputs, the `.puprc` and the
-changelogger strategy, then runs pup. The second commits through the API. github-script supplies
+with the changelogger action between them. The first validates the inputs and the changelogger
+strategy, reads the version's tag through the API to refuse one that exists, checks the `.puprc`,
+then runs pup. The second commits through the API. github-script supplies
 the Node runtime, `exec` and the `github` client, built from `token`; there is no dependency
 to install and no bundle to build.
 

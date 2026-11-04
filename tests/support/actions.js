@@ -32,13 +32,38 @@ const path = require('node:path')
  * @returns {Response} The response for the fetch to return.
  */
 function jsonResponse({ status = 200, body = {}, headers = {} }) {
-  // A 204 or 304 has no body, and Response refuses one.
-  const content = status === 204 || status === 304 ? null : JSON.stringify(body)
+  // A 204 carries no body, and Response refuses one: the merge endpoint answers it when the base
+  // already contains the head.
+  if (status === 204 || status === 205 || status === 304) {
+    return new Response(null, { status, headers })
+  }
 
-  return new Response(content, {
+  return new Response(JSON.stringify(body), {
     status,
     headers: { 'content-type': 'application/json', ...headers },
   })
+}
+
+/**
+ * The body of a recorded request: JSON parsed, anything else (an asset upload) as it was sent.
+ *
+ * @param {*} body What the request carried.
+ *
+ * @returns {*} The parsed JSON, the raw body, or undefined for none.
+ */
+function parseBody(body) {
+  if (body === undefined || body === null) {
+    return undefined
+  }
+  if (typeof body === 'string') {
+    try {
+      return JSON.parse(body)
+    } catch {
+      return body
+    }
+  }
+
+  return body
 }
 
 /**
@@ -72,7 +97,7 @@ function recordingFetch(rules = []) {
       method,
       url: href,
       path: requestPath,
-      body: options.body ? JSON.parse(options.body) : undefined,
+      body: parseBody(options.body),
     })
 
     for (const [index, rule] of rules.entries()) {
@@ -312,6 +337,38 @@ function recordingExec(rules = []) {
 }
 
 /**
+ * The real @actions/exec, wrapped to record each call and what it printed.
+ *
+ * For an action whose logic is in the commands themselves, such as git merges, a stand-in would only
+ * test the test. What a command prints is sent to a buffer of its own rather than to stdout, where
+ * the test runner reports results: that covers the `[command]` line @actions/exec echoes, so a test
+ * can assert what a run would have shown in the log.
+ *
+ * @returns {Promise<{exec: object, calls: object[], printed: Function}>} The wrapper, the calls it
+ *          recorded, and a reader for everything the commands printed.
+ */
+async function recordedRealExec() {
+  const { Writable } = require('node:stream')
+  const real = await import('@actions/exec')
+  const calls = []
+  const chunks = []
+  const sink = new Writable({
+    write(chunk, encoding, callback) {
+      chunks.push(String(chunk))
+      callback()
+    },
+  })
+
+  const getExecOutput = (command, args = [], options = {}) => {
+    calls.push({ command, args, options })
+
+    return real.getExecOutput(command, args, { ...options, outStream: sink, errStream: sink })
+  }
+
+  return { exec: { getExecOutput }, calls, printed: () => chunks.join('') }
+}
+
+/**
  * Both arguments actions/github-script passes to a script, ready for one test.
  *
  * @param {object}   t     The node:test context.
@@ -334,6 +391,7 @@ module.exports = {
   coreWithOutputs,
   recordingFetch,
   recordingExec,
+  recordedRealExec,
   readOutputs,
   isLogWrite,
 }

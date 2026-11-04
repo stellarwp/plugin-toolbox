@@ -1,0 +1,100 @@
+# Merges a release: the release branch into the base branch (`main`, or `master` where that is the
+# name), then the base branch back into develop. The part of a deploy that is the same for every
+# plugin; what happens after the merge (building, wordpress.org, announcements) is the caller's, and
+# publishing the GitHub release is the release-publish action's, at the commit this one leaves on the
+# base (`base-sha`).
+#
+# The checks and the merges live in release-merge.js, run by actions/github-script, so there is no
+# dependency to install and nothing to build. Everything goes through the GitHub API: the branch,
+# tag and release reads, the version-file reads and the merges themselves. No checkout is needed;
+# the caller checks out `base-sha` afterwards to build from it.
+name: Release merge
+description: Merges the release branch into the base and the base back into develop
+
+inputs:
+  branch:
+    description: >-
+      The release branch to merge, e.g. `release/M26.jigglypuff`. A branch name, not any git ref.
+    required: true
+  head:
+    description: >-
+      The commit the release branch has to be at, as a full hash; empty checks nothing. A deploy that
+      waits for an approval merges the branch's tip when the approval comes. Pass the commit the run
+      was started on (`github.sha`), and a branch that moved in between is refused instead of merged.
+    required: false
+    default: ''
+  version:
+    description: >-
+      The version being released: three or four numeric parts, such as 4.17.0 or 4.17.0.1, the rule
+      the release dashboard applies. It becomes the tag and the title of the GitHub release, so it has
+      to be the version the release branch holds: every file the branch's .puprc lists under
+      paths.versions is read, and a different version in any of them is refused. A pre-release such as
+      4.17.0-beta.1 and an empty value are refused before anything is merged, and so is a version
+      whose tag already exists, unless that tag's release was published from this branch, which makes
+      the run a retry. The release itself is published by release-publish, after this action.
+    required: true
+  base-branch:
+    description: 'The branch the release is merged into: `main`, or `master` where that is the name.'
+    required: false
+    default: 'main'
+  develop-branch:
+    description: >-
+      The branch the base is merged back into after the release. Pass an empty value for a repository
+      that has no develop branch: the release is merged into the base and nothing is merged back. Write
+      it in the caller (`develop-branch: ''`); a workflow_dispatch input left empty takes its default.
+    required: false
+    default: 'develop'
+  token:
+    description: >-
+      Token the merges are made with, and the branch, tag, release and file reads. It needs
+      `contents: write` on the repository, so the job needs that permission too. GitHub makes the
+      merge commits under its identity and signs them. It only ever reaches github-script's client,
+      never git or the log.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  version:
+    description: 'The version released.'
+    value: ${{ steps.merge.outputs.version }}
+  branch:
+    description: 'The release branch merged.'
+    value: ${{ steps.merge.outputs.branch }}
+  base-sha:
+    description: >-
+      The commit on the base branch that holds the release: the merge commit, or the base's tip on a
+      retry that found the merge already done. The commit to check out and build from; pass it to
+      release-publish as `target`.
+    value: ${{ steps.merge.outputs.base-sha }}
+  conflict:
+    description: >-
+      Which branch a merge conflicted on, `main` or `develop` for the defaults, or empty when the
+      merges went through. A conflict fails the step, so a caller reads this with `continue-on-error`
+      or in a later `if: failure()` step.
+    value: ${{ steps.merge.outputs.conflict }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Merge the release into the base and the base back into develop
+      id: merge
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so an input is data and
+        # never part of the program.
+        INPUT_BRANCH: ${{ inputs.branch }}
+        INPUT_HEAD: ${{ inputs.head }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_BASE_BRANCH: ${{ inputs.base-branch }}
+        INPUT_DEVELOP_BRANCH: ${{ inputs.develop-branch }}
+      with:
+        # Every read and the merges go through github-script's own client, built from this token.
+        github-token: ${{ inputs.token }}
+        script: |
+          const { runMerge } = require(`${process.env.ACTION_PATH}/release-merge.js`)
+          await runMerge({ github, core, env: process.env })
+
