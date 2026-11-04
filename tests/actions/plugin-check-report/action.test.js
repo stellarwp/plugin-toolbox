@@ -7,51 +7,17 @@ const os = require('node:os')
 const path = require('node:path')
 
 const report = require('../../../.github/actions/plugin-check-report/plugin-check-report.js')
-const { actionsFor, recordingExec } = require('../../support/actions.js')
+const { actionsFor } = require('../../support/actions.js')
 
 const FIXTURES = path.join(__dirname, 'fixtures')
 const REPO = 'example-org/my-plugin'
-const SHA = 'a'.repeat(40)
 
 const temp = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), `plugin-check-${prefix}-`))
 
-const RUNS = `/repos/${REPO}/actions/workflows/plugin-check.yml/runs`
-const run = (id, sha, headRepo = REPO) => ({
-  id,
-  html_url: `https://github.com/${REPO}/actions/runs/${id}`,
-  head_sha: sha,
-  status: 'completed',
-  head_repository: { full_name: headRepo },
-})
-
-/**
- * Exec rules for a baseline that downloads.
- *
- * @param {number} id       The run.
- * @param {string} baseline What its baseline.json holds.
- *
- * @returns {object[]} The rule.
- */
-function downloads(id, baseline = '{"errors":{"Some.Rule":2},"warnings":{}}') {
-  return [
-    {
-      command: 'gh',
-      args: new RegExp(`^run download ${id} `),
-      effect: (args) => {
-        const target = args[args.indexOf('--dir') + 1]
-        fs.mkdirSync(target, { recursive: true })
-        fs.writeFileSync(path.join(target, 'baseline.json'), baseline)
-      },
-    },
-  ]
-}
-
-const ARTIFACT = { body: { artifacts: [{ name: 'plugin-check-report', expired: false }] } }
-
 describe('plugin-check-report action steps', () => {
   describe('runPaths', () => {
-    it('makes a clean folder for the run and names the workflow of the caller', async (t) => {
-      const { core, outputs, logged } = await actionsFor(t)
+    it('makes a clean folder for the run', async (t) => {
+      const { core, outputs } = await actionsFor(t)
       const tempDir = temp('paths')
       fs.mkdirSync(path.join(tempDir, 'plugin-check-report', 'report'), { recursive: true })
       fs.writeFileSync(path.join(tempDir, 'plugin-check-report', 'report', 'old.txt'), 'from an earlier use')
@@ -61,19 +27,15 @@ describe('plugin-check-report action steps', () => {
         env: {
           RUNNER_TEMP: tempDir,
           GITHUB_REPOSITORY: REPO,
-          GITHUB_WORKFLOW_REF: `${REPO}/.github/workflows/plugin-check.yml@refs/pull/12/merge`,
         },
       })
 
       assert.equal(status, 0)
       assert.deepEqual(outputs(), {
         report: path.join(tempDir, 'plugin-check-report', 'report'),
-        baseline: path.join(tempDir, 'plugin-check-report', 'baseline', 'baseline.json'),
-        workflow: 'plugin-check.yml',
         marker: `<!-- plugin-check:${REPO} -->`,
       })
       assert.deepEqual(fs.readdirSync(path.join(tempDir, 'plugin-check-report', 'report')), [])
-      assert.match(logged(), /Baselines are read from the runs of plugin-check\.yml\./)
     })
 
     it('uses the marker the caller gives', async (t) => {
@@ -81,7 +43,7 @@ describe('plugin-check-report action steps', () => {
 
       report.runPaths({
         core,
-        env: { RUNNER_TEMP: temp('marker'), GITHUB_REPOSITORY: REPO, GITHUB_WORKFLOW_REF: 'a/b/.github/workflows/x.yml@r', INPUT_COMMENT_MARKER: '<!-- mine -->' },
+        env: { RUNNER_TEMP: temp('marker'), GITHUB_REPOSITORY: REPO, INPUT_COMMENT_MARKER: '<!-- mine -->' },
       })
 
       assert.equal(outputs().marker, '<!-- mine -->')
@@ -124,122 +86,6 @@ describe('plugin-check-report action steps', () => {
 
       assert.equal(status, 1)
       assert.match(logged(), /::error title=Plugin Check::The results file is not Plugin Check output/)
-    })
-  })
-
-  describe('runFetch', () => {
-    it('takes the run for the base commit of a pull request and labels it', async (t) => {
-      const baseline = path.join(temp('fetch'), 'baseline.json')
-      const { github, core, outputs, logged } = await actionsFor(t, [
-        { path: `${RUNS}?head_sha=${SHA}&per_page=20`, body: { workflow_runs: [run(200, SHA)] } },
-        { path: `${RUNS}?status=completed&head_sha=${SHA}&per_page=10`, body: { workflow_runs: [run(200, SHA)] } },
-        { path: `${RUNS}?status=completed&branch=develop&per_page=100`, body: { workflow_runs: [] } },
-        { path: `/repos/${REPO}/actions/runs/200/artifacts?name=plugin-check-report`, ...ARTIFACT },
-      ])
-      const { exec } = recordingExec(downloads(200))
-
-      const status = await report.runFetch({
-        github,
-        core,
-        exec,
-        env: { GITHUB_REPOSITORY: REPO, EVENT: 'pull_request', BASE_REF: 'develop', BASE_SHA: SHA, WAIT: '1200', WORKFLOW: 'plugin-check.yml', BASELINE: baseline },
-        now: () => 1000,
-        sleep: async () => {},
-      })
-
-      assert.equal(status, 0)
-      assert.deepEqual(outputs(), {
-        label: 'Target branch',
-        url: `https://github.com/${REPO}/actions/runs/200`,
-        advisory: 'false',
-      })
-      assert.match(logged(), /Baseline from https:\/\/github\.com\/example-org\/my-plugin\/actions\/runs\/200 \(exact\)/)
-      assert.ok(fs.existsSync(baseline))
-    })
-
-    it('marks a baseline from an older run as advisory', async (t) => {
-      const { github, core, outputs } = await actionsFor(t, [
-        { path: `${RUNS}?head_sha=${SHA}&per_page=20`, body: { workflow_runs: [] } },
-        { path: `${RUNS}?status=completed&head_sha=${SHA}&per_page=10`, body: { workflow_runs: [] } },
-        { path: `${RUNS}?status=completed&branch=develop&per_page=100`, body: { workflow_runs: [run(150, 'b'.repeat(40))] } },
-        { path: `/repos/${REPO}/actions/runs/150/artifacts?name=plugin-check-report`, ...ARTIFACT },
-      ])
-      const { exec } = recordingExec(downloads(150))
-
-      await report.runFetch({
-        github,
-        core,
-        exec,
-        env: { GITHUB_REPOSITORY: REPO, EVENT: 'pull_request', BASE_REF: 'develop', BASE_SHA: SHA, WAIT: '0', WORKFLOW: 'plugin-check.yml', BASELINE: path.join(temp('fetch'), 'baseline.json') },
-      })
-
-      assert.deepEqual({ label: outputs().label, advisory: outputs().advisory }, { label: 'Target branch, older run', advisory: 'true' })
-    })
-
-    it('takes the run before this one on the same branch for a push', async (t) => {
-      const { github, core, outputs } = await actionsFor(t, [
-        { path: `${RUNS}?status=completed&branch=develop&per_page=100`, body: { workflow_runs: [run(300, SHA), run(150, SHA)] } },
-        { path: `/repos/${REPO}/actions/runs/150/artifacts?name=plugin-check-report`, ...ARTIFACT },
-      ])
-      const { exec } = recordingExec(downloads(150))
-
-      const status = await report.runFetch({
-        github,
-        core,
-        exec,
-        env: { GITHUB_REPOSITORY: REPO, EVENT: 'push', GITHUB_RUN_ID: '200', GITHUB_REF_NAME: 'develop', WORKFLOW: 'plugin-check.yml', BASELINE: path.join(temp('fetch'), 'baseline.json') },
-      })
-
-      assert.equal(status, 0)
-      assert.equal(outputs().label, 'Previous run')
-      assert.match(outputs().url, /runs\/150$/)
-    })
-
-    it('passes with a message, and no outputs, when no run has a baseline', async (t) => {
-      const { github, core, outputs, logged } = await actionsFor(t, [
-        { path: `${RUNS}?status=completed&branch=develop&per_page=100`, body: { workflow_runs: [] } },
-      ])
-      const { exec } = recordingExec()
-
-      const status = await report.runFetch({
-        github,
-        core,
-        exec,
-        env: { GITHUB_REPOSITORY: REPO, EVENT: 'push', GITHUB_RUN_ID: '200', GITHUB_REF_NAME: 'develop', WORKFLOW: 'plugin-check.yml', BASELINE: path.join(temp('fetch'), 'baseline.json') },
-      })
-
-      assert.equal(status, 0)
-      assert.deepEqual(outputs(), {})
-      assert.match(logged(), /No earlier run has a baseline\./)
-    })
-
-    it('fails with exit status 2 when the lookup fails, so an outage never passes as no baseline', async (t) => {
-      const { github, core, logged } = await actionsFor(t, [])
-      const { exec } = recordingExec()
-
-      const status = await report.runFetch({
-        github,
-        core,
-        exec,
-        env: { GITHUB_REPOSITORY: REPO, EVENT: 'push', GITHUB_RUN_ID: '200', GITHUB_REF_NAME: 'develop', WORKFLOW: 'plugin-check.yml', BASELINE: path.join(temp('fetch'), 'baseline.json') },
-      })
-
-      assert.equal(status, 2)
-      assert.match(logged(), /Could not look up Plugin Check runs: runs on develop/)
-    })
-
-    it('fails with exit status 2 when the workflow file is unknown', async (t) => {
-      const { github, core } = await actionsFor(t, [])
-      const { exec } = recordingExec()
-
-      const status = await report.runFetch({
-        github,
-        core,
-        exec,
-        env: { GITHUB_REPOSITORY: REPO, EVENT: 'push', GITHUB_RUN_ID: '200', GITHUB_REF_NAME: 'develop', WORKFLOW: '', BASELINE: 'x' },
-      })
-
-      assert.equal(status, 2)
     })
   })
 
