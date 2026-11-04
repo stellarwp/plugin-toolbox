@@ -15,6 +15,9 @@ name: Playground Preview
 #   button   works out the zip's public link and posts the Playground links.
 #   failed   replaces "building" with "failed" when anything above failed.
 #
+# The playground-preview action only writes the text of the comment. The pr-comment action posts it,
+# so the comment is found and replaced by the same code every workflow here uses.
+#
 # Only pull requests from the repository itself get a preview. A fork's run cannot see the bucket
 # secrets, and its token cannot write a comment.
 #
@@ -64,6 +67,14 @@ on:
         required: false
         type: string
         default: ''
+      pup-version:
+        description: >-
+          The pup release that works out the zip's name, e.g. `2.0.0`. Use the release the
+          repository's own `composer pup` script downloads: the zip workflow builds the zip with that
+          one, and a name made by another release could differ, which would break the links.
+        required: false
+        type: string
+        default: '2.0.0'
       zip-link-base:
         description: >-
           Public link to a zip in the bucket, without the file name. The zip's name, as pup makes
@@ -134,14 +145,22 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      # A failed API call here must not stop the preview.
-      - name: Post "building"
+      # A failed comment here must not stop the preview.
+      - name: Write the "building" comment
+        id: building
         continue-on-error: true
         uses: $/.github/actions/playground-preview
         with:
           status: building
           comment-marker: ${{ env.COMMENT_MARKER }}
           time-zone: ${{ inputs.time-zone }}
+
+      - name: Post "building"
+        continue-on-error: true
+        uses: $/.github/actions/pr-comment
+        with:
+          marker: ${{ env.COMMENT_MARKER }}
+          body-file: ${{ steps.building.outputs.comment-file }}
 
       # After the comment, so the "failed" job replaces it with a link to this message. Without it,
       # missing secrets only show up minutes later, as an upload error deep in the zip build.
@@ -211,8 +230,8 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
-      # The runner's own Composer can be out of date, so set up PHP for a current one before
-      # Composer downloads pup.
+      # pup is a PHP archive, and the runner image's PHP depends on its version and on a custom
+      # `runs-on`, so set up a known one to run it.
       - name: Set Up PHP
         if: ${{ inputs.zip-url == '' }}
         uses: shivammathur/setup-php@v2
@@ -222,27 +241,35 @@ jobs:
 
       # pup names the zip after the version, the commit time and the commit hash, and the shared
       # zip workflow has no outputs, so the name is asked of pup again rather than rebuilt here.
-      # Same commands, same commit, same name.
+      # Same release, same commands, same commit, same name.
+      - name: Ask pup for the zip name
+        id: pup
+        if: ${{ inputs.zip-url == '' }}
+        uses: $/.github/actions/pup
+        with:
+          pup-version: ${{ inputs.pup-version }}
+          read: zip-name
+          dev: 'true'
+
       - name: Find the zip
         id: zip
         env:
           ZIP_URL: ${{ inputs.zip-url }}
           ZIP_LINK_BASE: ${{ inputs.zip-link-base }}
+          ZIP_NAME: ${{ steps.pup.outputs.zip-name }}
         run: |
           if [ -n "$ZIP_URL" ]; then
             echo "url=$ZIP_URL" >> "$GITHUB_OUTPUT"
-            exit 0
+          else
+            echo "url=${ZIP_LINK_BASE}${ZIP_NAME}.zip" >> "$GITHUB_OUTPUT"
           fi
-          composer run -q pup > /dev/null
-          version=$(php -d display_errors=0 bin/pup.phar get-version --dev)
-          name=$(php -d display_errors=0 bin/pup.phar zip-name "$version")
-          echo "url=${ZIP_LINK_BASE}${name}.zip" >> "$GITHUB_OUTPUT"
 
-      # `$/` is this repository at the commit that runs this workflow, so the action is always the
-      # same revision as the workflow, whichever ref the caller used, and it needs no checkout. It
+      # `$/` is this repository at the commit that runs this workflow, so the actions are always the
+      # same revision as the workflow, whichever ref the caller used, and they need no checkout. It
       # needs a runner of version 2.336.0 or newer, which `runs-on` has to give. Not ./, which in a
       # called workflow resolves against the caller's repository.
-      - name: Post the links
+      - name: Write the links
+        id: links
         uses: $/.github/actions/playground-preview
         with:
           status: ready
@@ -250,6 +277,12 @@ jobs:
           blueprints: ${{ inputs.blueprints }}
           comment-marker: ${{ env.COMMENT_MARKER }}
           time-zone: ${{ inputs.time-zone }}
+
+      - name: Post the links
+        uses: $/.github/actions/pr-comment
+        with:
+          marker: ${{ env.COMMENT_MARKER }}
+          body-file: ${{ steps.links.outputs.comment-file }}
 
   # Without this, a failed build would leave "building" on the pull request for good. A run
   # cancelled by a newer push is not a failure: the newer run's "building" replaces the comment.
@@ -262,10 +295,18 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - name: Post "failed"
+      - name: Write the "failed" comment
+        id: failed
         continue-on-error: true
         uses: $/.github/actions/playground-preview
         with:
           status: failed
           comment-marker: ${{ env.COMMENT_MARKER }}
           time-zone: ${{ inputs.time-zone }}
+
+      - name: Post "failed"
+        continue-on-error: true
+        uses: $/.github/actions/pr-comment
+        with:
+          marker: ${{ env.COMMENT_MARKER }}
+          body-file: ${{ steps.failed.outputs.comment-file }}

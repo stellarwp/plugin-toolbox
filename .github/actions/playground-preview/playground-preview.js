@@ -1,20 +1,24 @@
 'use strict'
 
 /**
- * Writes the "Try in WordPress Playground" comment on a pull request: "building" while the zip is
- * made, the links when it is ready, "failed" when something broke.
+ * Writes the text of the "Try in WordPress Playground" comment for a pull request: "building" while
+ * the zip is made, the links when it is ready, "failed" when something broke.
  *
  * The links come from blueprint files: the plugin repository's own, or the default next to this
  * script. Each file becomes one link. The `{{ZIP_URL}}` placeholder in a file is replaced with the
  * zip of the pull request, and the blueprint goes into the link itself, base64 encoded in the URL
  * hash. Nothing is hosted anywhere.
  *
+ * This file only builds the text. It never calls the GitHub API: the workflow hands the file run()
+ * writes to the pr-comment action, which finds and replaces the comment.
+ *
  * run() is the entry point actions/github-script calls. The functions it is built from are pure,
- * apart from reading the blueprint files and the API calls, so a test can assert each one. Run as
- * a script, it prints the comment for local blueprint files instead of posting it; see main().
+ * apart from reading the blueprint files, so a test can assert each one. Run as a script, it prints
+ * the comment for local blueprint files; see main().
  */
 
 const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
 
 /** Used when the caller lists no blueprint files. Works for any plugin. */
@@ -23,10 +27,15 @@ const DEFAULT_BLUEPRINT = path.join(__dirname, 'blueprints', 'default.json')
 /** Where a blueprint in the URL hash opens. Playground reads JSON or base64 JSON from the hash. */
 const PLAYGROUND_URL = 'https://playground.wordpress.net/'
 
-// This file is loaded as an ordinary module, so a relative path resolves against it, both in the
-// tests and in the copy of the repository the runner downloads. The comment is written by the same
-// code every action here uses.
-const { upsertComment, MAX_COMMENT_LENGTH } = require('../pr-comment/pr-comment.js')
+/**
+ * The most characters GitHub takes in a comment. The pr-comment action refuses a longer body too,
+ * but only with that number. Checking here as well lets the message name each link's length, so the
+ * blueprint to shorten is obvious, and fails the step that builds the text, not the one that posts it.
+ */
+const MAX_COMMENT_LENGTH = 65536
+
+/** The file the comment text is written to, under the runner's temp directory. */
+const COMMENT_FILE = 'playground-preview-comment.md'
 
 /** A placeholder: a name in capitals between double braces. Anything else is left alone. */
 const PLACEHOLDER = /\{\{([A-Z][A-Z0-9_]*)\}\}/g
@@ -410,26 +419,22 @@ function readyComment({ files, cwd, zipUrl, marker, sha, stamp }) {
  * The entry point actions/github-script calls. The inputs arrive as INPUT_* variables, so they
  * are data and never part of the script.
  *
+ * It writes the comment to a file and sets the `comment-file` output to its path. The workflow
+ * passes that file to the pr-comment action.
+ *
  * @param {object}   options
- * @param {object}   options.github An Octokit, from github-script.
  * @param {object}   options.core   @actions/core, from github-script.
  * @param {object}   options.env    process.env.
  * @param {Date}     options.now    The current time, for tests.
  *
  * @throws {Error} On a bad input or blueprint. github-script then fails the step with the message.
  */
-async function run({ github, core, env, now = new Date() }) {
+async function run({ core, env, now = new Date() }) {
   const status = String(env.INPUT_STATUS ?? '').trim()
   if (!STATUSES.includes(status)) {
     throw new Error(`Unknown status '${status}'. Use ${STATUSES.join(', ')}.`)
   }
 
-  const issue = Number(env.INPUT_PULL_REQUEST)
-  if (!Number.isInteger(issue) || issue <= 0) {
-    throw new Error('No pull request number. This action only runs for pull_request events.')
-  }
-
-  const [owner, repo] = String(env.GITHUB_REPOSITORY ?? '').split('/')
   const marker = env.INPUT_COMMENT_MARKER || `<!-- playground-preview:${env.GITHUB_REPOSITORY} -->`
   const stamp = formatStamp(now, env.INPUT_TIME_ZONE || 'America/New_York')
   const sha = env.INPUT_SHA
@@ -449,11 +454,13 @@ async function run({ github, core, env, now = new Date() }) {
     body = buildComment({ status, marker, sha, stamp, runUrl })
   }
 
+  const file = path.join(env.RUNNER_TEMP || os.tmpdir(), COMMENT_FILE)
+  fs.writeFileSync(file, body)
+  core.setOutput('comment-file', file)
+
   // The job summary keeps the links when posting the comment fails, and is where a test run reads them.
   await core.summary.addRaw(body).write()
-
-  const comment = await upsertComment({ github, owner, repo, issue, marker, body })
-  core.info(`${comment.created ? 'Created' : 'Updated'} comment ${comment.id} on #${issue} (${status}).`)
+  core.info(`Wrote the ${status} comment to ${file}.`)
 }
 
 /**
@@ -517,4 +524,5 @@ module.exports = {
   readyComment,
   DEFAULT_BLUEPRINT,
   MAX_COMMENT_LENGTH,
+  COMMENT_FILE,
 }

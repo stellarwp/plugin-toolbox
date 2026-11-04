@@ -1,13 +1,16 @@
 # playground-preview
 
-Writes one comment on a pull request with links that open the pull request's build in
+Writes the text of a pull request comment with links that open the pull request's build in
 [WordPress Playground](https://playground.wordpress.net/), a throwaway WordPress in the browser,
 and a link to download the zip. While the zip is built the comment says "building". If the build
 fails it says "failed", with a link to the run.
 
+The action only writes the text, to a file. It posts nothing. The
+[pr-comment](../pr-comment/) action posts the file.
+
 Most repositories do not use this action directly. They call the reusable workflow
 [`.github/workflows/playground-preview.yml`](../../workflows/playground-preview.yml), which builds
-the zip, runs this action and keeps the comment up to date. A caller to copy is in
+the zip, runs this action, posts its text with pr-comment and keeps the comment up to date. A caller to copy is in
 [`templates/workflows/playground-preview.yml`](../../../templates/workflows/playground-preview.yml):
 
 ```yaml
@@ -42,15 +45,9 @@ jobs:
   [stellarwp/github-actions' `zip.yml`](https://github.com/stellarwp/github-actions/blob/main/.github/workflows/zip.yml)
   with pup.
 - A `pup` Composer script that downloads `pup.phar` when it is missing and then runs it, so one
-  `composer pup` both installs and runs pup. The workflow also runs `php bin/pup.phar` itself, to
-  ask pup for the zip name, so keep the phar at `bin/pup.phar`:
-
-  ```json
-  "pup": [
-    "test -f ./bin/pup.phar || curl -o bin/pup.phar -L -C - https://github.com/stellarwp/pup/releases/download/2.0.0/pup.phar",
-    "@php bin/pup.phar"
-  ]
-  ```
+  `composer pup` both installs and runs pup. The zip workflow runs `composer -- pup`. Where the phar
+  lives is up to the repository: this workflow downloads its own copy of pup to ask for the zip name
+  (see [The zip link](#the-zip-link)), and never reads the repository's.
 
 - The bucket secrets, passed one by one. `secrets: inherit` only works when the caller and this
   repository are in the same organization.
@@ -75,8 +72,9 @@ One comment per pull request, replaced on every push. It is found by a hidden fi
 `<!-- playground-preview:<owner>/<repo> -->`. Pull requests from forks get no preview: their runs
 cannot see the bucket secrets, and their token cannot write a comment.
 
-The comment is written by the shared [pr-comment](../pr-comment/) module, the same code every
-action in this repository uses to find and replace a comment.
+The comment is posted by the shared [pr-comment](../pr-comment/) action, the same code every
+workflow in this repository uses to find and replace a comment. The workflow passes it the file this
+action writes and the same hidden first line.
 
 ## Blueprints
 
@@ -127,7 +125,8 @@ repositories work the same as public ones.
 - A blueprint with sample data and an extra plugin makes a link of about 1,300 characters.
 
 The limit that applies first is GitHub's: a comment can hold at most 65,536 characters. When the
-links would make the comment longer, the run fails and names each link's length. Make the largest
+links would make the comment longer, the step that writes the text fails and names each link's
+length. (pr-comment refuses a longer body too, but only says the number.) Make the largest
 blueprint smaller, for example by moving setup into a plugin or a WP-CLI command.
 
 ## The zip link
@@ -136,6 +135,12 @@ pup names the zip after the version, the commit time and the commit hash, for ex
 `my-plugin.1.2.0-dev-1793396265-15e470cb.zip`. The shared zip workflow has no outputs, so the
 reusable workflow asks pup for the same name again after the build, and adds it to `zip-link-base`
 (`https://evnt.is/test-zip?file=` by default, the public link to the packaging bucket).
+
+It asks with the shared [pup](../pup/) action, which downloads the pup release named by
+`pup-version` (`2.0.0` by default) and reads the name from it. **Set `pup-version` to the release
+your `composer pup` script downloads.** The zip workflow builds the zip with the repository's own
+pup, and a name made by another release could differ from it, which would make the link point at a
+zip that does not exist.
 
 To skip the build and use a zip from elsewhere, pass `zip-url`. No secret is needed then. This is
 how a repository with its own zip workflow uses this, and how to test it without bucket secrets.
@@ -156,6 +161,7 @@ preview failed`. Update branch protection if it required the old names.
 | `i18n` | `no` | `yes` runs `pup i18n` in the build |
 | `additional-commands` | empty | Run after `pup build`, before `pup package`. Prefer `.puprc` |
 | `zip-url` | empty: build the zip | Use this zip instead of building one |
+| `pup-version` | `2.0.0` | The pup release that works out the zip's name. Use the one your `composer pup` script downloads |
 | `zip-link-base` | `https://evnt.is/test-zip?file=` | Public link to the bucket. The zip name is added to the end |
 | `runs-on` | `ubuntu-latest` | Runner of the job that posts the links |
 | `time-zone` | `America/New_York` | Time zone of the badge |
@@ -189,8 +195,26 @@ not start the run.
 | `comment-marker` | no | `<!-- playground-preview:<owner>/<repo> -->` | First line of the comment |
 | `time-zone` | no | `America/New_York` | Time zone of the badge |
 | `sha` | no | the pull request's head commit | The commit the comment names |
-| `pull-request` | no | the pull request of the event | Where to comment |
-| `token` | no | `github.token` | Needs `pull-requests: write` |
+
+| Output | What it is |
+|---|---|
+| `comment-file` | Path of the file that holds the comment text. Pass it to pr-comment as `body-file` |
+
+In a workflow, the two actions go together:
+
+```yaml
+- id: links
+  uses: stellarwp/plugin-toolbox/.github/actions/playground-preview@main
+  with:
+    status: ready
+    zip-url: https://example.com/my-plugin.zip
+- uses: stellarwp/plugin-toolbox/.github/actions/pr-comment@main
+  with:
+    marker: '<!-- playground-preview:example-org/my-plugin -->'
+    body-file: ${{ steps.links.outputs.comment-file }}
+```
+
+The action needs no token: it does not call the GitHub API.
 
 ## Running it locally
 
@@ -210,6 +234,6 @@ the blueprint. A file that breaks a rule above exits 1 with the reason.
 ## How it is tested
 
 `tests/actions/playground-preview/` loads the script in `node --test`, with the real
-`@actions/core` and a real Octokit whose network is replaced, so the tests assert the API requests
-the action would send. Finding and replacing the comment is tested with pr-comment. It also runs the script from the command line. Run `npm install` once, then
-`node --test`.
+`@actions/core`, and asserts the text it writes and the output it sets. Finding and replacing the
+comment is tested with pr-comment. It also runs the script from the command line. Run `npm install`
+once, then `node --test`.

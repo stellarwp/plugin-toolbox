@@ -34,6 +34,9 @@ jobs:
     with:
       # The oldest PHP the plugin supports, so vendor/ is built for it.
       php-version: '7.4'
+      # The pup release your `composer pup` script downloads. The zip name is asked of this one, and
+      # must equal the name the zip workflow's pup makes.
+      pup-version: '2.0.0'
       # Leave out for the default blueprint. Each file is one link in the comment.
       # blueprints: |
       #   .github/playground/blueprint.json
