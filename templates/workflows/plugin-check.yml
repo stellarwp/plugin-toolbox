@@ -6,7 +6,7 @@ name: Plugin Check
 # A file to copy into .github/workflows/ of a plugin repository. Keep the file name
 # plugin-check.yml: earlier runs of this file hold the baselines, and a new name starts with none.
 # The work is in stellarwp/plugin-toolbox/.github/workflows/plugin-check.yml. The repository needs
-# a .puprc whose zip_name equals plugin-slug, and a `pup` Composer script; see the
+# a .puprc whose zip_name equals plugin-slug; pup itself is installed by the workflow. See the
 # plugin-check-report action's README.
 #
 # Checks that do not fit the plugin go in a .plugin-check.json at the repository root, as
@@ -41,3 +41,5 @@ jobs:
     uses: stellarwp/plugin-toolbox/.github/workflows/plugin-check.yml@main
     with:
       plugin-slug: my-plugin
+      # The pup release your release build uses. It builds the plugin for the check.
+      pup-version: '2.0.0'

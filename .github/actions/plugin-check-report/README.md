@@ -28,20 +28,9 @@ jobs:
 - A `.puprc` whose `build` makes the plugin as it ships, and whose `zip_name` equals `plugin-slug`.
   The zip's top folder is named after `zip_name`, and Plugin Check takes the slug from the folder
   name.
-- A `pup` Composer script that downloads `pup.phar` when it is missing and then runs it, so one
-  `composer pup` both installs and runs pup. Kadence Blocks has:
-
-  ```json
-  "pup": [
-    "test -f ./bin/pup.phar || curl -o bin/pup.phar -L -C - https://github.com/stellarwp/pup/releases/download/2.0.0/pup.phar",
-    "@php bin/pup.phar"
-  ]
-  ```
-
-  The script is what matters, but the path is not free yet: the workflow also runs
-  `php bin/pup.phar` itself, to ask pup for the version and the zip name, so keep the phar at
-  `bin/pup.phar`.
-
+- Nothing for pup itself. The workflow installs it with the shared [pup](../pup/) action, so the
+  repository needs no copy of `pup.phar` and no `pup` Composer script. Set the `pup-version` input
+  to the release the repository's own release build uses, so the check sees the same files.
 - Ignore rules that keep dev-only files out of the zip: a `.distignore`, `export-ignore` lines in
   `.gitattributes` (pup reads both), or pup's default ignore list.
 - The caller file named `plugin-check.yml`. See [The baseline](#the-baseline).
@@ -51,16 +40,19 @@ The JavaScript toolchain comes from files the repository already has: `.nvmrc` s
 
 ## How the plugin is built
 
-By default, with pup, the same steps the release zip uses, from the root of the checkout:
+By default, with pup, the same steps the release zip uses, from the root of the checkout. `pup`
+here is `php pup.phar`, with the phar the shared pup action installed:
 
 ```bash
-composer run -q pup > /dev/null   # downloads bin/pup.phar
-composer -- pup build
-version=$(php -d display_errors=0 bin/pup.phar get-version --dev)
-composer -- pup package "$version"
-name=$(php -d display_errors=0 bin/pup.phar zip-name "$version")
+pup build
+version=$(pup get-version --dev | tail -n 1)
+pup package "$version"
+name=$(pup zip-name "$version" | tail -n 1)
 unzip -q "$name.zip" -d "$PLUGIN_CHECK_BUILD_DIR"
 ```
+
+One pup release builds, packages and names the zip, so the name looked for is always the name the
+package step made. The last line pup prints is the value, as the pup action reads it.
 
 So `.puprc` and the ignore files decide what is checked. If the release needs a step the check should
 see too, such as making the POT file, put it in `.puprc`'s `build`, not in the workflow.
@@ -188,6 +180,7 @@ the check to require in branch protection is `plugin-check / Plugin Check`.
 | `plugin-slug` | required | The plugin's folder name. Equals `zip_name` in `.puprc` |
 | `main-file` | `<plugin-slug>.php` | The main plugin file, checked after the build |
 | `build-command` | empty: pup | A bash command that builds the plugin instead of pup. See [`build-command`](#build-command-for-a-repository-without-pup) |
+| `pup-version` | `2.0.0` | The pup release that builds the plugin, or `latest`. Use the release the repository's release build uses |
 | `runs-on` | `ubuntu-latest` | Runner of the job that builds and checks, of runner version 2.336.0 or newer (the job uses `$/`) |
 | `php-version` | `7.4` | PHP that builds `vendor/`. Use the oldest the plugin supports |
 | `exclude-checks` | empty | Checks to skip, one per line. Replaces `.plugin-check.json` when it names any. See [Excluding checks](#excluding-checks) |
