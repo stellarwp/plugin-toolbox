@@ -720,6 +720,25 @@ describe('compare with no baseline file, in a pull request', () => {
   })
 })
 
+describe('the note about a pull request that changes the baseline file', () => {
+  it('says so under the table, and keeps the comment within fifteen lines', () => {
+    const run = compareWith([resultsWithNewCodes(7)], { PLUGIN_CHECK_BASELINE: BASELINE, PLUGIN_CHECK_BASELINE_CHANGED: 'true' })
+    const lines = run.comment.replace(/\n$/, '').split('\n')
+
+    assert.ok(lines.includes('ℹ️ This pull request changes the baseline file.'))
+    assert.ok(lines.length <= 15, `${lines.length} lines`)
+    assert.match(lines.at(-1), /^📎 /)
+  })
+
+  it('says nothing when the file is not changed, or does not exist', () => {
+    const same = compareWith([fixture('same-as-baseline.txt')], { PLUGIN_CHECK_BASELINE: BASELINE, PLUGIN_CHECK_BASELINE_CHANGED: 'false' })
+    const none = compareWith([fixture('clean.txt')], { PLUGIN_CHECK_BASELINE_CHANGED: 'true' })
+
+    assert.doesNotMatch(same.comment, /changes the baseline file/)
+    assert.doesNotMatch(none.comment, /changes the baseline file/)
+  })
+})
+
 describe('the baseline file text', () => {
   it('sorts codes by Unicode code point, not by UTF-16 unit', () => {
     const counts = report.countPerCode([

@@ -620,6 +620,24 @@ function buildComment({ marker, status, badge, column, noBaseline, totals, wentU
 }
 
 /**
+ * The one line under the table that says where the baseline came from, when that is worth saying.
+ *
+ * @param {object}  input
+ * @param {string}  input.source  `file`, `target` or `none`.
+ * @param {boolean} input.changed The pull request changes the baseline file, so the comparison is
+ *                                with its own change. A reviewer should look at the diff of the file.
+ *
+ * @returns {string} The line, or ''.
+ */
+function baselineNote({ source, changed }) {
+  if (source === 'target') {
+    return "ℹ️ There is no baseline file, so the baseline is the target branch's results. See the job summary to add one."
+  }
+
+  return source === 'file' && changed ? 'ℹ️ This pull request changes the baseline file.' : ''
+}
+
+/**
  * Reads the baseline file, and names it when it cannot be used.
  *
  * Plugin Check reports it as an error annotation: a committed file can be broken by a merge conflict
@@ -741,7 +759,9 @@ function updateSection({ mode, noFile, verdict, baselineName, env }) {
  *                              COMMENT_MARKER, PLUGIN_CHECK_BASELINE (default: .plugin-check-baseline.json
  *                              in the current folder), PLUGIN_CHECK_BASE_RESULTS (the target branch's results,
  *                              used as the baseline when there is no file) and
- *                              PLUGIN_CHECK_BASE_REQUIRED (`true`: they must exist), COMMENT_BADGE,
+ *                              PLUGIN_CHECK_BASE_REQUIRED (`true`: they must exist),
+ *                              PLUGIN_CHECK_BASELINE_CHANGED (`true`: this pull request changes the
+ *                              baseline file), COMMENT_BADGE,
  *                              RUN_URL, ARTIFACT_URL, GITHUB_STEP_SUMMARY.
  * @param {object}   input.log  Where messages go: `out`, `err`, `error`, `warning`, `notice`.
  *
@@ -894,10 +914,7 @@ function compareOrThrow({ args, env, log }) {
     wentUp: verdict.wentUp,
     wentDown: verdict.wentDown,
     updateHint: mode !== 'strict' && hasFile && verdict.errorsDown > 0,
-    note:
-      source === 'target'
-        ? `ℹ️ There is no baseline file, so the baseline is the target branch's results. See the job summary to add one.`
-        : '',
+    note: baselineNote({ source, changed: env.PLUGIN_CHECK_BASELINE_CHANGED === 'true' }),
     upList: verdict.upList,
     links: linksLine({ artifactUrl: env.ARTIFACT_URL || '', runUrl, resultsPath }),
   })
@@ -1431,6 +1448,7 @@ module.exports = {
   parseExcludeInput,
   parseResults,
   readBaseline,
+  baselineNote,
   readBaselineFile,
   readTargetResults,
   readIfFile,
