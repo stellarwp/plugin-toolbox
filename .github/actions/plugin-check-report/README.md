@@ -1,8 +1,9 @@
 # plugin-check-report
 
 Compares a [WordPress.org Plugin Check](https://github.com/WordPress/plugin-check) results file with
-a baseline: the counts of an earlier run of the same workflow. It saves this run's counts as the
-next baseline and writes a short body for the pull request comment.
+a baseline: the number of errors and warnings per rule, kept in a file the repository commits,
+`.plugin-check-baseline.json`. It writes a short body for the pull request comment, and a new
+baseline to copy into the repository.
 
 Most repositories do not use this action directly. They call the reusable workflow
 [`.github/workflows/plugin-check.yml`](../../workflows/plugin-check.yml), which builds the plugin,
@@ -14,7 +15,6 @@ action and posts the comment. A caller to copy is in
 jobs:
   plugin-check:
     permissions:
-      actions: read
       contents: read
       issues: write
       pull-requests: write
@@ -33,7 +33,9 @@ jobs:
   to the release the repository's own release build uses, so the check sees the same files.
 - Ignore rules that keep dev-only files out of the zip: a `.distignore`, `export-ignore` lines in
   `.gitattributes` (pup reads both), or pup's default ignore list.
-- The caller file named `plugin-check.yml`. See [The baseline](#the-baseline).
+- A baseline file, `.plugin-check-baseline.json` at the root. Without it the check still works, but
+  slower: see [The baseline](#the-baseline). Keep it out of the zip: Plugin Check flags hidden files,
+  and pup's default ignore list already drops them.
 
 The JavaScript toolchain comes from files the repository already has: `.nvmrc` sets up Node,
 `package-lock.json` turns on the npm cache, and `bun.lock` or `bun.lockb` sets up bun.
@@ -87,28 +89,80 @@ guess at the top folder.
 
 ## The baseline
 
-The baseline is never a committed file. It is the `baseline.json` in the `plugin-check-report`
-artifact of an earlier run of the same workflow file:
+The baseline is `.plugin-check-baseline.json`, a file the repository commits:
 
-- A pull request compares with the run for its base commit. For a stacked pull request that is
-  the run of the pull request below it. A run still going is waited for, up to 20 minutes.
-- If that run has no baseline (it was cancelled, say), the newest run on the target branch is used.
-  More errors than that older run only warn, because the target may have changed since.
-- A push compares with the run before it on the same branch.
-- With no earlier run at all, nothing is compared and the check passes with a warning. A failed
-  lookup (an API or download error) fails instead, so an outage never passes as "no baseline".
+```json
+{
+  "errors": {
+    "WordPress.Security.EscapeOutput.OutputNotEscaped": 12
+  },
+  "warnings": {
+    "WordPress.DB.DirectDatabaseQuery.DirectQuery": 3
+  }
+}
+```
 
-Only runs of the repository's own branches count. A pull request from a fork has a run of the same
-workflow, and the runs list matches it by branch name and commit, so a fork's run on a branch called
-`develop` would look like a run of `develop`. Its artifact is whatever the fork's workflow uploaded,
-so runs whose head commit is in another repository are skipped.
+It holds a count for each rule code, and no file names or line numbers, so it only changes when a
+rule gains or loses an error somewhere, not when code moves. Only a rule with more errors than the
+file allows fails the check.
 
-The earlier runs are found by the caller's workflow file name, read from `GITHUB_WORKFLOW_REF`.
-Renaming the caller file starts again with no baseline. Artifacts expire after the repository's
-retention period (90 days by default), so a branch with no run for that long starts with none too.
+A pull request is compared with the file in its own checkout, the pull request merged into its
+target. So a pull request that fixes errors lowers the file in the same diff, and one that adds an
+error on purpose raises it in the same diff, where a reviewer sees it. The comment says "This pull
+request changes the baseline file" when it does. The tradeoff: a pull request can raise a count to
+hide a new error. The change is in the diff, in a file with an obvious name. To require a reviewer
+for it, add a line such as `/.plugin-check-baseline.json @my-org/leads` to CODEOWNERS.
 
-For a pull request to have a baseline, the branch it targets needs runs: list it under `push` in
-the caller.
+A push is compared with the file at that commit, so a merge that adds errors fails on the target
+branch, where the whole team sees it.
+
+### Making and updating the file
+
+Every run uploads the `plugin-check-report` artifact, with a `baseline.json` made from that run's
+results. To start the file, or to lower it after errors were fixed, download that artifact and copy
+the file. The job summary shows the command with the run number filled in:
+
+```bash
+gh run download <run-id> --repo my-org/my-plugin --name plugin-check-report --dir /tmp/plugin-check
+cp /tmp/plugin-check/baseline.json .plugin-check-baseline.json
+```
+
+Or locally, from the plugin's root, with the results of a local Plugin Check run:
+
+```bash
+node .github/actions/plugin-check-report/plugin-check-report.js update results.txt
+```
+
+The workflow never commits the file itself. That would need a write token on every pull request,
+could not push to a fork, and would change the baseline without the person who owns the change.
+
+When error counts go down and the file is not updated, the check passes with a notice and the
+comment asks for the update. Slack in the file lets a later pull request add errors back, so it is
+worth lowering the file when errors are fixed. If two pull requests change the same count, git
+reports a conflict in the file: merge the target branch, then make the file again from the new run
+instead of merging the numbers by hand.
+
+### With no baseline file
+
+The check is slower, not weaker:
+
+- **A pull request** (in `baseline` mode) builds and checks the target branch's commit too, in a
+  second job that runs in parallel with the first, and compares with those results. The comment's
+  column is then "Target branch", and a line says there is no baseline file. If the target branch
+  cannot be built or checked, the check fails with a message that says so: it never passes without a
+  baseline. The cost is a second build and Plugin Check run, so the job minutes double, though the
+  wait does not.
+- **A push** has no target to compare with. The counts are reported and the check passes with a
+  warning that says how to start the file.
+- **`strict` mode** needs no baseline, so it builds nothing extra and says nothing.
+
+Commit the file to stop the second build.
+
+### A file that is not valid
+
+A file that is not JSON (a merge conflict left markers in it, say) or not the shape above fails the
+check with an error annotation that names the file and says what is wrong. The comment then says
+Plugin Check could not run. Replace it with the `baseline.json` of the run's artifact.
 
 ## Modes
 
@@ -161,6 +215,11 @@ grows past 15 lines. Pull requests from forks get no comment: their token cannot
 The workflow writes it with the [pr-comment](../pr-comment/) action. The comment is found by its
 first line, not by its author.
 
+One line under the table says where the baseline came from when that matters: that the baseline is
+the target branch's results because there is no baseline file, or that the pull request changes the
+baseline file. When an error count went down, the "Rules that went down" line asks for the file to be
+updated. The commands are in the job summary, not in the comment.
+
 The action builds the body. Under the status line it puts a "Check Finished" badge with the time in
 Eastern Time (`06:08 PM EDT` in summer, `EST` in winter), made by `finishBadge()` in
 `plugin-check-report.js`, so no caller passes one. When the build or the check broke and there was
@@ -200,14 +259,15 @@ in the same job does not see them there.
 
 ```yaml
 permissions:
-  actions: read         # read earlier runs and download their baseline
-  contents: read        # check out the repository
+  contents: read        # check out the repository, and read the baseline file
   issues: write         # the sticky comment
   pull-requests: write  # the sticky comment
 ```
 
 A called workflow can only lower these. If the caller grants less than a job asks for, GitHub does
 not start the run. The job that runs the Plugin Check action lowers itself to `contents: read`.
+A caller from an earlier version that still grants `actions: read` works: a caller may give more
+than a job asks for.
 
 ## Inputs of the action
 
@@ -217,51 +277,49 @@ not start the run. The job that runs the Plugin Check action lowers itself to `c
 | `comment-file` | no | none | Where to write the comment body |
 | `mode` | no | `baseline` | `baseline` or `strict` |
 | `comment-marker` | no | `<!-- plugin-check:<owner>/<repo> -->` | First line of the comment body |
-| `baseline-wait` | no | `1200` | Seconds to wait for the base commit's run. A whole number, or the check fails |
-| `token` | no | `github.token` | Needs `actions: read` |
+| `baseline-file` | no | `.plugin-check-baseline.json` | The committed baseline. A relative path is read from the working directory |
+| `base-results` | no | none | Results of the target branch, used as the baseline when there is no baseline file. Not used in `strict` mode |
+| `base-required` | no | `false` | `true` when the caller checked the target branch: a missing `base-results` file then fails the compare |
+| `baseline-changed` | no | `false` | `true` when the pull request changes the baseline file; the comment says so |
 
 | Output | What it is |
 |---|---|
 | `artifact-url` | The `plugin-check-report` artifact of this run |
-| `baseline-url` | The run the baseline came from. Empty with no baseline |
 
 ## Running it locally
 
-You need Node 20 or newer, and for the baseline the GitHub CLI signed in (`gh auth login`). Run
-`npm install` once in the toolbox checkout, which installs the GitHub client the lookup uses. The
-`compare` and `fetch` commands take the same arguments and environment variables as the two bash
-scripts did.
+You need Node 20 or newer. For a pull request's baseline, check out its branch: the file is in it.
 
-1. Build the plugin and run Plugin Check in a local WordPress, for example with wp-env:
+1. Build the plugin and run Plugin Check in a local WordPress, for example with wp-env. The excluded
+   checks come from the same `.plugin-check.json` as in CI:
 
    ```bash
    npx wp-env start
-   npx wp-env run cli wp plugin check my-plugin --format=json > results.txt
+   npx wp-env run cli wp plugin check my-plugin --format=json \
+     $(node .github/actions/plugin-check-report/plugin-check-report.js exclude-checks) > results.txt
    ```
 
    Keep only the command's output in the file. A notice from wp-env at the top fails the compare
    with "not Plugin Check output", on purpose.
 
-2. Get a baseline from the branch you compare with:
+2. Compare, from the plugin's root, where `.plugin-check-baseline.json` is:
 
    ```bash
-   GITHUB_REPOSITORY=my-org/my-plugin \
-     node .github/actions/plugin-check-report/plugin-check-report.js fetch develop baseline.json
-   ```
-
-   The token comes from `GITHUB_TOKEN`, else `GH_TOKEN`, else `gh auth token`. The exit status is 0
-   when a baseline was written, 1 when no run has one, and 2 when the lookup itself failed.
-
-3. Compare:
-
-   ```bash
-   PLUGIN_CHECK_BASELINE=baseline.json \
-     node .github/actions/plugin-check-report/plugin-check-report.js compare --comment-file comment.md results.txt
+   node .github/actions/plugin-check-report/plugin-check-report.js compare --comment-file comment.md results.txt
    ```
 
    Exit 0 means the check passes. `comment.md` holds what the pull request would show. Add
-   `PLUGIN_CHECK_MODE=strict` to see the strict result. Skip step 2 to see the counts with no
-   baseline. `compare --update results.txt` writes the baseline for a results file instead.
+   `PLUGIN_CHECK_MODE=strict` to see the strict result, or `PLUGIN_CHECK_BASELINE=path` to use
+   another file. With no baseline file, the counts are shown and nothing is compared.
+
+3. To make or update the file from these results:
+
+   ```bash
+   node .github/actions/plugin-check-report/plugin-check-report.js update results.txt
+   ```
+
+   `update` is short for `compare --update`. It writes `.plugin-check-baseline.json` in the current
+   folder, with the same text as the `baseline.json` of the CI artifact.
 
 ## Differences from the earlier bash scripts
 
@@ -271,8 +329,13 @@ show with a hand-edited baseline or an odd results file, except the first two:
 
 - The mode `ratchet` is now called `baseline`. The old word is refused, and the message says what
   to use.
-- The `workflow-file` input is gone. The runs that hold the baseline are the calling workflow's,
-  which the run itself knows.
+- The `workflow-file`, `baseline-wait`, `token` and `baseline-url` pieces are gone, and so is the
+  "older run" status and the "Target branch" / "Previous run" column names. The baseline is a
+  committed file now, not the artifact of an earlier run, so nothing is looked up or waited for.
+  The `fetch` command is gone with them.
+- The texts for a missing baseline, for error counts that went down and for an invalid baseline
+  file are new, and the job summary has the commands to update the file. These are the only
+  expected files under `fixtures/expected/` that no longer come from the bash script.
 - The `badge-url` input is gone. The action makes the "Check Finished" badge itself, and also writes
   the "could not run" body that a shell step in the workflow wrote before. Both look as they did.
 - A rule with an empty code is counted like any other. Bash misread its row and showed wrong totals.
@@ -287,14 +350,14 @@ show with a hand-edited baseline or an odd results file, except the first two:
 ## How it is tested
 
 The work is in `plugin-check-report.js`: small functions that take plain values, so a test calls
-them directly. `tests/actions/plugin-check-report/` has five files, run with `node --test`:
+them directly. `tests/actions/plugin-check-report/` has four files, run with `node --test`:
 
 - `compare.test.js` runs the compare in-process on the sample results files in `fixtures/`, and
   checks the comment, the job summary and the annotations against the exact files in
-  `fixtures/expected/`. Those files were written by the original bash script, so they pin that the
-  JavaScript prints what it printed.
-- `fetch.test.js` runs the lookup against a real GitHub client with the network replaced by written
-  answers, a fake clock for the wait, and a stand-in for the `gh` download.
+  `fixtures/expected/`. Most of those files were written by the original bash script, so they pin
+  that the JavaScript prints what it printed; the ones listed under "Differences" were rewritten for
+  the committed baseline. It also covers the missing file, the target branch as a baseline, the
+  invalid file and the command line.
 - `action.test.js` calls the step functions the way `actions/github-script` does.
 - `badge.test.js` checks the badge URL against what the old shell step printed, from the real
   `date` command, for both sides of both daylight saving changes, midnight, noon and the end of a
