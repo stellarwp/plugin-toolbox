@@ -409,11 +409,12 @@ function buildRows(now, base) {
  * @param {string}  input.mode        `baseline` or `strict`.
  * @param {boolean} input.noBaseline  There was nothing to compare with: only the totals count.
  * @param {string}  input.baselineName The baseline file's name, for the hint to update it.
+ * @param {boolean} input.fromFile    The baseline is the committed file, which can be lowered.
  *
  * @returns {object} `messages` (`{level, text}` in print order), `totals`, `wentUp`, `wentDown`,
  *          `errorsDown` (how many rules have fewer errors), `errorsUp`, `upList` and `failed`.
  */
-function evaluate({ rows, mode, noBaseline, baselineName = BASELINE_FILE }) {
+function evaluate({ rows, mode, noBaseline, baselineName = BASELINE_FILE, fromFile = true }) {
   const totals = { errorsBase: 0, errorsNow: 0, warningsBase: 0, warningsNow: 0 }
   const messages = []
   let failed = false
@@ -473,7 +474,7 @@ function evaluate({ rows, mode, noBaseline, baselineName = BASELINE_FILE }) {
 
   // Fewer errors than the file says leaves room for them to come back unnoticed. Strict mode does
   // not use the file, so it asks for nothing.
-  if (mode !== 'strict' && errorsDown > 0) {
+  if (mode !== 'strict' && fromFile && errorsDown > 0) {
     messages.push({
       level: 'notice',
       text: `Error counts went down. Lower the baseline so they cannot come back: commit the baseline.json from this run's plugin-check-report artifact as ${baselineName}.`,
@@ -574,12 +575,13 @@ function linksLine({ artifactUrl, runUrl, resultsPath }) {
  * @param {number}   input.wentUp      How many rules went up.
  * @param {number}   input.wentDown    How many rules went down.
  * @param {boolean}  input.updateHint  An error count went down: ask for the baseline file to be updated.
+ * @param {string}   input.note        One line under the table, such as where the baseline came from, or ''.
  * @param {string}   input.upList      The first rules that went up, ready to print.
  * @param {string}   input.links       From linksLine.
  *
  * @returns {string} The body, cut to MAX_COMMENT_LINES lines, with no final line break.
  */
-function buildComment({ marker, status, badge, column, noBaseline, totals, wentUp, wentDown, updateHint = false, upList, links }) {
+function buildComment({ marker, status, badge, column, noBaseline, totals, wentUp, wentDown, updateHint = false, note = '', upList, links }) {
   let body = `${marker}\n${status}\n\n`
 
   if (badge) {
@@ -596,6 +598,9 @@ function buildComment({ marker, status, badge, column, noBaseline, totals, wentU
     body += `| Warnings | ${totals.warningsNow} | ${totals.warningsBase} | ${change(totals.warningsNow, totals.warningsBase)} |\n\n`
   }
 
+  if (note) {
+    body += `${note}\n`
+  }
   if (wentUp > MAX_RULES_LISTED) {
     body += `Went up (top ${MAX_RULES_LISTED} of ${wentUp}): ${upList}\n`
   } else if (wentUp > 0) {
@@ -605,7 +610,7 @@ function buildComment({ marker, status, badge, column, noBaseline, totals, wentU
     body += `Rules that went down: ${wentDown}.${updateHint ? ' Update the baseline file, see the job summary.' : ''}\n`
   }
   // A blank line separates the notes above from the links, when there are notes.
-  if (wentUp > 0 || wentDown > 0) {
+  if (wentUp > 0 || wentDown > 0 || note) {
     body += '\n'
   }
   body += links
@@ -648,25 +653,58 @@ function readBaselineFile(file, name) {
 }
 
 /**
+ * The target branch's results as a baseline, for a pull request in a repository with no baseline
+ * file. The workflow checked the target branch's commit in the same run, so its counts are what the
+ * pull request is compared with.
+ *
+ * @param {object} env  PLUGIN_CHECK_BASE_RESULTS (the results file) and PLUGIN_CHECK_BASE_REQUIRED.
+ * @param {string} name The baseline file's name, for the message.
+ *
+ * @throws {CheckFailure} When the results are missing or are not Plugin Check output. Never passes
+ *         without a baseline, because the workflow asked for one.
+ *
+ * @returns {{errors: Map<string, number>, warnings: Map<string, number>}} Counts.
+ */
+function readTargetResults(env, name) {
+  const file = env.PLUGIN_CHECK_BASE_RESULTS || ''
+
+  if (!file || !isFile(file)) {
+    throw new CheckFailure(
+      `The target branch could not be checked, so there is nothing to compare with. Look at the job that checks the target branch in this run. To skip that check, commit the baseline.json from this run's plugin-check-report artifact as ${name}.`,
+      1,
+      true
+    )
+  }
+
+  const text = fs.readFileSync(file, 'utf8')
+  const refusal = checkResultsText(text)
+  if (refusal) {
+    throw new CheckFailure(`The results of the target branch cannot be used. ${refusal}`, 1, true)
+  }
+
+  return countPerCode(parseResults(text))
+}
+
+/**
  * The part of the job summary that says how to change the baseline file, or '' when there is nothing
  * to do. The comment stays short; this is where the commands go.
  *
  * @param {object} input
  * @param {string} input.mode         `baseline` or `strict`.
- * @param {boolean} input.noBaseline  There is no baseline file.
+ * @param {boolean} input.noFile      There is no baseline file.
  * @param {object} input.verdict      From evaluate.
  * @param {string} input.baselineName The baseline file's name.
  * @param {object} input.env          GITHUB_RUN_ID and GITHUB_REPOSITORY, for the real command.
  *
  * @returns {string} Markdown with a final line break, or ''.
  */
-function updateSection({ mode, noBaseline, verdict, baselineName, env }) {
+function updateSection({ mode, noFile, verdict, baselineName, env }) {
   if (mode === 'strict') {
     return ''
   }
 
   const lines = []
-  if (noBaseline) {
+  if (noFile) {
     lines.push(`There is no ${baselineName} yet. To start one, add the file from this run:`)
   } else if (verdict.errorsDown > 0) {
     lines.push(`Error counts went down. To lower the baseline, replace ${baselineName} with the file from this run:`)
@@ -700,9 +738,11 @@ function updateSection({ mode, noBaseline, verdict, baselineName, env }) {
  * @param {string[]} input.args Arguments: `--update` and `--comment-file <path>` in any order, then
  *                              the results file.
  * @param {object}   input.env  Environment. PLUGIN_CHECK_MODE (`baseline`, the default, or `strict`),
- *                              COMMENT_MARKER, PLUGIN_CHECK_BASELINE (default: baseline.json next
- *                              to this file), COMMENT_BADGE, RUN_URL, ARTIFACT_URL,
- *                              GITHUB_STEP_SUMMARY.
+ *                              COMMENT_MARKER, PLUGIN_CHECK_BASELINE (default: .plugin-check-baseline.json
+ *                              in the current folder), PLUGIN_CHECK_BASE_RESULTS (the target branch's results,
+ *                              used as the baseline when there is no file) and
+ *                              PLUGIN_CHECK_BASE_REQUIRED (`true`: they must exist), COMMENT_BADGE,
+ *                              RUN_URL, ARTIFACT_URL, GITHUB_STEP_SUMMARY.
  * @param {object}   input.log  Where messages go: `out`, `err`, `error`, `warning`, `notice`.
  *
  * @returns {number} The exit status: 0 passes, 1 fails the check, another number is a file that
@@ -801,24 +841,33 @@ function compareOrThrow({ args, env, log }) {
     return 0
   }
 
-  // No baseline file yet: report the counts and pass. Failing here would block the very pull request
-  // that adds the workflow, before anyone has a result to make the file from. Strict mode does not
-  // use the file, so it has nothing to say.
-  const noBaseline = !isFile(baselinePath)
+  // Where the baseline comes from: the committed file, else (baseline mode, pull request) the target
+  // branch's results, else nothing. With no baseline at all, the counts are reported and the check
+  // passes: failing would block a push before anyone has a result to make the file from.
+  const hasFile = isFile(baselinePath)
+  let source = hasFile ? 'file' : 'none'
   let base = { errors: new Map(), warnings: new Map() }
-  if (noBaseline) {
-    if (mode === 'strict') {
-      log.out('No baseline file. Strict mode does not need one.')
-    } else {
-      log.warning(
-        `No baseline file at ${baselineName}, so nothing was compared. To start one, commit the baseline.json from this run's plugin-check-report artifact as ${baselineName}.`
-      )
-    }
-  } else {
+
+  if (hasFile) {
     base = readBaselineFile(baselinePath, baselineName)
+  } else if (mode === 'strict') {
+    // Strict mode does not use a baseline, so it has nothing to say and builds nothing.
+    log.out('No baseline file. Strict mode does not need one.')
+  } else if (env.PLUGIN_CHECK_BASE_RESULTS || env.PLUGIN_CHECK_BASE_REQUIRED === 'true') {
+    base = readTargetResults(env, baselineName)
+    source = 'target'
+    log.warning(
+      `No baseline file at ${baselineName}, so the target branch was checked too, and its results are the baseline for this run. That makes the run slower. To stop it, commit the baseline.json from this run's plugin-check-report artifact as ${baselineName}.`
+    )
+  } else {
+    log.warning(
+      `No baseline file at ${baselineName}, so nothing was compared. To start one, commit the baseline.json from this run's plugin-check-report artifact as ${baselineName}.`
+    )
   }
 
-  const verdict = evaluate({ rows: buildRows(now, base), mode, noBaseline, baselineName })
+  const noBaseline = source === 'none'
+  const verdict = evaluate({ rows: buildRows(now, base), mode, noBaseline, baselineName, fromFile: hasFile })
+
   for (const { level, text: message } of verdict.messages) {
     log[level](message)
   }
@@ -839,12 +888,16 @@ function compareOrThrow({ args, env, log }) {
     marker: env.COMMENT_MARKER || '<!-- plugin-check -->',
     status: statusLine({ mode, noBaseline, ...verdict, errorsNow: verdict.totals.errorsNow }),
     badge: env.COMMENT_BADGE || '',
-    column: 'Baseline',
+    column: source === 'target' ? 'Target branch' : 'Baseline',
     noBaseline,
     totals: verdict.totals,
     wentUp: verdict.wentUp,
     wentDown: verdict.wentDown,
-    updateHint: mode !== 'strict' && verdict.errorsDown > 0,
+    updateHint: mode !== 'strict' && hasFile && verdict.errorsDown > 0,
+    note:
+      source === 'target'
+        ? `ℹ️ There is no baseline file, so the baseline is the target branch's results. See the job summary to add one.`
+        : '',
     upList: verdict.upList,
     links: linksLine({ artifactUrl: env.ARTIFACT_URL || '', runUrl, resultsPath }),
   })
@@ -853,7 +906,7 @@ function compareOrThrow({ args, env, log }) {
     writeText(commentFile, `${body}\n`, 'write')
   }
   if (env.GITHUB_STEP_SUMMARY) {
-    const how = updateSection({ mode, noBaseline, verdict, baselineName, env })
+    const how = updateSection({ mode, noFile: !hasFile, verdict, baselineName, env })
     writeText(env.GITHUB_STEP_SUMMARY, `${body}\n${how}`, 'append')
   }
 
@@ -1379,6 +1432,7 @@ module.exports = {
   parseResults,
   readBaseline,
   readBaselineFile,
+  readTargetResults,
   readIfFile,
   readJsonValues,
   runCompare,

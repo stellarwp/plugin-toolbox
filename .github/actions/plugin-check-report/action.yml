@@ -45,6 +45,20 @@ inputs:
       A relative path is read from the working directory.
     required: false
     default: '.plugin-check-baseline.json'
+  base-results:
+    description: >-
+      Path of the Plugin Check results of the pull request's target branch. Used as the baseline when
+      there is no baseline file, so a pull request is still compared with something. Empty when
+      nothing was checked on the target branch. Not used in `strict` mode.
+    required: false
+    default: ''
+  base-required:
+    description: >-
+      `true` when the caller checked the target branch because there is no baseline file. A missing
+      `base-results` file then fails the compare, so a target branch that could not be checked never
+      passes as "no baseline".
+    required: false
+    default: 'false'
 
 outputs:
   artifact-url:
@@ -102,6 +116,8 @@ runs:
         COMMENT_FILE: ${{ inputs.comment-file }}
         PLUGIN_CHECK_MODE: ${{ inputs.mode }}
         PLUGIN_CHECK_BASELINE: ${{ inputs.baseline-file }}
+        PLUGIN_CHECK_BASE_RESULTS: ${{ inputs.base-results }}
+        PLUGIN_CHECK_BASE_REQUIRED: ${{ inputs.base-required }}
         COMMENT_MARKER: ${{ steps.paths.outputs.marker }}
         ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
