@@ -11,11 +11,18 @@ name: Plugin Check
 # .github/actions/pup action, so the repository does not need a copy of it or a Composer script for
 # it. A repository without pup passes `build-command` instead; see the plugin-check-report README.
 #
-# Three jobs, so the third-party action never holds a token that can write. The comments are written
+# Four jobs, so the third-party action never holds a token that can write. The comments are written
 # by .github/actions/pr-comment, which calls the GitHub API itself:
 #   start   posts "in progress" on the pull request.
-#   check   builds the plugin and runs wordpress/plugin-check-action. Read-only token.
+#   plan    lists the excluded checks, and decides whether the target branch is checked too.
+#   check   builds the plugin and runs wordpress/plugin-check-action. Read-only token. It runs for
+#           the pull request ("head") and, when the repository has no baseline file, for the commit
+#           the pull request targets ("base"), in parallel.
 #   report  compares the results with the baseline and replaces the comment with the result.
+#
+# The baseline is the repository's `.plugin-check-baseline.json`, read from the pull request's own
+# checkout. Without that file, a pull request is compared with the target branch's results instead,
+# which costs a second build and check; commit the file to stop that.
 #
 # The action also tries to post its own comment. With a read-only token that call fails (it logs
 # "Failed to post PR comment" and carries on), so the only comment is ours.
@@ -154,9 +161,65 @@ jobs:
 
             ![Plugin Check started](${{ steps.badge.outputs.url }})
 
+  # Works out, from the repository's files, what the check job needs to know. Cheap: a sparse
+  # checkout of two files. A bad .plugin-check.json fails here in seconds, before any build.
+  plan:
+    name: Plugin Check plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.target.outputs.matrix }}
+      base: ${{ steps.target.outputs.base }}
+      checks: ${{ steps.exclude.outputs.checks }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: source
+          sparse-checkout: |
+            .plugin-check.json
+            .plugin-check-baseline.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # The checks to skip: the `exclude-checks` input when it names any, else the list in the
+      # repository's .plugin-check.json. Like the report job, this needs a runner of version 2.336.0
+      # or newer for `$/`; the two small jobs run on ubuntu-latest, which has it.
+      - name: List the excluded checks
+        id: exclude
+        uses: $/.github/actions/plugin-check-report/exclude-checks
+        with:
+          exclude-checks: ${{ inputs.exclude-checks }}
+          config-file: ${{ github.workspace }}/source/.plugin-check.json
+
+      # A pull request in baseline mode, in a repository with no baseline file, is compared with the
+      # target branch, so that commit is built and checked too. Strict mode needs no baseline, and a
+      # push has no target to compare with.
+      - name: Decide whether to check the target branch
+        id: target
+        env:
+          EVENT: ${{ github.event_name }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          if [ "$EVENT" = pull_request ] && [ "$MODE" != strict ] && [ ! -f source/.plugin-check-baseline.json ]; then
+            echo 'matrix={"target":["head","base"]}' >> "$GITHUB_OUTPUT"
+            echo 'base=true' >> "$GITHUB_OUTPUT"
+            echo "::notice title=Plugin Check::There is no .plugin-check-baseline.json, so the target branch is built and checked too. Commit the baseline.json from the plugin-check-report artifact of this run to stop that."
+          else
+            echo 'matrix={"target":["head"]}' >> "$GITHUB_OUTPUT"
+            echo 'base=false' >> "$GITHUB_OUTPUT"
+          fi
+
   check:
-    name: Plugin Check run
+    name: Plugin Check run (${{ matrix.target }})
+    needs: plan
     runs-on: ${{ inputs.runs-on }}
+
+    strategy:
+      # The pull request and its target branch are separate checks: one failing must not stop the other.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
 
     # Build, WordPress start and the check together take about 15 minutes for a large plugin. The cap is
     # for a container that stops answering.
@@ -178,20 +241,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: source
+          # "base" is the commit the pull request targets, as it is without the pull request.
+          ref: ${{ matrix.target == 'base' && github.event.pull_request.base.sha || '' }}
           submodules: ${{ inputs.submodules }}
           # Nothing here pushes over git, and the job goes on to run third-party code.
           persist-credentials: false
-
-      # The checks to skip: the `exclude-checks` input when it names any, else the list in the
-      # repository's .plugin-check.json. First, so a bad file fails in seconds, before the build, with
-      # a message that says what to fix. Like the report job, this needs a runner of version 2.336.0
-      # or newer for `$/`; the `runs-on` input says so.
-      - name: List the excluded checks
-        id: exclude
-        uses: $/.github/actions/plugin-check-report/exclude-checks
-        with:
-          exclude-checks: ${{ inputs.exclude-checks }}
-          config-file: ${{ github.workspace }}/source/.plugin-check.json
 
       # The action's wp-env pulls these images when it starts, and pulling them is part of the
       # time that step takes. Started now, in the background, the download overlaps with the
@@ -352,9 +406,10 @@ jobs:
           echo "Checking $dir ($(find "$dir" -type f | wc -l | xargs) files)."
 
       # Saved now, before the third-party action below runs, so nothing it does can end up in a
-      # cache that later runs restore. Skipped when this exact commit already saved one.
+      # cache that later runs restore. Skipped when this exact commit already saved one, and for the
+      # target branch, which only reads the cache.
       - name: Save the build cache
-        if: ${{ inputs.cache-paths != '' && steps.build-cache.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.target == 'head' && inputs.cache-paths != '' && steps.build-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: ${{ steps.cache-paths.outputs.paths }}
@@ -376,17 +431,21 @@ jobs:
       # Fails on any error, which is expected while a plugin still has known problems: the report
       # job decides pass or fail from the counts. The action writes its results to
       # $RUNNER_TEMP/plugin-check-results.txt and uploads them as the plugin-check-results
-      # artifact. Its `slug` input is not passed: it would rename that artifact.
+      # artifact. Its `slug` input is passed for the target branch only: it renames that artifact to
+      # plugin-check-results-<slug>, so the two do not clash.
       - name: Run Plugin Check
         continue-on-error: true
         uses: wordpress/plugin-check-action@v1
         with:
           build-dir: ${{ github.workspace }}/build/${{ inputs.plugin-slug }}
-          exclude-checks: ${{ steps.exclude.outputs.checks }}
+          exclude-checks: ${{ needs.plan.outputs.checks }}
+          # The target branch's results go into an artifact of their own. The slug is the folder the
+          # plugin is in anyway, so the checks see the same thing; only the artifact's name changes.
+          slug: ${{ matrix.target == 'base' && inputs.plugin-slug || '' }}
 
   report:
     name: Plugin Check
-    needs: [start, check]
+    needs: [start, plan, check]
     # "start" is skipped for forks and non-pull-request runs, which would skip this job too.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -415,6 +474,7 @@ jobs:
         run: |
           {
             echo "RESULTS=$RUNNER_TEMP/results/plugin-check-results.txt"
+            echo "BASE_RESULTS=$RUNNER_TEMP/base-results/plugin-check-results.txt"
             echo "COMMENT_BODY=$RUNNER_TEMP/plugin-check-comment.md"
           } >> "$GITHUB_ENV"
 
@@ -426,6 +486,16 @@ jobs:
         with:
           name: plugin-check-results
           path: ${{ runner.temp }}/results
+
+      # The target branch's results, when the plan said to check it. A missing artifact is not an
+      # error here: the compare fails with a message that says the target could not be checked.
+      - name: Download the target branch's results
+        if: ${{ needs.plan.outputs.base == 'true' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: plugin-check-results-${{ inputs.plugin-slug }}
+          path: ${{ runner.temp }}/base-results
 
       # `$/` is this repository at the commit that runs this workflow, so the action is always the
       # same revision as the workflow, whichever ref the caller used, and it needs no checkout. It
@@ -443,6 +513,8 @@ jobs:
           comment-marker: ${{ env.COMMENT_MARKER }}
           mode: ${{ inputs.mode }}
           baseline-file: ${{ github.workspace }}/source/.plugin-check-baseline.json
+          base-results: ${{ needs.plan.outputs.base == 'true' && env.BASE_RESULTS || '' }}
+          base-required: ${{ needs.plan.outputs.base == 'true' }}
 
       - name: Post the result
         if: ${{ !cancelled() && env.COMMENT == 'true' }}

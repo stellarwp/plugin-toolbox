@@ -634,6 +634,92 @@ describe('plugin-check-report compare', () => {
   })
 })
 
+describe('compare with no baseline file, in a pull request', () => {
+  // The workflow checked the target branch's commit in the same run, and passes its results.
+  const baseResults = () => fixture('same-as-baseline.txt')
+
+  it('compares with the target branch and says so', () => {
+    const run = compareWith([fixture('errors-up.txt')], { PLUGIN_CHECK_BASE_RESULTS: baseResults(), PLUGIN_CHECK_BASE_REQUIRED: 'true' })
+
+    assert.equal(run.status, 1)
+    assert.match(
+      run.stdout,
+      /::warning title=Plugin Check::No baseline file at no-baseline\.json, so the target branch was checked too, and its results are the baseline for this run\. That makes the run slower\. To stop it, commit the baseline\.json from this run's plugin-check-report artifact as no-baseline\.json\./
+    )
+    assert.match(run.stdout, new RegExp(`::error title=Plugin Check::${ESCAPE} has 3 errors, the baseline has 2`))
+    assert.match(run.comment, /\| Now \| Target branch \| Change \|/)
+    assert.match(run.comment, /ℹ️ There is no baseline file, so the baseline is the target branch's results\. See the job summary to add one\./)
+    assert.match(run.summary, /There is no no-baseline\.json yet\. To start one, add the file from this run:/)
+  })
+
+  it('passes when the pull request has no more errors than the target branch', () => {
+    const run = compareWith([fixture('same-as-baseline.txt')], { PLUGIN_CHECK_BASE_RESULTS: baseResults(), PLUGIN_CHECK_BASE_REQUIRED: 'true' })
+
+    assert.equal(run.status, 0)
+    assert.match(run.comment, /✅ Plugin Check passed/)
+    assert.match(run.comment, /\| Errors {3}\| 3 \| 3 \| ±0 \|/)
+  })
+
+  it('does not ask to lower a baseline file that does not exist', () => {
+    const run = compareWith([fixture('errors-down.txt')], { PLUGIN_CHECK_BASE_RESULTS: baseResults(), PLUGIN_CHECK_BASE_REQUIRED: 'true' })
+
+    assert.equal(run.status, 0)
+    assert.match(run.stdout, /went down from/, 'the per-rule notices stay')
+    assert.doesNotMatch(run.stdout, /Error counts went down/)
+    assert.doesNotMatch(run.comment, /Update the baseline file/)
+  })
+
+  it('keeps the comment within fifteen lines, links last, with the note', () => {
+    const run = compareWith([resultsWithNewCodes(7)], { PLUGIN_CHECK_BASE_RESULTS: baseResults(), PLUGIN_CHECK_BASE_REQUIRED: 'true' })
+    const lines = run.comment.replace(/\n$/, '').split('\n')
+
+    assert.ok(lines.length <= 15, `${lines.length} lines`)
+    assert.match(lines.at(-1), /^📎 /)
+    assert.ok(lines.some((line) => line.startsWith('ℹ️ There is no baseline file')))
+  })
+
+  it('fails, never passes, when the target branch could not be checked', () => {
+    for (const env of [{}, { PLUGIN_CHECK_BASE_RESULTS: '/nonexistent/base-results.txt' }]) {
+      const run = compareWith([fixture('clean.txt')], { PLUGIN_CHECK_BASE_REQUIRED: 'true', ...env })
+
+      assert.equal(run.status, 1)
+      assert.match(run.stdout, /::error title=Plugin Check::The target branch could not be checked, so there is nothing to compare with\./)
+      assert.equal(run.comment, '', 'no comment body, so the workflow writes "could not run"')
+    }
+  })
+
+  it('fails when the results of the target branch are not Plugin Check output', () => {
+    const run = compareWith([fixture('clean.txt')], { PLUGIN_CHECK_BASE_RESULTS: fixture('garbage.txt'), PLUGIN_CHECK_BASE_REQUIRED: 'true' })
+
+    assert.equal(run.status, 1)
+    assert.match(run.stdout, /::error title=Plugin Check::The results of the target branch cannot be used\. The results file is not Plugin Check output/)
+  })
+
+  it('uses the baseline file when there is one, and ignores the target branch', () => {
+    const run = compareWith([fixture('errors-up.txt')], {
+      PLUGIN_CHECK_BASELINE: BASELINE,
+      PLUGIN_CHECK_BASE_RESULTS: fixture('garbage.txt'),
+      PLUGIN_CHECK_BASE_REQUIRED: 'true',
+    })
+
+    assert.equal(run.status, 1)
+    assert.match(run.comment, /\| Now \| Baseline \| Change \|/)
+    assert.doesNotMatch(run.stdout, /target branch was checked/)
+  })
+
+  it('leaves strict mode alone, which needs no baseline', () => {
+    const run = compareWith([fixture('clean.txt')], {
+      PLUGIN_CHECK_MODE: 'strict',
+      PLUGIN_CHECK_BASE_RESULTS: fixture('garbage.txt'),
+      PLUGIN_CHECK_BASE_REQUIRED: 'true',
+    })
+
+    assert.equal(run.status, 0)
+    assert.match(run.stdout, /No baseline file\. Strict mode does not need one\./)
+    assert.doesNotMatch(run.stdout, /target branch/)
+  })
+})
+
 describe('the baseline file text', () => {
   it('sorts codes by Unicode code point, not by UTF-16 unit', () => {
     const counts = report.countPerCode([
