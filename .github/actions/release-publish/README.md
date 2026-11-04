@@ -64,7 +64,10 @@ In this order, stopping at the first failure:
    release is a higher version, as when a hotfix goes out on an older line after a newer version
    is already released.
 5. Without `files`, creates the release at the commit: tag and title, the notes from `notes-file`
-   or the ones GitHub generates from the pull requests since the previous release.
+   or the ones GitHub generates from the pull requests since the previous release. The previous
+   release is chosen here, not left to GitHub: the highest published version below this one, so a
+   hotfix on an older line (`2.1.38.3` after `2.1.46` is out) gets the changes since `2.1.38.2`,
+   not since `2.1.46`. A first release, with nothing below it, leaves the start to GitHub.
 6. With `files`, creates the release as a **draft**, uploads every file, then publishes it. A draft
    makes no tag, so an upload that fails is undone by deleting the draft: nothing is left behind,
    and the release is never public without its files. That is also what a repository with

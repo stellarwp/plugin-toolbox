@@ -15,6 +15,7 @@ const {
   readNotesFile,
   readFiles,
   makeLatest,
+  previousVersion,
 } = require('../../../.github/actions/release-publish/release-publish.js')
 const { coreWithOutputs, octokitFor } = require('../../support/actions.js')
 
@@ -29,16 +30,24 @@ const API = {
   branch: '/repos/stellarwp/plugin/branches/main',
   notes: '/repos/stellarwp/plugin/releases/generate-notes',
   releases: '/repos/stellarwp/plugin/releases',
+  list: '/repos/stellarwp/plugin/releases?per_page=100',
   release: '/repos/stellarwp/plugin/releases/77',
   assets: /^https:\/\/uploads\.github\.com\/repos\/stellarwp\/plugin\/releases\/77\/assets\?name=/,
 }
 
 const RELEASE_URL = 'https://github.com/stellarwp/plugin/releases/tag/4.17.0'
 
+/** The releases the repository has, as the list endpoint sends them: 4.16.0 is the latest. */
+const RELEASES = [
+  { id: 60, tag_name: '4.16.0', draft: false },
+  { id: 59, tag_name: '4.15.2', draft: false },
+]
+
 /** The rules of the common case: no tag, no release yet, a lower latest, notes generated. */
 const FRESH = [
   { method: 'POST', path: API.notes, body: { name: '4.17.0', body: '## What changed\n* Fix (#12)' } },
   { method: 'GET', path: API.latest, body: { tag_name: '4.16.0' } },
+  { method: 'GET', path: API.list, body: RELEASES },
 ]
 
 /**
@@ -166,6 +175,29 @@ describe('release-publish', () => {
     })
   })
 
+  describe('previousVersion', () => {
+    it('picks the highest published version below the one released, for a hotfix on an older line too', () => {
+      const releases = [
+        { tag_name: '2.1.46', draft: false },
+        { tag_name: '2.1.38.2', draft: false },
+        { tag_name: '2.1.38.1', draft: false },
+        { tag_name: '2.1.38.3', draft: true },
+        { tag_name: 'v2.0.0', draft: false },
+        { tag_name: '2.1.40', draft: false },
+      ]
+
+      assert.strictEqual(previousVersion('2.1.38.3', releases), '2.1.38.2')
+      assert.strictEqual(previousVersion('2.1.47', releases), '2.1.46')
+      assert.strictEqual(previousVersion('2.1.41', releases), '2.1.40')
+    })
+
+    it('finds nothing below the first release, or among drafts and tags that are not plain versions', () => {
+      assert.strictEqual(previousVersion('1.0.0', [{ tag_name: '1.1.0', draft: false }]), null)
+      assert.strictEqual(previousVersion('2.0.0', [{ tag_name: '1.9.0', draft: true }, { tag_name: 'v1.8.0', draft: false }]), null)
+      assert.strictEqual(previousVersion('2.0.0', []), null)
+    })
+  })
+
   describe('makeLatest', () => {
     it('keeps "Latest" on a newer release when an older line gets a hotfix', () => {
       assert.strictEqual(makeLatest('4.17.0', null), 'true')
@@ -188,11 +220,14 @@ describe('release-publish', () => {
         `GET ${API.releaseByTag}`,
         `GET ${API.tag}`,
         `GET ${API.latest}`,
+        `GET ${API.list}`,
         `POST ${API.notes}`,
         `POST ${API.releases}`,
       ])
-      assert.deepStrictEqual(requests[3].body, { tag_name: '4.17.0', target_commitish: SHA })
-      assert.deepStrictEqual(requests[4].body, {
+      // The notes start at the published version right below this one, chosen here rather than
+      // left to GitHub.
+      assert.deepStrictEqual(requests[4].body, { tag_name: '4.17.0', target_commitish: SHA, previous_tag_name: '4.16.0' })
+      assert.deepStrictEqual(requests[5].body, {
         tag_name: '4.17.0',
         target_commitish: SHA,
         name: '4.17.0',
@@ -201,6 +236,33 @@ describe('release-publish', () => {
       })
       assert.deepStrictEqual(outputs(), { published: 'true', 'release-url': RELEASE_URL, sha: SHA })
       assert.match(summary(), /Published release 4\.17\.0 at `0123456`/)
+    })
+
+    it('leaves the start of the notes to GitHub when no published release is below the version', async (t) => {
+      const { github, requests } = await octokitFor([
+        { method: 'POST', path: API.notes, body: { body: 'first' } },
+        { method: 'GET', path: API.latest, status: 404, body: { message: 'Not Found' } },
+        { method: 'GET', path: API.list, body: [{ id: 1, tag_name: '4.17.0', draft: true }] },
+        { method: 'POST', path: API.releases, status: 201, body: { id: 77, html_url: RELEASE_URL } },
+      ])
+      const { core, logged } = await coreWithOutputs(t)
+
+      await runPublish({ github, core, env: publishEnv(), cwd: checkoutWith() })
+
+      const notes = requests.find((request) => request.path === API.notes)
+      assert.deepStrictEqual(notes.body, { tag_name: '4.17.0', target_commitish: SHA })
+      assert.match(logged(), /No published release is below this version/)
+    })
+
+    it('fails when the releases cannot be listed, rather than guessing where the notes start', async (t) => {
+      const { github, requests } = await octokitFor([
+        { method: 'GET', path: API.latest, body: { tag_name: '4.16.0' } },
+        { method: 'GET', path: API.list, status: 500, body: { message: 'boom' } },
+      ])
+      const { core } = await coreWithOutputs(t)
+
+      await assert.rejects(runPublish({ github, core, env: publishEnv(), cwd: checkoutWith() }), /Listing the releases failed \(HTTP 500\).*Nothing was published/s)
+      assert.ok(!requested(requests).some((line) => line.startsWith('POST')), 'nothing is created')
     })
 
     it('publishes at the tip of a branch given as target, with the title and the notes file', async (t) => {
@@ -234,6 +296,7 @@ describe('release-publish', () => {
       const { github, requests } = await octokitFor([
         { method: 'POST', path: API.notes, body: { body: 'notes' } },
         { method: 'GET', path: API.latest, body: { tag_name: '4.18.0' } },
+        { method: 'GET', path: API.list, body: [{ id: 61, tag_name: '4.18.0', draft: false }, ...RELEASES] },
         { method: 'POST', path: API.releases, status: 201, body: { id: 77, html_url: RELEASE_URL } },
       ])
       const { core, logged } = await coreWithOutputs(t)
@@ -242,11 +305,14 @@ describe('release-publish', () => {
 
       assert.strictEqual(requests.at(-1).body.make_latest, 'false')
       assert.match(logged(), /below the current latest release/)
+      // The notes start at the release below the hotfix, not at the newer 4.18.0.
+      assert.strictEqual(requests.find((request) => request.path === API.notes).body.previous_tag_name, '4.16.0')
     })
 
     it('takes "Latest" when the repository has no release yet', async (t) => {
       const { github, requests } = await octokitFor([
         { method: 'POST', path: API.notes, body: { body: 'notes' } },
+        { method: 'GET', path: API.list, body: [] },
         { method: 'POST', path: API.releases, status: 201, body: { id: 77, html_url: RELEASE_URL } },
       ])
       const { core } = await coreWithOutputs(t)
@@ -272,6 +338,7 @@ describe('release-publish', () => {
         `GET ${API.releaseByTag}`,
         `GET ${API.tag}`,
         `GET ${API.latest}`,
+        `GET ${API.list}`,
         `POST ${API.notes}`,
         `POST ${API.releases}`,
         'POST uploads:/repos/stellarwp/plugin/releases/77/assets?name=plugin.zip',
@@ -279,15 +346,15 @@ describe('release-publish', () => {
         `PATCH ${API.release}`,
       ])
       // Created as a draft, with no make_latest yet: that is decided when it is published.
-      assert.deepStrictEqual(requests[4].body, {
+      assert.deepStrictEqual(requests[5].body, {
         tag_name: '4.17.0',
         target_commitish: SHA,
         name: '4.17.0',
         body: '## What changed\n* Fix (#12)',
         draft: true,
       })
-      assert.strictEqual(String(requests[5].body), 'PK zip bytes')
-      assert.deepStrictEqual(requests[7].body, { draft: false, make_latest: 'true' })
+      assert.strictEqual(String(requests[6].body), 'PK zip bytes')
+      assert.deepStrictEqual(requests[8].body, { draft: false, make_latest: 'true' })
       assert.deepStrictEqual(outputs(), { published: 'true', 'release-url': RELEASE_URL, sha: SHA })
       assert.match(logged(), /Attached plugin\.zip.*Attached plugin\.pot/s)
       assert.match(summary(), /with `plugin\.zip`, `plugin\.pot`/)

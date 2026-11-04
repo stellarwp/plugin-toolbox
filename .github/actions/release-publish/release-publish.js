@@ -205,6 +205,50 @@ async function latestReleaseTag({ github, owner, repo }) {
 }
 
 /**
+ * The repository's releases, every page.
+ *
+ * @param {object} options
+ * @param {object} options.github The Octokit github-script supplies.
+ * @param {string} options.owner  The repository owner.
+ * @param {string} options.repo   The repository name.
+ *
+ * @throws {Error} When the read fails.
+ *
+ * @returns {Promise<object[]>} The releases as the API lists them, drafts included.
+ */
+async function listReleases({ github, owner, repo }) {
+  try {
+    return await github.paginate(github.rest.repos.listReleases, { owner, repo, per_page: 100 })
+  } catch (error) {
+    throw new Error(`Listing the releases failed (HTTP ${error.status}): ${error.message}. ${NOTHING}`)
+  }
+}
+
+/**
+ * The published version right below the one being released: where its generated notes start.
+ *
+ * GitHub's own choice of a previous tag is not documented, so for a hotfix on an older line
+ * (`2.1.38.3` after `2.1.46` is out) the notes could cover the changes since `2.1.46`. Choosing it
+ * here makes the range the one the version number says: the highest published version below this
+ * one, `2.1.38.2`. Drafts and tags that are not plain versions are skipped.
+ *
+ * @param {string}   version  The version being released.
+ * @param {object[]} releases The releases listReleases returned.
+ *
+ * @returns {string|null} The tag to start the notes from, or null when no release is below.
+ */
+function previousVersion(version, releases) {
+  return (
+    releases
+      .filter((release) => !release.draft && STELLARWP_VERSION_PATTERN.test(release.tag_name))
+      .map((release) => release.tag_name)
+      .filter((tag) => compareVersions(tag, version) < 0)
+      .sort(compareVersions)
+      .at(-1) ?? null
+  )
+}
+
+/**
  * Whether the new release takes "Latest": yes, unless the current latest is a higher version, as
  * when a hotfix goes out on an older line after a newer version is released. A latest whose tag is
  * not a plain version (a `v` prefix, a name) is not compared, and the new release takes it.
@@ -276,9 +320,24 @@ async function runPublish({ github, core, env, cwd = process.cwd() }) {
     core.info(`${version} is below the current latest release, so it is published without taking "Latest".`)
   }
 
-  const body =
-    notes ??
-    (await github.rest.repos.generateReleaseNotes({ owner, repo, tag_name: version, target_commitish: sha })).data.body
+  let body = notes
+  if (body === null) {
+    const previous = previousVersion(version, await listReleases({ github, owner, repo }))
+    core.info(
+      previous
+        ? `The notes cover the changes since ${previous}.`
+        : 'No published release is below this version: GitHub chooses where the notes start.'
+    )
+    body = (
+      await github.rest.repos.generateReleaseNotes({
+        owner,
+        repo,
+        tag_name: version,
+        target_commitish: sha,
+        ...(previous ? { previous_tag_name: previous } : {}),
+      })
+    ).data.body
+  }
 
   let release
   if (files.length === 0) {
@@ -350,4 +409,5 @@ module.exports = {
   readNotesFile,
   readFiles,
   makeLatest,
+  previousVersion,
 }
