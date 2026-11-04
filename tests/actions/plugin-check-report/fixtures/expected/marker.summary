@@ -1,5 +1,5 @@
 <!-- plugin-check:example-org/my-plugin -->
-⚠️ Plugin Check ran, but there was no baseline to compare with
+⚠️ Plugin Check ran, but there is no baseline file yet
 
 |          | Now |
 |:--|--:|
@@ -7,3 +7,10 @@
 | Warnings | 0 |
 
 📎 [Run](https://example.test/actions/runs/1)
+
+There is no baseline.json yet. To start one, add the file from this run:
+
+```bash
+gh run download <run-id> --repo <owner>/<repo> --name plugin-check-report --dir /tmp/plugin-check
+cp /tmp/plugin-check/baseline.json baseline.json
+```

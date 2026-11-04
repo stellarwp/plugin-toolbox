@@ -107,7 +107,7 @@ describe('plugin-check-report action steps', () => {
       assert.match(logged(), /Plugin Check found more errors than the baseline allows\./)
       const comment = fs.readFileSync(commentFile, 'utf8')
       assert.match(comment, /❌ Plugin Check failed: 1 rule has more errors than the baseline allows/)
-      assert.equal(summary(), comment)
+      assert.ok(summary().startsWith(comment), 'the summary is the comment, and then how to update the baseline')
     })
 
     it('passes, and writes no comment file when none is asked for', async (t) => {
@@ -146,7 +146,7 @@ describe('plugin-check-report action steps', () => {
 
       report.runCompare({ core, env: { ...base(), RESULTS: results, PLUGIN_CHECK_BASELINE: '/nonexistent/baseline.json' } })
 
-      assert.match(logged(), /::warning title=Plugin Check::No baseline to compare with/)
+      assert.match(logged(), /::warning title=Plugin Check::No baseline file at baseline\.json, so nothing was compared\./)
       const failing = report.runCompare({ core, env: { ...base(), RESULTS: results, PLUGIN_CHECK_BASELINE: path.join(FIXTURES, 'baseline.json') } })
       assert.equal(failing, 1)
       assert.match(logged(), /::error title=Plugin Check::100%25done has 1 errors/)

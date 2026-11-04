@@ -27,6 +27,9 @@ const path = require('node:path')
 /** Title of every annotation. */
 const TITLE = 'Plugin Check'
 
+/** The baseline file a repository commits, at its root. */
+const BASELINE_FILE = '.plugin-check-baseline.json'
+
 /** The pull request comment must stay short. Everything else is behind the links. */
 const MAX_COMMENT_LINES = 15
 const MAX_RULES_LISTED = 5
@@ -54,11 +57,13 @@ class CheckFailure extends Error {
   /**
    * @param {string} message  What went wrong, in plain words.
    * @param {number} exitCode The exit status for the step.
+   * @param {boolean} annotate Show the message as an error annotation, not only in the log.
    */
-  constructor(message, exitCode = 1) {
+  constructor(message, exitCode = 1, annotate = false) {
     super(message)
     this.name = 'CheckFailure'
     this.exitCode = exitCode
+    this.annotate = annotate
   }
 }
 
@@ -403,15 +408,17 @@ function buildRows(now, base) {
  * @param {object[]} input.rows       From buildRows.
  * @param {string}  input.mode        `baseline` or `strict`.
  * @param {boolean} input.noBaseline  There was nothing to compare with: only the totals count.
+ * @param {string}  input.baselineName The baseline file's name, for the hint to update it.
  *
  * @returns {object} `messages` (`{level, text}` in print order), `totals`, `wentUp`, `wentDown`,
- *          `errorsUp`, `upList` and `failed`.
+ *          `errorsDown` (how many rules have fewer errors), `errorsUp`, `upList` and `failed`.
  */
-function evaluate({ rows, mode, noBaseline }) {
+function evaluate({ rows, mode, noBaseline, baselineName = BASELINE_FILE }) {
   const totals = { errorsBase: 0, errorsNow: 0, warningsBase: 0, warningsNow: 0 }
   const messages = []
   let failed = false
   let wentDown = 0
+  let errorsDown = 0
   let wentUp = 0
   let errorsUp = 0
   let upList = ''
@@ -457,8 +464,20 @@ function evaluate({ rows, mode, noBaseline }) {
       })
     } else if (found < allowed) {
       wentDown++
+      if (kind === 'errors') {
+        errorsDown++
+      }
       messages.push({ level: 'notice', text: `${shown} (${kind}) went down from ${allowed} to ${found}.` })
     }
+  }
+
+  // Fewer errors than the file says leaves room for them to come back unnoticed. Strict mode does
+  // not use the file, so it asks for nothing.
+  if (mode !== 'strict' && errorsDown > 0) {
+    messages.push({
+      level: 'notice',
+      text: `Error counts went down. Lower the baseline so they cannot come back: commit the baseline.json from this run's plugin-check-report artifact as ${baselineName}.`,
+    })
   }
 
   // Strict mode ignores the baseline for pass or fail: any error fails. The counts and the table
@@ -470,7 +489,7 @@ function evaluate({ rows, mode, noBaseline }) {
     }
   }
 
-  return { messages, totals, wentUp, wentDown, errorsUp, upList, failed }
+  return { messages, totals, wentUp, wentDown, errorsDown, errorsUp, upList, failed }
 }
 
 /**
@@ -513,7 +532,7 @@ function statusLine({ mode, failed, noBaseline, errorsUp, errorsNow }) {
     return '✅ Plugin Check passed: no errors'
   }
   if (noBaseline) {
-    return '⚠️ Plugin Check ran, but there was no baseline to compare with'
+    return '⚠️ Plugin Check ran, but there is no baseline file yet'
   }
   if (failed) {
     return errorsUp === 1
@@ -554,12 +573,13 @@ function linksLine({ artifactUrl, runUrl, resultsPath }) {
  * @param {object}   input.totals      From evaluate.
  * @param {number}   input.wentUp      How many rules went up.
  * @param {number}   input.wentDown    How many rules went down.
+ * @param {boolean}  input.updateHint  An error count went down: ask for the baseline file to be updated.
  * @param {string}   input.upList      The first rules that went up, ready to print.
  * @param {string}   input.links       From linksLine.
  *
  * @returns {string} The body, cut to MAX_COMMENT_LINES lines, with no final line break.
  */
-function buildComment({ marker, status, badge, column, noBaseline, totals, wentUp, wentDown, upList, links }) {
+function buildComment({ marker, status, badge, column, noBaseline, totals, wentUp, wentDown, updateHint = false, upList, links }) {
   let body = `${marker}\n${status}\n\n`
 
   if (badge) {
@@ -582,7 +602,7 @@ function buildComment({ marker, status, badge, column, noBaseline, totals, wentU
     body += `Went up: ${upList}\n`
   }
   if (wentDown > 0) {
-    body += `Rules that went down: ${wentDown}.\n`
+    body += `Rules that went down: ${wentDown}.${updateHint ? ' Update the baseline file, see the job summary.' : ''}\n`
   }
   // A blank line separates the notes above from the links, when there are notes.
   if (wentUp > 0 || wentDown > 0) {
@@ -592,6 +612,85 @@ function buildComment({ marker, status, badge, column, noBaseline, totals, wentU
 
   // Hard cap: whatever happens above, the comment never grows past MAX_COMMENT_LINES.
   return body.split('\n').slice(0, MAX_COMMENT_LINES).join('\n').replace(/\n+$/, '')
+}
+
+/**
+ * Reads the baseline file, and names it when it cannot be used.
+ *
+ * Plugin Check reports it as an error annotation: a committed file can be broken by a merge conflict
+ * or by hand, and the author has to fix it.
+ *
+ * @param {string} file The path.
+ * @param {string} name The file's name, as the messages show it.
+ *
+ * @throws {CheckFailure} When it is not a baseline.
+ *
+ * @returns {{errors: Map<string, number>, warnings: Map<string, number>}} Counts.
+ */
+function readBaselineFile(file, name) {
+  try {
+    return readBaseline(fs.readFileSync(file, 'utf8'))
+  } catch (error) {
+    if (!(error instanceof CheckFailure)) {
+      throw error
+    }
+
+    const reason = error.message
+      .replace(/^The baseline is not valid: /, '')
+      .replace(/^jq: parse error: /, 'it is not JSON: ')
+
+    throw new CheckFailure(
+      `The baseline file ${name} is not valid: ${reason} Fix it, or replace it with the baseline.json from this run's plugin-check-report artifact.`,
+      error.exitCode,
+      true
+    )
+  }
+}
+
+/**
+ * The part of the job summary that says how to change the baseline file, or '' when there is nothing
+ * to do. The comment stays short; this is where the commands go.
+ *
+ * @param {object} input
+ * @param {string} input.mode         `baseline` or `strict`.
+ * @param {boolean} input.noBaseline  There is no baseline file.
+ * @param {object} input.verdict      From evaluate.
+ * @param {string} input.baselineName The baseline file's name.
+ * @param {object} input.env          GITHUB_RUN_ID and GITHUB_REPOSITORY, for the real command.
+ *
+ * @returns {string} Markdown with a final line break, or ''.
+ */
+function updateSection({ mode, noBaseline, verdict, baselineName, env }) {
+  if (mode === 'strict') {
+    return ''
+  }
+
+  const lines = []
+  if (noBaseline) {
+    lines.push(`There is no ${baselineName} yet. To start one, add the file from this run:`)
+  } else if (verdict.errorsDown > 0) {
+    lines.push(`Error counts went down. To lower the baseline, replace ${baselineName} with the file from this run:`)
+  } else if (verdict.failed) {
+    lines.push(
+      `If the new errors are on purpose, raise their counts in ${baselineName} in this pull request, so reviewers see it. The file from this run has the new counts:`
+    )
+  } else {
+    return ''
+  }
+
+  const run = env.GITHUB_RUN_ID || '<run-id>'
+  const repo = env.GITHUB_REPOSITORY || '<owner>/<repo>'
+
+  return [
+    '',
+    ...lines,
+    '',
+    '```bash',
+    `gh run download ${run} --repo ${repo} --name plugin-check-report --dir /tmp/plugin-check`,
+    `cp /tmp/plugin-check/baseline.json ${baselineName}`,
+    '```',
+    '',
+  ].join('\n')
 }
 
 /**
@@ -614,7 +713,12 @@ function compare({ args, env, log }) {
     return compareOrThrow({ args, env, log })
   } catch (error) {
     if (error instanceof CheckFailure) {
-      log.err(error.message)
+      // A baseline file that cannot be read is the author's to fix, so it shows in the checks panel.
+      if (error.annotate) {
+        log.error(error.message)
+      } else {
+        log.err(error.message)
+      }
 
       return error.exitCode
     }
@@ -669,7 +773,10 @@ function compareOrThrow({ args, env, log }) {
     return 1
   }
 
-  const baselinePath = env.PLUGIN_CHECK_BASELINE || path.join(__dirname, 'baseline.json')
+  // The default is the committed file in the current folder, so `compare --update` from the plugin
+  // root writes it in place.
+  const baselinePath = env.PLUGIN_CHECK_BASELINE || path.resolve(BASELINE_FILE)
+  const baselineName = path.basename(baselinePath)
 
   if (!isFile(resultsPath)) {
     log.error(`Results file not found: ${resultsPath}`)
@@ -694,19 +801,24 @@ function compareOrThrow({ args, env, log }) {
     return 0
   }
 
-  // No earlier run to compare with: report the counts and pass. Failing here would block every pull
-  // request whenever the target branch has no finished run (its first run, or expired artifacts).
+  // No baseline file yet: report the counts and pass. Failing here would block the very pull request
+  // that adds the workflow, before anyone has a result to make the file from. Strict mode does not
+  // use the file, so it has nothing to say.
   const noBaseline = !isFile(baselinePath)
   let base = { errors: new Map(), warnings: new Map() }
   if (noBaseline) {
-    log.warning(
-      `No baseline to compare with (${baselinePath}), so nothing was compared. Run the workflow on the target branch to make one.`
-    )
+    if (mode === 'strict') {
+      log.out('No baseline file. Strict mode does not need one.')
+    } else {
+      log.warning(
+        `No baseline file at ${baselineName}, so nothing was compared. To start one, commit the baseline.json from this run's plugin-check-report artifact as ${baselineName}.`
+      )
+    }
   } else {
-    base = readBaseline(fs.readFileSync(baselinePath, 'utf8'))
+    base = readBaselineFile(baselinePath, baselineName)
   }
 
-  const verdict = evaluate({ rows: buildRows(now, base), mode, noBaseline })
+  const verdict = evaluate({ rows: buildRows(now, base), mode, noBaseline, baselineName })
   for (const { level, text: message } of verdict.messages) {
     log[level](message)
   }
@@ -732,6 +844,7 @@ function compareOrThrow({ args, env, log }) {
     totals: verdict.totals,
     wentUp: verdict.wentUp,
     wentDown: verdict.wentDown,
+    updateHint: mode !== 'strict' && verdict.errorsDown > 0,
     upList: verdict.upList,
     links: linksLine({ artifactUrl: env.ARTIFACT_URL || '', runUrl, resultsPath }),
   })
@@ -740,7 +853,8 @@ function compareOrThrow({ args, env, log }) {
     writeText(commentFile, `${body}\n`, 'write')
   }
   if (env.GITHUB_STEP_SUMMARY) {
-    writeText(env.GITHUB_STEP_SUMMARY, `${body}\n`, 'append')
+    const how = updateSection({ mode, noBaseline, verdict, baselineName, env })
+    writeText(env.GITHUB_STEP_SUMMARY, `${body}\n${how}`, 'append')
   }
 
   if (verdict.failed) {
@@ -1167,7 +1281,7 @@ function runExcludeChecks({ core, env }) {
 }
 
 /**
- * The command line: `compare` and `exclude-checks`.
+ * The command line: `compare`, `update` and `exclude-checks`.
  *
  * @param {string[]} argv The arguments after the script name.
  * @param {object}   env  The environment, default process.env.
@@ -1188,6 +1302,11 @@ async function main(
 
   if (command === 'compare') {
     return compare({ args, env, log })
+  }
+
+  // `update <results>` is `compare --update <results>`: writes the baseline file for the results.
+  if (command === 'update') {
+    return compare({ args: ['--update', ...args], env, log })
   }
 
   // Prints the flag `wp plugin check` takes, so a local run skips the same checks as CI:
@@ -1219,7 +1338,7 @@ async function main(
     }
   }
 
-  io.err('Usage: plugin-check-report.js compare|exclude-checks ...')
+  io.err('Usage: plugin-check-report.js compare|update|exclude-checks ...')
 
   return 2
 }
@@ -1235,6 +1354,7 @@ module.exports = {
   MODES,
   actionLog,
   BADGE_TIME_ZONE,
+  BASELINE_FILE,
   EXCLUDE_FILE,
   badgeStamp,
   buildComment,
@@ -1258,6 +1378,7 @@ module.exports = {
   parseExcludeInput,
   parseResults,
   readBaseline,
+  readBaselineFile,
   readIfFile,
   readJsonValues,
   runCompare,
@@ -1266,4 +1387,5 @@ module.exports = {
   runPaths,
   runUpdate,
   statusLine,
+  updateSection,
 }

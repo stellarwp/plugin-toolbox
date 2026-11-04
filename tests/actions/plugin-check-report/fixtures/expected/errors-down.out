@@ -1,2 +1,3 @@
 ::notice title=Plugin Check::WordPress.Security.EscapeOutput.OutputNotEscaped (errors) went down from 2 to 1.
+::notice title=Plugin Check::Error counts went down. Lower the baseline so they cannot come back: commit the baseline.json from this run's plugin-check-report artifact as baseline.json.
 Plugin Check error counts are within the baseline.

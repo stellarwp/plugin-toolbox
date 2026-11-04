@@ -13,3 +13,10 @@ line 12
 line 13
 line 14
 line 15
+
+If the new errors are on purpose, raise their counts in baseline.json in this pull request, so reviewers see it. The file from this run has the new counts:
+
+```bash
+gh run download <run-id> --repo <owner>/<repo> --name plugin-check-report --dir /tmp/plugin-check
+cp /tmp/plugin-check/baseline.json baseline.json
+```

@@ -7,6 +7,13 @@
 | Warnings | 0 | 1 | -1 |
 
 Went up (top 5 of 7): `Test.Rule.Number1` (+1), `Test.Rule.Number2` (+1), `Test.Rule.Number3` (+1), `Test.Rule.Number4` (+1), `Test.Rule.Number5` (+1)
-Rules that went down: 3.
+Rules that went down: 3. Update the baseline file, see the job summary.
 
 📎 [Run](https://example.test/actions/runs/1)
+
+Error counts went down. To lower the baseline, replace baseline.json with the file from this run:
+
+```bash
+gh run download <run-id> --repo <owner>/<repo> --name plugin-check-report --dir /tmp/plugin-check
+cp /tmp/plugin-check/baseline.json baseline.json
+```
