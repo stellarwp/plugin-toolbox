@@ -460,6 +460,36 @@ describe('zip-name', () => {
       assert.equal(outputs().version, `4.19.0.1-dev-${TIMESTAMP}-${HASH}`)
     })
 
+    it('reads the checkout in working-directory, resolved against the workspace', async (t) => {
+      // A workflow that checks the repository out into source/ and runs the action from the workspace.
+      const { core, outputs } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed())
+      const workspace = checkoutWith({})
+      fs.mkdirSync(path.join(workspace, 'source'))
+      fs.writeFileSync(path.join(workspace, 'source', '.puprc'), JSON.stringify(PUPRC))
+
+      await runZipName({ core, exec, env: nameEnv({ INPUT_WORKING_DIRECTORY: 'source' }), cwd: workspace })
+
+      assert.ok(
+        calls.filter((call) => call.command !== 'curl').every((call) => call.options.cwd === path.join(workspace, 'source')),
+        'pup and git run in source/'
+      )
+      assert.equal(outputs()['base-version'], '4.19.0.1')
+    })
+
+    it('refuses a working-directory that is not there, before downloading or running anything', async (t) => {
+      const { core, outputs } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed())
+      const cwd = checkoutWith({ '.puprc': PUPRC })
+
+      await assert.rejects(
+        runZipName({ core, exec, env: nameEnv({ INPUT_WORKING_DIRECTORY: 'source' }), cwd }),
+        /working-directory 'source' is not a directory of the workspace.*No zip name was resolved/s
+      )
+      assert.deepEqual(calls, [])
+      assert.deepEqual(outputs(), {})
+    })
+
     it('reuses the phar an earlier step of the job downloaded, without checking or downloading again', async (t) => {
       const { core, outputs, logged } = await coreWithOutputs(t)
       const { exec, calls } = recordingExec(allSucceed())

@@ -38,6 +38,14 @@ inputs:
       wrong ref stops before it starts.
     required: false
     default: ''
+  working-directory:
+    description: >-
+      Where the repository is checked out, relative to the workspace, for a workflow that checks it
+      out somewhere other than the workspace itself (`source/`). The .puprc, the version files and
+      the commit are read there. Empty is the workspace. A directory that is not there fails before
+      anything runs.
+    required: false
+    default: ''
   pup-version:
     description: >-
       The pup release that reads the version and names the zip: a release number, such as 2.0.0,
@@ -86,6 +94,7 @@ runs:
         INPUT_PRERELEASE: ${{ inputs.prerelease }}
         INPUT_SEQUENCE: ${{ inputs.sequence }}
         INPUT_EXPECTED_VERSION: ${{ inputs.expected-version }}
+        INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
         INPUT_PUP_VERSION: ${{ inputs.pup-version }}
         INPUT_TOKEN: ${{ inputs.token }}
       with:

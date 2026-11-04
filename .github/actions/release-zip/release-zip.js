@@ -16,6 +16,7 @@ const path = require('node:path')
 
 const { readVersionFiles } = require('../../lib/puprc.js')
 const { setupPup, lastLine } = require('../../lib/pup.js')
+const { readWorkingDirectory } = require('../../lib/workspace.js')
 
 /** What was not done, to close every error message. */
 const WHAT = 'No zip was built.'
@@ -128,7 +129,8 @@ function readCheckoutFile(cwd, name) {
  * @param {object}   options.core      The @actions/core toolkit, for the log and the outputs.
  * @param {object}   options.exec      The @actions/exec toolkit.
  * @param {object}   options.env       The environment the action manifest put its inputs in.
- * @param {string}   options.cwd       The checkout, the working directory by default.
+ * @param {string}   options.cwd       The workspace, the process's working directory by default;
+ *                                     `working-directory` is resolved against it.
  * @param {Function} options.fetchImpl What `fetch` to use for `latest`; a test passes a stand-in.
  *
  * @throws {Error} When an input is wrong, .puprc is unusable, the pup release cannot be run, a pup
@@ -136,11 +138,12 @@ function readCheckoutFile(cwd, name) {
  *
  * @returns {Promise<void>} Resolves once the zip exists and the outputs are set.
  */
-async function runZip({ core, exec, env, cwd = process.cwd(), fetchImpl = globalThis.fetch }) {
+async function runZip({ core, exec, env, cwd: workspace = process.cwd(), fetchImpl = globalThis.fetch }) {
   const version = readVersion(env.INPUT_VERSION)
   const production = readYesNo(env.INPUT_PRODUCTION, 'production')
   const check = readYesNo(env.INPUT_CHECK, 'check')
   const i18n = readYesNo(env.INPUT_I18N, 'i18n')
+  const cwd = readWorkingDirectory(env.INPUT_WORKING_DIRECTORY, { base: workspace, what: WHAT })
 
   readVersionFiles(readCheckoutFile(cwd, '.puprc'), WHAT)
 

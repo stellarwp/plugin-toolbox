@@ -19,6 +19,7 @@ const path = require('node:path')
 const { runOrFail } = require('../../lib/exec.js')
 const { readVersionFiles } = require('../../lib/puprc.js')
 const { setupPup, lastLine } = require('../../lib/pup.js')
+const { readWorkingDirectory } = require('../../lib/workspace.js')
 
 /** What was not done, to close every error message. */
 const WHAT = 'No zip name was resolved.'
@@ -208,9 +209,9 @@ function readCheckoutFile(cwd, name) {
  * the zip name.
  *
  * Every input check and the .puprc read run before pup is downloaded, so a wrong `production`,
- * `prerelease` or `sequence`, or a repository without a usable .puprc, fails with nothing
- * downloaded and nothing run. `expected-version` is checked once the version is read, before the
- * suffix is built.
+ * `prerelease` or `sequence`, a `working-directory` that is not there, or a repository without a
+ * usable .puprc, fails with nothing downloaded and nothing run. `expected-version` is checked once
+ * the version is read, before the suffix is built.
  *
  * `production` is the master switch: with `yes`, `prerelease` and `sequence` are ignored with a
  * warning, never refused, so a form filled in by habit still produces the clean zip.
@@ -219,7 +220,8 @@ function readCheckoutFile(cwd, name) {
  * @param {object}   options.core      The @actions/core toolkit, for the log and the outputs.
  * @param {object}   options.exec      The @actions/exec toolkit.
  * @param {object}   options.env       The environment the action manifest put its inputs in.
- * @param {string}   options.cwd       The checkout, the working directory by default.
+ * @param {string}   options.cwd       The workspace, the process's working directory by default;
+ *                                     `working-directory` is resolved against it.
  * @param {Function} options.fetchImpl What `fetch` to use for `latest`; a test passes a stand-in.
  *
  * @throws {Error} When an input is wrong, .puprc is unusable, the pup release cannot be run, pup
@@ -228,11 +230,12 @@ function readCheckoutFile(cwd, name) {
  *
  * @returns {Promise<void>} Resolves once the outputs are set.
  */
-async function runZipName({ core, exec, env, cwd = process.cwd(), fetchImpl = globalThis.fetch }) {
+async function runZipName({ core, exec, env, cwd: workspace = process.cwd(), fetchImpl = globalThis.fetch }) {
   const production = readYesNo(env.INPUT_PRODUCTION, 'production')
   const prerelease = readPrerelease(env.INPUT_PRERELEASE)
   const sequence = readSequence(env.INPUT_SEQUENCE)
   const expected = String(env.INPUT_EXPECTED_VERSION ?? '').trim()
+  const cwd = readWorkingDirectory(env.INPUT_WORKING_DIRECTORY, { base: workspace, what: WHAT })
 
   readVersionFiles(readCheckoutFile(cwd, '.puprc'), WHAT)
 

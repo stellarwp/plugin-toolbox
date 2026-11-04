@@ -213,6 +213,35 @@ describe('release-zip', () => {
       )
     })
 
+    it('builds in working-directory and reports the zip there, as an absolute path', async (t) => {
+      const { core, outputs } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed())
+      const workspace = checkoutWith({})
+      fs.mkdirSync(path.join(workspace, 'source'))
+      fs.writeFileSync(path.join(workspace, 'source', '.puprc'), JSON.stringify(PUPRC))
+
+      await runZip({ core, exec, env: zipEnv({ INPUT_WORKING_DIRECTORY: 'source' }), cwd: workspace })
+
+      assert.ok(
+        calls.filter((call) => call.command === 'php').every((call) => call.options.cwd === path.join(workspace, 'source')),
+        'pup runs in source/'
+      )
+      assert.equal(outputs()['zip-path'], path.join(workspace, 'source', `give.${VERSION}.zip`))
+    })
+
+    it('refuses a working-directory that is not there, before downloading or running anything', async (t) => {
+      const { core, outputs } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed())
+      const cwd = checkoutWith({ '.puprc': PUPRC })
+
+      await assert.rejects(
+        runZip({ core, exec, env: zipEnv({ INPUT_WORKING_DIRECTORY: 'missing' }), cwd }),
+        /working-directory 'missing' is not a directory of the workspace.*No zip was built/s
+      )
+      assert.deepEqual(calls, [])
+      assert.deepEqual(outputs(), {})
+    })
+
     it('stops before downloading or running anything when an input is wrong', async (t) => {
       const cases = [
         [{ INPUT_VERSION: '' }, /No version was given/],

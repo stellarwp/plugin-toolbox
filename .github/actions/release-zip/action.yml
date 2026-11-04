@@ -31,6 +31,14 @@ inputs:
     description: '`yes` runs `pup i18n`, which downloads the finished translations; `no` skips it. Anything else fails before anything runs.'
     required: false
     default: 'yes'
+  working-directory:
+    description: >-
+      Where the repository is checked out, relative to the workspace, for a workflow that checks it
+      out somewhere other than the workspace itself (`source/`). pup runs there and writes the zip
+      there; `zip-path` is still an absolute path. Empty is the workspace. A directory that is not
+      there fails before anything runs.
+    required: false
+    default: ''
   pup-version:
     description: >-
       The pup release that builds and packages: a release number, such as 2.0.0, or 'latest' for the
@@ -71,6 +79,7 @@ runs:
         INPUT_PRODUCTION: ${{ inputs.production }}
         INPUT_CHECK: ${{ inputs.check }}
         INPUT_I18N: ${{ inputs.i18n }}
+        INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
         INPUT_PUP_VERSION: ${{ inputs.pup-version }}
         INPUT_TOKEN: ${{ inputs.token }}
       with:

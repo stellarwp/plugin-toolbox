@@ -93,6 +93,7 @@ Before anything is downloaded or run:
 
 - An empty `version`. The template passes zip-name's `version` output, which is never empty.
 - `production`, `check` or `i18n` that is not `yes` or `no`.
+- `working-directory` that is not a directory of the workspace.
 - A missing or unusable `.puprc`.
 - `pup-version` that is neither a release number such as `2.0.0` nor `latest`.
 
@@ -108,6 +109,7 @@ name in `composer.json`.
 | `production` | no | `no` | `yes` runs `pup check` strict; `no` runs it with `--dev` |
 | `check` | no | `yes` | Whether `pup check` runs |
 | `i18n` | no | `yes` | Whether `pup i18n` runs |
+| `working-directory` | no | the workspace | Where the repository is checked out, relative to the workspace, e.g. `source`. pup runs and writes the zip there; `zip-path` is absolute either way |
 | `pup-version` | no | `latest` | The pup release to run: a number such as `2.0.0`, or `latest`. Pass the same value zip-name got. See [Which pup runs](#which-pup-runs) |
 | `token` | no | `github.token` | Authenticates the `latest` lookup. A pinned `pup-version` never uses it |
 
