@@ -1,0 +1,72 @@
+# Installs pup, and optionally reads the version and the zip name from it.
+#
+# pup is downloaded from its GitHub release into the runner's temp directory and run with PHP, so a
+# repository does not need a copy of it, and every action in this repository installs and reads pup
+# the same way. The work is in pup.js, run by actions/github-script, so there is nothing to install
+# and nothing to build.
+name: pup
+description: Installs pup from its GitHub release and optionally reads the version and the zip name
+
+inputs:
+  pup-version:
+    description: >-
+      The pup release to install: a release number, such as `2.0.0`, or `latest` for the newest
+      release. It has to ship a pup.phar asset, which every release from 1.2.4 to 2.0.0 does. Use the
+      release the repository's own `composer pup` script downloads: a zip name made by another
+      release could differ from the one the repository's build makes.
+    required: false
+    default: '2.0.0'
+  read:
+    description: >-
+      What to read from pup after installing it. Empty reads nothing. `version` runs
+      `pup get-version`. `zip-name` reads the version, then runs `pup zip-name` for it. Both need a
+      checkout of the repository, because pup reads the version from its files.
+    required: false
+    default: ''
+  dev:
+    description: >-
+      `true` reads the development build version, `pup get-version --dev`, which has the commit in
+      it. Only used when `read` is set.
+    required: false
+    default: 'false'
+  token:
+    description: >-
+      Token for the `latest` lookup through the GitHub API, so the runner's shared unauthenticated
+      quota is not spent. A pinned release makes no API call and needs no token.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  phar:
+    description: 'Path of pup.phar. Run it with `php "$PHAR" <command>`.'
+    value: ${{ steps.pup.outputs.phar }}
+  release:
+    description: 'The pup release that was installed, as a tag. `latest` is resolved to its number.'
+    value: ${{ steps.pup.outputs.release }}
+  version:
+    description: 'The version pup printed. Empty unless `read` is `version` or `zip-name`.'
+    value: ${{ steps.pup.outputs.version }}
+  zip-name:
+    description: 'The name of the zip, without `.zip`. Empty unless `read` is `zip-name`.'
+    value: ${{ steps.pup.outputs.zip-name }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install pup
+      id: pup
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so an input is data and
+        # never part of the program.
+        INPUT_PUP_VERSION: ${{ inputs.pup-version }}
+        INPUT_READ: ${{ inputs.read }}
+        INPUT_DEV: ${{ inputs.dev }}
+        INPUT_TOKEN: ${{ inputs.token }}
+      with:
+        script: |
+          const { run } = require(`${process.env.ACTION_PATH}/pup.js`)
+          await run({ core, exec, env: process.env })
