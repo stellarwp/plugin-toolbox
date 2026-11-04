@@ -29,8 +29,10 @@ inputs:
     description: >-
       The number of a build numbered by hand, digits from 1 with no leading zero: `2` names the build
       `<version>-rc-2`. Empty names it after the commit, `<version>-rc-<timestamp>-<hash>`, unique
-      per commit. On a QA build anything else fails before anything runs; a production build
-      ignores it.
+      per commit. Keep one scheme for a version's pre-release cycle: a numbered build sorts below a
+      timestamped one of the same label (`-rc-2` is below `-rc-1792689067-fbcf8681`), so a site on
+      the timestamped build is not offered the numbered one. On a QA build anything else fails
+      before anything runs; a production build ignores it.
     required: false
     default: ''
   expected-version:

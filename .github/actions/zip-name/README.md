@@ -49,7 +49,10 @@ the suffix `pup get-version --dev` gives: the committer timestamp of HEAD and it
 read with the same two git commands pup runs, so a default QA build is named as every QA build was
 until now. The other labels take the place of `dev`. A `sequence` takes the place of the timestamp
 and the hash, for a build numbered by hand, `rc-1`, `rc-2`; nothing counts up on its own, since
-that would need state somewhere.
+that would need state somewhere. Keep one scheme for a version's pre-release cycle: `version_compare`
+reads the part after the label as a number, so `4.19.0.1-rc-2` sorts below
+`4.19.0.1-rc-1792689067-fbcf8681`, and a site that installed the timestamped RC is not offered the
+numbered one.
 
 Hyphens throughout, as pup writes them. In PHP's `version_compare`, which WordPress uses to decide
 whether an update applies, `-`, `.` and `_` are the same separator and `dev < alpha < beta < RC <
@@ -117,7 +120,7 @@ produces the right production build.
 |---|---|---|---|
 | `production` | no | `no` | `yes` names the clean zip and ignores the two below; `no` names a QA build |
 | `prerelease` | no | `dev` | The label of a QA build: `dev`, `alpha`, `beta` or `rc` |
-| `sequence` | no | | The number of a build numbered by hand, in place of the timestamp and hash |
+| `sequence` | no | | The number of a build numbered by hand, in place of the timestamp and hash. One scheme per pre-release cycle; see [What it names](#what-it-names) |
 | `expected-version` | no | | The version the files have to hold; see [What it refuses](#what-it-refuses) |
 | `working-directory` | no | the workspace | Where the repository is checked out, relative to the workspace, e.g. `source`. The `.puprc`, the version files and the commit are read there |
 | `pup-version` | no | `latest` | The pup release to run: a number such as `2.0.0`, or `latest`. See [Which pup runs](#which-pup-runs) |
