@@ -190,6 +190,10 @@ pinned release downloads straight from its release page. `latest` reads the newe
 the GitHub API, authenticated with `token` so the runner's shared unauthenticated quota is not
 spent.
 
+The download, the release checks and the way pup is run come from the shared [pup](../pup/)
+action's script, so every action in this repository installs and reads pup the same way. A phar
+that an earlier step of the job already downloaded is reused.
+
 The release itself decides whether the action can run it, not a version comparison: the action
 sends a HEAD request to the release's `pup.phar` asset. Every release from 1.2.4 to 2.0.0
 publishes one; the phar downloads into the runner's temp directory and runs on the runner's PHP.

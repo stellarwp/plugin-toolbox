@@ -12,11 +12,21 @@
  */
 
 const fs = require('node:fs')
-const os = require('node:os')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 
+const { lastLine, runOrFail } = require('../../lib/commands.js')
 const { compareVersions } = require('../../lib/versions.js')
+const {
+  validatePupVersion,
+  resolvePupRelease,
+  resolvePupDistribution,
+  pupDownloadUrl,
+  pupReleaseUrl,
+  pharPath,
+  downloadPhar,
+  runPup,
+} = require('../pup/pup.js')
 
 /**
  * Three or four numeric parts, the shape the stellarwp changelog versioning accepts. That strategy
@@ -36,9 +46,6 @@ const SEMVER_PATTERN =
 
 /** The numeric start of a version, which is what the branch-version comparison reads. */
 const NUMERIC_PREFIX = /^\d+(\.\d+)*/
-
-/** A pup release number, which goes into the download URL. */
-const PUP_VERSION_PATTERN = /^\d+\.\d+\.\d+$/
 
 /** A calendar date as the changelog writing strategies expect it. */
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
@@ -233,77 +240,6 @@ function validateBranch(branch, prefixes = []) {
 }
 
 /**
- * Checks the pup release to download.
- *
- * @param {string} version The `pup-version` input.
- *
- * @throws {Error} When it is not a release number.
- *
- * @returns {string} The version.
- */
-function validatePupVersion(version) {
-  const trimmed = String(version ?? '').trim()
-
-  if (trimmed.toLowerCase() !== 'latest' && !PUP_VERSION_PATTERN.test(trimmed)) {
-    throw new Error(`pup-version '${trimmed}' is not a pup release number, such as 2.0.0, or 'latest'.`)
-  }
-
-  return trimmed
-}
-
-/**
- * Resolves the `pup-version` input to a concrete pup release.
- *
- * A pinned release number is used as it is: resolvePupDistribution checks it against the
- * release page, so there is no API call for the common case. `latest` asks the GitHub API for
- * the newest release, authenticated with the action token when the caller passes one, so the
- * runner's shared unauthenticated quota is not spent.
- *
- * @param {object}          options
- * @param {string}          options.version   The validated `pup-version` input.
- * @param {string}          options.token     The action token, possibly empty.
- * @param {Function}        options.fetchImpl What `fetch` to use; a test passes a stand-in.
- *
- * @throws {Error} When the latest release cannot be read.
- *
- * @returns {Promise<string>} The release tag to download from.
- */
-async function resolvePupRelease({ version, token, fetchImpl }) {
-  if (version.toLowerCase() !== 'latest') {
-    return version
-  }
-
-  const headers = {}
-  if (token) {
-    headers.authorization = `Bearer ${token}`
-  }
-
-  const response = await fetchImpl('https://api.github.com/repos/stellarwp/pup/releases/latest', {
-    headers,
-  })
-
-  if (!response.ok) {
-    throw new Error(
-      `Reading the latest pup release failed (HTTP ${response.status}). Pass a pinned pup-version and run this step again. Nothing was changed.`
-    )
-  }
-
-  // The tag goes into a download URL and a temp file path, and a missing one would surface
-  // as a 404 on …/download/undefined/pup.phar, which the distribution check would report as
-  // a release that does not exist. A broken API response must fail here, naming the API, so
-  // the tag is validated before it is used.
-  const tag = (await response.json()).tag_name
-  if (typeof tag !== 'string' || !PUP_VERSION_PATTERN.test(tag)) {
-    throw new Error(
-      'The latest pup release has no usable tag. Pass a pinned pup-version and run this step ' +
-        'again. Nothing was changed.'
-    )
-  }
-
-  return tag
-}
-
-/**
  * Reads what the action needs from the repository's .puprc.
  *
  * pup itself does not fail on a missing or broken .puprc: it reads either as empty, bumps nothing
@@ -397,110 +333,6 @@ function readChangeloggerStrategy(text) {
 }
 
 /**
- * Where a pup release's phar is published.
- *
- * @param {string} version A pup release number, already validated.
- *
- * @returns {string} The download URL.
- */
-function pupDownloadUrl(version) {
-  return `https://github.com/stellarwp/pup/releases/download/${version}/pup.phar`
-}
-
-/**
- * The page of a pup release, which answers 404 when the release does not exist.
- *
- * @param {string} version A pup release number, already validated.
- *
- * @returns {string} The release page URL.
- */
-function pupReleaseUrl(version) {
-  return `https://github.com/stellarwp/pup/releases/tag/${version}`
-}
-
-/**
- * Sends a HEAD request and reports whether the URL exists.
- *
- * @param {object} exec The @actions/exec toolkit.
- * @param {string} url  The URL to check.
- *
- * @returns {Promise<{exists: boolean, missing: boolean, result: object}>} Whether it answered
- *          200, whether it answered 404, and curl's result for anything else.
- */
-async function headExists(exec, url) {
-  const result = await exec.getExecOutput('curl', ['-fsSI', url], {
-    ignoreReturnCode: true,
-    silent: true,
-  })
-
-  // curl -f answers a 404 with exit code 22 and the status in stderr.
-  return {
-    exists: result.exitCode === 0,
-    missing: result.exitCode === 22 && /404/.test(result.stderr),
-    result,
-  }
-}
-
-/**
- * Which distribution a pup release carries, decided by looking at the release itself: a `pup.phar`
- * asset means the PHP build the action runs. A release without one (1.2.3 and 0.0.1 among the
- * published ones, and the TypeScript line once it ships) cannot be run from here yet.
- *
- * The checks are HEAD requests against the asset URL and, when that is missing, the release page,
- * not the releases API, so a pinned `pup-version` stays free of API calls and rate limits. The
- * second request tells a release without a phar from a release that does not exist, which a
- * mistyped pin produces.
- *
- * @param {object}   exec    The @actions/exec toolkit.
- * @param {string}   release The resolved pup release tag.
- *
- * @throws {Error} When the release does not exist, or a check itself fails and the run cannot
- *                 tell which path to take.
- *
- * @returns {Promise<'phar'|'ts'>} The distribution the release carries: `ts` for any release
- *          without a phar, the old ones included, since that is the path they take.
- */
-async function resolvePupDistribution({ exec, release }) {
-  const asset = await headExists(exec, pupDownloadUrl(release))
-
-  if (asset.exists) {
-    return 'phar'
-  }
-
-  if (asset.missing) {
-    const page = await headExists(exec, pupReleaseUrl(release))
-
-    if (page.exists) {
-      return 'ts'
-    }
-
-    if (page.missing) {
-      throw new Error(`pup ${release} is not a release: check pup-version for a typo. Nothing was changed.`)
-    }
-
-    throw checkFailed(release, page.result)
-  }
-
-  throw checkFailed(release, asset.result)
-}
-
-/**
- * The error for a release check that neither succeeded nor answered 404.
- *
- * @param {string} release The pup release tag.
- * @param {object} result  What curl returned.
- *
- * @returns {Error} The error, holding what curl printed.
- */
-function checkFailed(release, result) {
-  const output = [result.stdout, result.stderr].map((text) => text.trim()).filter(Boolean)
-
-  return new Error(
-    `Checking the pup ${release} release failed (exit code ${result.exitCode}):\n` + output.join('\n')
-  )
-}
-
-/**
  * The pup commands that prepare a version, in the order they run.
  *
  * @param {string} phar    Path to the downloaded pup.phar.
@@ -559,24 +391,6 @@ function commitMessage(branch, version) {
 }
 
 /**
- * The last non-empty line of a command's output, where `pup get-version` prints the version after any
- * PHP notice.
- *
- * @param {string} output What the command printed.
- *
- * @returns {string} The line, trimmed, or an empty string.
- */
-function lastLine(output) {
-  return (
-    String(output ?? '')
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .at(-1) ?? ''
-  )
-}
-
-/**
  * Reads the version `pup get-version` printed: the numeric part of its last line, so a suffix such as
  * -beta.1 is ignored and a PHP notice printed before it is skipped.
  *
@@ -621,31 +435,6 @@ function readCheckoutFile(cwd, name) {
 
     throw error
   }
-}
-
-/**
- * Runs a command and fails with its output when it exits non-zero.
- *
- * @param {object}   exec    The @actions/exec toolkit.
- * @param {string}   command The program.
- * @param {string[]} args    Its arguments.
- * @param {object}   options Options for @actions/exec.
- * @param {string}   what    What the command does, to open the error message.
- *
- * @throws {Error} When the command exits non-zero, holding what it printed.
- *
- * @returns {Promise<string>} What the command printed to stdout.
- */
-async function runOrFail(exec, command, args, options, what) {
-  const result = await exec.getExecOutput(command, args, { ...options, ignoreReturnCode: true })
-
-  if (result.exitCode !== 0) {
-    const output = [result.stdout, result.stderr].map((text) => text.trim()).filter(Boolean)
-
-    throw new Error(`${what} failed (exit code ${result.exitCode}):\n${output.join('\n')}`)
-  }
-
-  return result.stdout
 }
 
 /**
@@ -766,26 +555,14 @@ async function runPrepare({ core, exec, env, cwd = process.cwd(), fetchImpl = gl
  * @returns {Promise<void>} Resolves once pup has run.
  */
 async function runPrepareWithPhar({ core, exec, cwd, env, pharRelease, version, branch }) {
-  const phar = path.join(env.RUNNER_TEMP || os.tmpdir(), `pup-${pharRelease}.phar`)
+  const phar = pharPath(env, pharRelease)
 
-  await runOrFail(
-    exec,
-    'curl',
-    ['-fsSL', '--retry', '3', '-o', phar, pupDownloadUrl(pharRelease)],
-    {},
-    `Downloading pup ${pharRelease}`
-  )
+  await downloadPhar({ exec, release: pharRelease, phar })
 
   // A version lower than the one the branch already has would bump it backwards: a wrong version, or
   // the wrong branch. The same version is fine, it is what re-running a preparation finds. When pup
   // finds no version at all it exits non-zero, which fails here as replace-version would.
-  const printed = await runOrFail(
-    exec,
-    'php',
-    ['-d', 'display_errors=stderr', phar, 'get-version'],
-    { cwd, silent: true },
-    'pup get-version'
-  )
+  const printed = await runPup({ exec, phar, cwd, args: ['get-version'] })
   const current = readCurrentVersion(printed)
   // Only the numeric start is compared: 4.17.0-beta.1 counts as 4.17.0, which compareVersions
   // reads; a pre-release of the version the branch holds is still that version.
