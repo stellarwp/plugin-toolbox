@@ -66,6 +66,41 @@ function validateBranch(branch, input, { optional = false } = {}) {
   return trimmed
 }
 
+/** A full commit hash, the only form `head` takes: a branch name would be read at run time again. */
+const COMMIT_PATTERN = /^[0-9a-f]{40}$/
+
+/**
+ * Reads the `head` input: the commit the release branch has to be at, or nothing.
+ *
+ * A deploy that waits for an approval merges the branch's tip when the approval comes, which may
+ * not be the commit the run was started on. The caller passes that commit (`github.sha` in a
+ * workflow_dispatch run) and a branch that moved in between is refused instead of merged.
+ *
+ * @param {string} head The input value.
+ *
+ * @throws {Error} When it is neither empty nor a full commit hash.
+ *
+ * @returns {string|null} The hash, lower-cased, or null for an empty value.
+ */
+function readHead(head) {
+  const trimmed = String(head ?? '')
+    .trim()
+    .toLowerCase()
+
+  if (trimmed === '') {
+    return null
+  }
+
+  if (!COMMIT_PATTERN.test(trimmed)) {
+    throw new Error(
+      `head '${trimmed}' is not a full commit hash. Pass the commit the release branch has to be at, ` +
+        'such as github.sha, or leave it empty. Nothing was merged.'
+    )
+  }
+
+  return trimmed
+}
+
 /**
  * The message of a merge commit.
  *
@@ -367,6 +402,7 @@ async function runMerge({ github, core, env }) {
   const version = validateVersion(env.INPUT_VERSION)
   const base = validateBranch(env.INPUT_BASE_BRANCH, 'base-branch')
   const develop = validateBranch(env.INPUT_DEVELOP_BRANCH, 'develop-branch', { optional: true })
+  const head = readHead(env.INPUT_HEAD)
   const { owner, repo } = readRepository(env, 'Nothing was merged.')
 
   if (develop !== null && base === develop) {
@@ -383,6 +419,13 @@ async function runMerge({ github, core, env }) {
   // to the branch between the version check and the merge would reach the base unchecked; a tag
   // named like the branch could also change what a read by name returns.
   const branchSha = await readBranchTip({ github, owner, repo, branch })
+  if (head !== null && head !== branchSha) {
+    throw new Error(
+      `${branch} is at ${branchSha}, not at ${head}, the commit this run was started on: the branch ` +
+        'moved after the run started, so its tip is not the commit that was built and reviewed. Start ' +
+        'the deploy again on the branch as it is now. Nothing was merged.'
+    )
+  }
   for (const name of develop === null ? [base] : [base, develop]) {
     await readBranchTip({ github, owner, repo, branch: name })
   }
@@ -453,6 +496,7 @@ module.exports = {
   runPreflight,
   validateVersion,
   validateBranch,
+  readHead,
   mergeMessage,
   isConflict,
 }

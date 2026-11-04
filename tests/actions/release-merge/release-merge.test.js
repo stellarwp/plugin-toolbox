@@ -8,6 +8,7 @@ const {
   runPreflight,
   validateVersion,
   validateBranch,
+  readHead,
   mergeMessage,
   isConflict,
 } = require('../../../.github/actions/release-merge/release-merge.js')
@@ -224,6 +225,20 @@ describe('release-merge', () => {
     })
   })
 
+  describe('readHead', () => {
+    it('reads a full commit hash, lower-cased, and an empty value as no check', () => {
+      assert.strictEqual(readHead(` ${TIP.main.toUpperCase()} `), TIP.main)
+      assert.strictEqual(readHead(''), null)
+      assert.strictEqual(readHead(undefined), null)
+    })
+
+    it('refuses anything but a full hash: a branch name would be read at run time again', () => {
+      for (const value of ['main', 'aaaaaaa', 'refs/heads/main', `${TIP.main}0`]) {
+        assert.throws(() => readHead(value), /is not a full commit hash.*github\.sha.*Nothing was merged/s, value)
+      }
+    })
+  })
+
   describe('mergeMessage', () => {
     it('names what was merged into what', () => {
       assert.strictEqual(mergeMessage('release/M26.test', 'main'), 'Merge release/M26.test into main')
@@ -371,6 +386,40 @@ describe('release-merge', () => {
       )
       assert.strictEqual(mergesAsked(requests)[0].head, tip, 'the merge takes the tip that was checked')
       assert.ok(!JSON.stringify(requests).includes(pushed), 'the later commit is never read or merged')
+    })
+
+    it('merges when head is the commit the branch is at', async (t) => {
+      const { github, requests } = await octokitFor(repositoryWith())
+      const { core, outputs } = await coreWithOutputs(t)
+
+      await runMerge({ github, core, env: mergeEnv({ INPUT_HEAD: TIP['release/M26.test'] }) })
+
+      assert.strictEqual(mergesAsked(requests).length, 2)
+      assert.strictEqual(outputs()['base-sha'], MERGED.main)
+    })
+
+    it('refuses a branch that moved after the run started, before reading a file or merging', async (t) => {
+      // The run was started at `head`; a push during the wait for approval moved the branch to TIP.
+      const head = '9999999999999999999999999999999999999999'
+      const { github, requests } = await octokitFor(repositoryWith())
+      const { core, outputs } = await coreWithOutputs(t)
+
+      await assert.rejects(
+        runMerge({ github, core, env: mergeEnv({ INPUT_HEAD: head }) }),
+        /release\/M26\.test is at aaaa.*, not at 9999.*, the commit this run was started on.*Start the deploy again.*Nothing was merged/s
+      )
+
+      assert.deepStrictEqual(requested(requests), [`GET ${API.tag}`, `GET ${API.branch('release/M26.test')}`])
+      assert.deepStrictEqual(mergesAsked(requests), [])
+      assert.deepStrictEqual(outputs(), {})
+    })
+
+    it('refuses a head that is not a full commit hash before asking the API anything', async (t) => {
+      const { github, requests } = await octokitFor(repositoryWith())
+      const { core } = await coreWithOutputs(t)
+
+      await assert.rejects(runMerge({ github, core, env: mergeEnv({ INPUT_HEAD: 'release/M26.test' }) }), /head 'release\/m26\.test' is not a full commit hash/)
+      assert.deepStrictEqual(requests, [])
     })
 
     it('merges only into the base when develop-branch is empty, for a repository without develop', async (t) => {

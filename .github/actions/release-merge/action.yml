@@ -15,6 +15,13 @@ inputs:
     description: >-
       The release branch to merge, e.g. `release/M26.jigglypuff`. A branch name, not any git ref.
     required: true
+  head:
+    description: >-
+      The commit the release branch has to be at, as a full hash; empty checks nothing. A deploy that
+      waits for an approval merges the branch's tip when the approval comes. Pass the commit the run
+      was started on (`github.sha`), and a branch that moved in between is refused instead of merged.
+    required: false
+    default: ''
   version:
     description: >-
       The version being released: three or four numeric parts, such as 4.17.0 or 4.17.0.1, the rule
@@ -79,6 +86,7 @@ runs:
         # Read from process.env rather than interpolated into the script, so an input is data and
         # never part of the program.
         INPUT_BRANCH: ${{ inputs.branch }}
+        INPUT_HEAD: ${{ inputs.head }}
         INPUT_VERSION: ${{ inputs.version }}
         INPUT_BASE_BRANCH: ${{ inputs.base-branch }}
         INPUT_DEVELOP_BRANCH: ${{ inputs.develop-branch }}

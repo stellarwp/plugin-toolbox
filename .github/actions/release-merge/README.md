@@ -127,11 +127,18 @@ a published tag is compared against, and what is merged into the base. A commit 
 after the check is not merged by that run; run the step again for it. The branch name appears in
 the merge message and in the messages, not in what the API is asked.
 
+The tip is read when the step runs, which in a deploy that waits for an approval is later than the
+run started. Pass `head`, the commit the run was started on (`github.sha` in a `workflow_dispatch`
+run), and a branch whose tip is another commit is refused before anything is merged: the commit
+that was built and reviewed is no longer the tip, so the deploy is started again. The template does
+this; without `head`, the tip at that moment is what merges.
+
 ## Inputs
 
 | Input | Required | Default | What it is |
 |---|---|---|---|
 | `branch` | yes | | The release branch to merge, e.g. `release/M26.jigglypuff`. A branch name. |
+| `head` | no | | The commit the release branch has to be at, as a full hash: `github.sha`, the commit the run was started on. Empty checks nothing. See [Versions it refuses](#versions-it-refuses). |
 | `version` | yes | | The version being released: three or four numeric parts. |
 | `base-branch` | no | `main` | The branch the release is merged into: `main`, or `master` where that is the repository's name for it. |
 | `develop-branch` | no | `develop` | The branch the base is merged back into. Empty for a repository without one: only the first merge is made. Write `develop-branch: ''` in the caller itself; a `workflow_dispatch` input left empty takes its default, so the empty value cannot be passed through one. |
