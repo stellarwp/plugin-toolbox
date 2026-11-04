@@ -201,7 +201,7 @@ publishes one; the phar downloads into the runner's temp directory and runs on t
 A release without one is not supported yet: the prepare step fails, saying so and naming a pin
 to use instead. A pinned release that does not exist, such as a mistyped number, fails the step
 with "is not a release"; the action tells the two apart with a second HEAD request, to the
-release's page.
+release's page. A phar an earlier step of the same job downloaded is reused.
 
 The TypeScript line of pup publishes no phar. How the action will call it is open until that
 line ships a distribution: through pup's own GitHub Action, or straight from the script with the

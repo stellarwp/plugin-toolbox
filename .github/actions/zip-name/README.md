@@ -67,7 +67,7 @@ A `.puprc` with the version files and the zip name:
     "versions": [
       { "file": "give.php", "regex": "(Version: )(.+)" },
       { "file": "give.php", "regex": "(define\\( 'GIVE_VERSION', ')([^']+)" },
-      { "file": "readme.txt", "strategy": "(Stable tag: )(.+)" }
+      { "file": "readme.txt", "regex": "(Stable tag: )(.+)" }
     ]
   }
 }
@@ -89,6 +89,7 @@ Before anything is downloaded or run:
 - `prerelease` that is not `dev`, `alpha`, `beta` or `rc`. Empty counts as `dev`.
 - `sequence` that is not empty or digits from 1 with no leading zero: `0`, `02`, `abc`, `rc-2`.
 - A missing `.puprc`, one that is not JSON, or one with no `paths.versions`.
+- `pup-version` that is neither a release number such as `2.0.0` nor `latest`.
 
 After the version is read, before the suffix is built:
 
@@ -138,6 +139,9 @@ release's `pup.phar` asset. Every release from 1.2.4 to 2.0.0 publishes one; the
 into the runner's temp directory and runs on the runner's PHP. A release without one is not
 supported yet: the step fails, saying so and naming a pin to use instead. A pinned release that
 does not exist, such as a mistyped number, fails the step with "is not a release".
+
+A phar an earlier step of the same job downloaded is reused, so release-zip after zip-name
+downloads nothing; a download that fails leaves no file behind to be reused by mistake.
 
 How pup is resolved, downloaded and run is shared with release-prep and release-zip, in
 [`.github/lib/pup.js`](../../lib/pup.js). When the TypeScript line of pup publishes a distribution,

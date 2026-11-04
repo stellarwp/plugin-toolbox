@@ -94,6 +94,7 @@ Before anything is downloaded or run:
 - An empty `version`. The template passes zip-name's `version` output, which is never empty.
 - `production`, `check` or `i18n` that is not `yes` or `no`.
 - A missing or unusable `.puprc`.
+- `pup-version` that is neither a release number such as `2.0.0` nor `latest`.
 
 After the build, a zip that is not where pup said it would be: `pup package` exited 0 but
 `<zip-name>.zip` is not in the root of the checkout. That points at `zip_name` in `.puprc`, or the
@@ -122,9 +123,9 @@ name in `composer.json`.
 `pup-version` pins a pup release (`2.0.0`) or tracks the newest one (`latest`, the default). A
 pinned release downloads straight from its release page; `latest` reads the newest release through
 the GitHub API, authenticated with `token`. The release has to publish a `pup.phar` asset, which
-every release from 1.2.4 to 2.0.0 does; one without it fails the step and names a pin to use. How
-pup is resolved, downloaded and run is shared with release-prep and zip-name, in
-[`.github/lib/pup.js`](../../lib/pup.js).
+every release from 1.2.4 to 2.0.0 does; one without it fails the step and names a pin to use. The
+phar zip-name downloaded earlier in the job is reused. How pup is resolved, downloaded and run is
+shared with release-prep and zip-name, in [`.github/lib/pup.js`](../../lib/pup.js).
 
 ## How it runs
 
