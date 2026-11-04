@@ -391,7 +391,7 @@ describe('plugin-check-report compare', () => {
         assert.notEqual(run.status, 0, what)
         assert.match(run.stdout, /::error title=Plugin Check::The baseline file baseline\.json is not valid: /, what)
         assert.match(run.stdout, reason, what)
-        assert.match(run.stdout, /Fix it, or replace it with the baseline\.json from this run's plugin-check-report artifact\./, what)
+        assert.match(run.stdout, /[.!?] Fix it, or replace it with the baseline\.json from this run's plugin-check-report artifact\./, what)
         assert.equal(run.comment, '', what)
       }
     })

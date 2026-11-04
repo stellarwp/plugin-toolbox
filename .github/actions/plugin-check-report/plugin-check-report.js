@@ -662,8 +662,11 @@ function readBaselineFile(file, name) {
       .replace(/^The baseline is not valid: /, '')
       .replace(/^jq: parse error: /, 'it is not JSON: ')
 
+    // A parser's message has no full stop of its own, and the sentence after it needs one.
+    const stop = /[.!?]$/.test(reason) ? '' : '.'
+
     throw new CheckFailure(
-      `The baseline file ${name} is not valid: ${reason} Fix it, or replace it with the baseline.json from this run's plugin-check-report artifact.`,
+      `The baseline file ${name} is not valid: ${reason}${stop} Fix it, or replace it with the baseline.json from this run's plugin-check-report artifact.`,
       error.exitCode,
       true
     )
