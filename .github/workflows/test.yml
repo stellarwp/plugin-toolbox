@@ -1,0 +1,42 @@
+name: Tests
+
+# This repo's own checks. A bug here reaches every repo that pins a tag from it, so the logic in the
+# actions is unit tested rather than only exercised by a real release.
+#
+# Run it locally: `npm install` once, then `node --test`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # Node 24 is what actions/github-script@v9 runs the action scripts on, so the tests run on the
+      # same one.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      # `npm install`, not `npm ci`: ci exists to install from a committed lockfile, and no lockfile
+      # is committed here. Each run resolves the newest versions the ranges in package.json allow,
+      # which is the point. The tests drive the real @actions/github and @actions/core, and pinning
+      # them would let the versions under test drift from the ones a release actually runs against
+      # without anything saying so.
+      - name: Install the test dependencies
+        run: npm install
+
+      # No path argument: `node --test <dir>` is read as a module to load rather than a directory
+      # to search on some Node versions, including the 24.x the runner ships. Bare `node --test`
+      # finds every *.test.js under the repository on all of them.
+      - name: Run the unit tests
+        run: node --test

@@ -1,0 +1,63 @@
+# Creates or moves git tags through the GitHub API. Knows nothing about versions: pair it with
+# .github/actions/resolve-floating-tags to move floating version tags, or hand it any tag name.
+#
+# The work lives in move.js. actions/github-script runs it with a pre-authenticated Octokit, so
+# there is no dependency to install and nothing to build: the file in the repository is the file
+# that runs.
+name: Move git tags
+description: Creates or moves the named git tags so that they point at a commit
+
+inputs:
+  tags:
+    description: >-
+      The tags to create or move, separated by spaces or newlines, e.g. `v1 v1.2`. An empty value
+      moves nothing and succeeds, so a caller passing another step's output needs no `if:` of its
+      own. Names are tag names, not refs: pass `v1`, not `refs/tags/v1`.
+    required: true
+  sha:
+    description: >-
+      The commit the tags should point at. Defaults to the commit the workflow is running for, which
+      on a `release` event is the commit the release tag names.
+    required: false
+    default: ''
+  repository:
+    description: 'The `<owner>/<repo>` to write the tags in. Defaults to the current repository.'
+    required: false
+    default: ''
+  token:
+    description: >-
+      Token used to write the tag refs. It needs `contents: write` on the repository, so the job
+      needs that permission too. Pass a PAT or app token instead when a ruleset protects the tags in
+      a way the default token cannot satisfy.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  created:
+    description: 'The tags that did not exist and were created, space separated.'
+    value: ${{ steps.move.outputs.created }}
+  moved:
+    description: 'The tags that already existed and were repointed, space separated.'
+    value: ${{ steps.move.outputs.moved }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Create or move the tags
+      id: move
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so a tag name is data and
+        # never part of the program.
+        INPUT_TAGS: ${{ inputs.tags }}
+        INPUT_SHA: ${{ inputs.sha }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const { run } = require(`${process.env.ACTION_PATH}/move.js`)
+          await run({ github, core, env: process.env })

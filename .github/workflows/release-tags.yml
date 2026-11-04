@@ -1,0 +1,62 @@
+name: Move floating version tags
+
+# This repo's own release automation, and the example other repos copy.
+#
+# Consuming repos pin a floating tag ("uses: stellarwp/plugin-toolbox/.github/actions/setup-slic@v1"),
+# so every published release has to move v<major> and v<major>.<minor> onto the released commit.
+#
+# The work is split into two actions so that either half can be used on its own:
+# resolve-floating-tags works out which tags the version should own, move-git-tags writes them. To
+# run this in another repo, copy this file and replace the local `uses:` paths with
+# `stellarwp/plugin-toolbox/.github/actions/<action>@v1`.
+#
+# Run it locally: you cannot, it only makes sense against real refs. Check a release afterwards
+# with `gh api repos/stellarwp/plugin-toolbox/git/ref/tags/v1 --jq .object.sha`.
+
+on:
+  release:
+    types: [published]
+
+# Two releases published close together would otherwise read the tag list and write to it at the
+# same time, and the later write would win regardless of which release is newer. One group for the
+# whole workflow serialises them.
+#
+# `queue: max` because the default, `single`, keeps only one run pending and cancels the one already
+# waiting. Publishing three releases at once would move the tags for the first and the last, and
+# silently drop the middle.
+concurrency:
+  group: ${{ github.workflow }}
+  queue: max
+
+permissions:
+  contents: read
+
+jobs:
+  move-floating-tags:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # move-git-tags writes the tag refs
+    steps:
+      # Only so that the two `uses: ./` paths below resolve. Neither action reads the working tree,
+      # so a repo calling them by their `@v1` path needs no checkout at all.
+      #
+      # No ref on purpose: the actions run at the released commit, not at the version on the default
+      # branch. A release event reads this workflow from the released commit too, so the workflow and
+      # the actions it calls are always the same revision.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          # Nothing here runs git. Both actions below write through the API with the token they are
+          # handed, so keeping credentials in .git/config would only leave them for a later step.
+          persist-credentials: false
+
+      - name: Resolve the floating tags for this release
+        id: floating
+        uses: ./.github/actions/resolve-floating-tags
+        with:
+          tag: ${{ github.event.release.tag_name }}
+
+      - name: Move them onto the released commit
+        uses: ./.github/actions/move-git-tags
+        with:
+          tags: ${{ steps.floating.outputs.tags }}

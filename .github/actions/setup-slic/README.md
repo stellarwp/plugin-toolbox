@@ -86,7 +86,7 @@ If Composer runs before this action, update it before that earlier step too. See
 | `php-version` | recommended | slic resolves it | PHP version to set in slic, e.g. `8.3`. See [PHP version](#php-version) |
 | `host-php-version` | no | active host PHP, otherwise `8.3` | Host PHP version used by Slic's CLI. Setup also installs current compatible Composer 2 and disables host coverage drivers. |
 | `here-dir` | no | the workspace | Plugin-checkout parent, themes directory, or site root. See [Checkout layout](#checkout-layout) |
-| `ref` | no | `main` | slic branch, tag or commit |
+| `ref` | no | `2.5.1` | slic branch, tag or commit |
 | `slic-repository` | no | `stellarwp/slic` | Repository to check slic out from |
 | `slic-path` | no | `slic` | Path in the workspace to check slic out into |
 | `wp-version` | no | `''` | `latest`, an explicit version like `6.6`, or `''` to keep the image's version |
