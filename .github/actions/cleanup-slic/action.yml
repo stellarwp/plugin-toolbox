@@ -1,0 +1,39 @@
+name: Clean up slic
+description: Removes the stack configured by setup-slic and the SSH agent it owns
+
+runs:
+  using: composite
+  steps:
+    - name: Clean up slic resources
+      if: always()
+      shell: bash
+      run: |
+        status=0
+
+        if [ "${SLIC_TOOLBOX_STACK_CONFIGURED:-}" = "true" ] && [ -n "${SLIC_BIN:-}" ]; then
+          if "${SLIC_BIN}" down; then
+            echo "SLIC_TOOLBOX_STACK_CONFIGURED=" >> "$GITHUB_ENV"
+          else
+            status=$?
+          fi
+        fi
+
+        # Clear each ownership marker independently so partial cleanup can be retried.
+        # Never stop an agent supplied by the caller, even if SSH_AUTH_SOCK changed.
+        if [ -n "${SLIC_TOOLBOX_SSH_AGENT_PID:-}" ]; then
+          if SSH_AGENT_PID="${SLIC_TOOLBOX_SSH_AGENT_PID}" ssh-agent -k > /dev/null 2>&1; then
+            echo "SLIC_TOOLBOX_SSH_AGENT_PID=" >> "$GITHUB_ENV"
+          else
+            status=$?
+          fi
+        fi
+
+        if [ -n "${SLIC_TOOLBOX_SSH_AGENT_DIR:-}" ]; then
+          if rm -f "${SLIC_TOOLBOX_SSH_AGENT_DIR}/agent.sock" && rmdir "${SLIC_TOOLBOX_SSH_AGENT_DIR}"; then
+            echo "SLIC_TOOLBOX_SSH_AGENT_DIR=" >> "$GITHUB_ENV"
+          else
+            status=$?
+          fi
+        fi
+
+        exit "${status}"
