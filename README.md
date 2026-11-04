@@ -119,7 +119,7 @@ Three drawers in the toolbox. You can use any one without the others.
 
 | Layer | Lives in | What's in it |
 |---|---|---|
-| Composite actions | `.github/actions/` | Small single-purpose steps with no opinions: `setup-slic`, `setup-bun`, `setup-node`, `prepare-matrix`, `check-php-changes`, `smart-checkout`, `process-changelog`, `generate-pot` |
+| Composite actions | `.github/actions/` | Small single-purpose steps with no opinions: `setup-slic`, `setup-bun`, `setup-node`, `prepare-matrix`, `check-php-changes`, `smart-checkout`, `process-changelog`, `generate-pot`, `zip-name`, `release-zip` |
 | Reusable workflows | `.github/workflows/` | Full jobs built from the actions (standards, analysis, tests, zip, release prep). Most repos will only touch this layer. |
 | File sync | `templates/` + `.github/sync.yml` | Files that must exist in the target repo, grouped by brand and repo type |
 
@@ -170,6 +170,7 @@ Each phase ends with something people can actually use.
 - [x] Add `release-prep`: version bump, TBD replacement and changelog through pup and the changelogger action, committed to the release branch through the GitHub API. A caller to copy is in `templates/workflows/release-prep.yml`.
 - [x] Add `release-merge`: the release branch into the base branch, the base back into develop, each step safe to rerun and a conflict reported with a `MERGE_CONFLICT` line.
 - [x] Add `release-publish`: the GitHub release for a version at a commit, with a title, notes from a file and assets uploaded before the release is public, skipped when it already exists. The complete deploy workflow to copy, both actions with the build between them, is `templates/workflows/release.yml`.
+- [x] Add `zip-name` and `release-zip`: the zip's name before the build, with a pre-release label (`dev`, `alpha`, `beta`, `rc`) and an optional build number, then `pup build`, `check`, `i18n` and `package` for that version. What `stellarwp/github-actions`' `zip.yml` does, as two actions so the bucket can be asked for the name first. The caller to copy, with the S3 check, the upload, the Slack notice and the artifact around them, is `templates/workflows/zip.yml`.
 - [ ] Turn every hard-coded repo name, slug, or branch pattern into an input.
 - [ ] Self-checks: actionlint everything, unit test anything with real logic.
 - [ ] Tag `v1.0.0`.
@@ -180,7 +181,7 @@ Each phase ends with something people can actually use.
 - [ ] `analysis.yml`: PHPStan and the PHP compat matrix.
 - [ ] `tests.yml`: slic suites via `prepare-matrix`, with LD's cheap/expensive split. Review TEC's paused [#51](https://github.com/the-events-calendar/actions/pull/51) first so that work isn't lost.
 - [ ] `changelog.yml`: the changelogger check.
-- [ ] `zip.yml`: reconcile TEC's and LD's versions.
+- [ ] `zip.yml`: a `workflow_call` wrapper for the `zip-name` and `release-zip` actions, so the copies of `templates/workflows/zip.yml` become one `uses:` line. What LearnDash's version adds on top (the size comparison, the pull request comment) is brand policy and stays in its file.
 - [ ] `release-prep.yml`: a `workflow_call` wrapper for the `release-prep` action, plus the tested-up-to bump it does not do yet.
 - [ ] `release-tags.yml`: a `workflow_call` wrapper for the floating tag actions, so a repo gets a `uses:` instead of copying the workflow. The actions have to be referenced by full path, not `./`, because a relative path in a called workflow resolves against the caller.
 - [ ] Document each in `docs/continuous-integration.md` with its local command.
