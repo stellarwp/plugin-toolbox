@@ -175,7 +175,7 @@ download.
 | `branch-prefixes` | no | `["release/", "hotfix/", "bucket/"]` | The prefixes `branch` has to start with, as a JSON array. Empty keeps the default; `[]` turns the check off. See [Branches it refuses](#branches-it-refuses) |
 | `version` | yes | | The version to prepare, e.g. `4.17.0`. See [Versions it refuses](#versions-it-refuses) |
 | `date` | no | today, in UTC | The changelog date as `YYYY-MM-DD`. Empty or `today` writes today |
-| `token` | no | `github.token` | The token the commit is created with. See [Committing](#committing) |
+| `token` | no | `github.token` | The token the tag is read with and the commit is created with. See [Versions it refuses](#versions-it-refuses) and [Committing](#committing) |
 | `pup-version` | no | `latest` | The pup release to run: a number such as `2.0.0`, or `latest` for the newest. See [Which pup runs](#which-pup-runs) |
 
 ## Outputs
@@ -267,7 +267,8 @@ a commit made with `GITHUB_TOKEN`.
 
 Two [actions/github-script](https://github.com/actions/github-script) steps run `release-prep.js`,
 with the changelogger action between them. The first validates the inputs, the `.puprc` and the
-changelogger strategy, then runs pup. The second commits through the API. github-script supplies
+changelogger strategy, reads the version's tag through the API to refuse one that exists, then runs
+pup. The second commits through the API. github-script supplies
 the Node runtime, `exec` and the `github` client, built from `token`; there is no dependency
 to install and no bundle to build.
 
