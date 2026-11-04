@@ -136,7 +136,7 @@ pup names the zip after the version, the commit time and the commit hash, for ex
 reusable workflow asks pup for the same name again after the build, and adds it to `zip-link-base`
 (`https://evnt.is/test-zip?file=` by default, the public link to the packaging bucket).
 
-It asks with the shared [pup](../pup/) action, which downloads the pup release named by
+It asks with the shared [zip-name](../zip-name/) action, which downloads the pup release named by
 `pup-version` (`2.0.0` by default) and reads the name from it. **Set `pup-version` to the release
 your `composer pup` script downloads.** The zip workflow builds the zip with the repository's own
 pup, and a name made by another release could differ from it, which would make the link point at a

@@ -240,16 +240,16 @@ jobs:
           coverage: none
 
       # pup names the zip after the version, the commit time and the commit hash, and the shared
-      # zip workflow has no outputs, so the name is asked of pup again rather than rebuilt here.
-      # Same release, same commands, same commit, same name.
+      # zip workflow has no outputs, so the name is asked of the zip-name action again rather than
+      # rebuilt here. Same pup release, same commit, same name as the zip workflow's QA build.
       - name: Ask pup for the zip name
         id: pup
         if: ${{ inputs.zip-url == '' }}
-        uses: $/.github/actions/pup
+        uses: $/.github/actions/zip-name
         with:
+          production: 'no'
+          prerelease: dev
           pup-version: ${{ inputs.pup-version }}
-          read: zip-name
-          dev: 'true'
 
       - name: Find the zip
         id: zip
