@@ -111,7 +111,8 @@ And at the end, a name from `pup zip-name` that does not end in `.<version>`, wh
 is not the one the S3 check and the upload would look for.
 
 With `production: yes`, `prerelease` and `sequence` are ignored whatever they hold, not read and
-not refused: the action writes a warning naming what the form carried, and names the clean zip.
+not refused: when `prerelease` is not `dev` or `sequence` is not empty, the action writes a warning
+naming what the form carried; either way it names the clean zip.
 `production` is the master switch; a form filled in by habit, or with a typo in `sequence`, still
 produces the right production build.
 
