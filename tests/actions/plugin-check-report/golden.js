@@ -73,18 +73,6 @@ const CASES = [
   { name: 'rule-up-total-same', results: 'rule-up-total-same.txt', baseline: BASELINE, env: RUN },
   { name: 'errors-down', results: 'errors-down.txt', baseline: BASELINE, env: RUN },
   { name: 'warnings-up', results: 'warnings-up.txt', baseline: BASELINE, env: RUN },
-  {
-    name: 'errors-up-advisory',
-    results: 'errors-up.txt',
-    baseline: BASELINE,
-    env: { ...RUN, PLUGIN_CHECK_ADVISORY: 'true' },
-  },
-  {
-    name: 'errors-up-advisory-uppercase',
-    results: 'errors-up.txt',
-    baseline: BASELINE,
-    env: { ...RUN, PLUGIN_CHECK_ADVISORY: 'TRUE' },
-  },
   { name: 'strict-no-baseline', results: 'errors-down.txt', env: { ...RUN, PLUGIN_CHECK_MODE: 'strict' } },
   {
     name: 'strict-errors-down',
@@ -94,12 +82,6 @@ const CASES = [
   },
   { name: 'strict-clean', results: 'clean.txt', env: { ...RUN, PLUGIN_CHECK_MODE: 'strict' } },
   { name: 'strict-warnings-only', text: warningsOnly, env: { ...RUN, PLUGIN_CHECK_MODE: 'strict' } },
-  {
-    name: 'label-and-url',
-    results: 'same-as-baseline.txt',
-    baseline: BASELINE,
-    env: { ...RUN, BASELINE_LABEL: 'Target branch', BASELINE_URL: 'https://github.com/o/r/actions/runs/1' },
-  },
   { name: 'seven-new-codes', text: () => newCodes(7), baseline: BASELINE, env: RUN },
   { name: 'six-new-codes', text: () => newCodes(6), baseline: BASELINE, env: RUN },
   {

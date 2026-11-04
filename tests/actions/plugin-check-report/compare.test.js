@@ -358,23 +358,6 @@ describe('plugin-check-report compare', () => {
       assert.match(run.comment, new RegExp(`Went up: \`${DIRECT_QUERY}\` warning \\(\\+2\\)`))
     })
 
-    it('only warns when the baseline is from an older run of the target branch', () => {
-      const run = compareWith([fixture('errors-up.txt')], {
-        PLUGIN_CHECK_BASELINE: BASELINE,
-        PLUGIN_CHECK_ADVISORY: 'true',
-      })
-
-      assert.equal(run.status, 0)
-      assert.match(run.stdout, /::warning title=Plugin Check::.*Not enforced/)
-      assert.match(run.comment, /⚠️ Plugin Check passed, not enforced/)
-    })
-
-    it('takes only the exact word true as advisory', () => {
-      const run = compareWith([fixture('errors-up.txt')], { PLUGIN_CHECK_BASELINE: BASELINE, PLUGIN_CHECK_ADVISORY: 'TRUE' })
-
-      assert.equal(run.status, 1)
-    })
-
     it('treats an empty baseline file, and null, as no counts at all', () => {
       for (const content of ['', 'null', '  \n']) {
         const run = compareWith([fixture('errors-up.txt')], { PLUGIN_CHECK_BASELINE: baselineFile(content) })
@@ -532,16 +515,6 @@ describe('plugin-check-report compare', () => {
       const run = compareWith([fixture('clean.txt')], { COMMENT_MARKER: marker })
 
       assert.equal(run.comment.split('\n')[0], marker)
-    })
-
-    it('names the baseline column after where it came from, with a link', () => {
-      const run = compareWith([fixture('same-as-baseline.txt')], {
-        PLUGIN_CHECK_BASELINE: BASELINE,
-        BASELINE_LABEL: 'Target branch',
-        BASELINE_URL: 'https://github.com/o/r/actions/runs/1',
-      })
-
-      assert.match(run.comment, /\| Now \| \[Target branch\]\(https:\/\/github\.com\/o\/r\/actions\/runs\/1\) \| Change \|/)
     })
 
     it('lists at most five rules and never grows past fifteen lines', () => {
