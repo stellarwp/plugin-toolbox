@@ -390,17 +390,27 @@ jobs:
     # "start" is skipped for forks and non-pull-request runs, which would skip this job too.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
-    # Up to 20 minutes of it can be waiting for the target branch's run.
-    timeout-minutes: 30
+    timeout-minutes: 10
 
-    # Writes one sticky comment on the pull request, and reads an earlier run's artifact as the
-    # baseline. No checkout: the scripts come with the action.
+    # Writes one sticky comment on the pull request, and reads the repository's baseline file. The
+    # scripts come with the action.
     permissions:
-      actions: read
+      contents: read
       issues: write
       pull-requests: write
 
     steps:
+      # Only the baseline file, nothing else of the repository. It is JSON that the compare reads
+      # and never runs. The checkout is the pull request's merge commit, so a pull request that
+      # changes the file is compared with its own change, which a reviewer sees in the diff.
+      - name: Check out the baseline file
+        uses: actions/checkout@v7
+        with:
+          path: source
+          sparse-checkout: .plugin-check-baseline.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Set file paths
         run: |
           {
@@ -432,6 +442,7 @@ jobs:
           comment-file: ${{ env.COMMENT_BODY }}
           comment-marker: ${{ env.COMMENT_MARKER }}
           mode: ${{ inputs.mode }}
+          baseline-file: ${{ github.workspace }}/source/.plugin-check-baseline.json
 
       - name: Post the result
         if: ${{ !cancelled() && env.COMMENT == 'true' }}
