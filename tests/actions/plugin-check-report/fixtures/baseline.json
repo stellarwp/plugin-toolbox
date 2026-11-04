@@ -1,0 +1,9 @@
+{
+  "errors": {
+    "WordPress.Security.EscapeOutput.OutputNotEscaped": 2,
+    "WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents": 1
+  },
+  "warnings": {
+    "WordPress.DB.DirectDatabaseQuery.DirectQuery": 1
+  }
+}
