@@ -266,9 +266,9 @@ a commit made with `GITHUB_TOKEN`.
 ## How it runs
 
 Two [actions/github-script](https://github.com/actions/github-script) steps run `release-prep.js`,
-with the changelogger action between them. The first validates the inputs, the `.puprc` and the
-changelogger strategy, reads the version's tag through the API to refuse one that exists, then runs
-pup. The second commits through the API. github-script supplies
+with the changelogger action between them. The first validates the inputs and the changelogger
+strategy, reads the version's tag through the API to refuse one that exists, checks the `.puprc`,
+then runs pup. The second commits through the API. github-script supplies
 the Node runtime, `exec` and the `github` client, built from `token`; there is no dependency
 to install and no bundle to build.
 
