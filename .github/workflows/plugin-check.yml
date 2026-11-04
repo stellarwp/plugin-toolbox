@@ -468,7 +468,22 @@ jobs:
           path: source
           sparse-checkout: .plugin-check-baseline.json
           sparse-checkout-cone-mode: false
+          # The merge commit and its two parents, to see whether the pull request changes the file.
+          fetch-depth: 2
           persist-credentials: false
+
+      # The comment says so when a pull request changes the baseline: it is compared with its own
+      # change, which a reviewer should look at.
+      - name: Check whether the pull request changes the baseline file
+        id: changed
+        if: ${{ github.event_name == 'pull_request' }}
+        working-directory: source
+        run: |
+          if git diff --quiet HEAD^1 HEAD -- .plugin-check-baseline.json; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set file paths
         run: |
@@ -515,6 +530,7 @@ jobs:
           baseline-file: ${{ github.workspace }}/source/.plugin-check-baseline.json
           base-results: ${{ needs.plan.outputs.base == 'true' && env.BASE_RESULTS || '' }}
           base-required: ${{ needs.plan.outputs.base == 'true' }}
+          baseline-changed: ${{ steps.changed.outputs.changed == 'true' }}
 
       - name: Post the result
         if: ${{ !cancelled() && env.COMMENT == 'true' }}

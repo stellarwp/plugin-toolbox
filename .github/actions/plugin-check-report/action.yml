@@ -59,6 +59,12 @@ inputs:
       passes as "no baseline".
     required: false
     default: 'false'
+  baseline-changed:
+    description: >-
+      `true` when the pull request changes the baseline file. The comment then says so, because the
+      pull request is compared with its own change and a reviewer should look at the file's diff.
+    required: false
+    default: 'false'
 
 outputs:
   artifact-url:
@@ -118,6 +124,7 @@ runs:
         PLUGIN_CHECK_BASELINE: ${{ inputs.baseline-file }}
         PLUGIN_CHECK_BASE_RESULTS: ${{ inputs.base-results }}
         PLUGIN_CHECK_BASE_REQUIRED: ${{ inputs.base-required }}
+        PLUGIN_CHECK_BASELINE_CHANGED: ${{ inputs.baseline-changed }}
         COMMENT_MARKER: ${{ steps.paths.outputs.marker }}
         ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
