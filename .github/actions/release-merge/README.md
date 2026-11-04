@@ -122,6 +122,11 @@ fails the step without the marker; running the step again is enough.
 The branches are checked too: each has to exist in the repository, the base and develop have to be
 two different branches (when there is a develop), and the release branch cannot be either of them.
 
+The release branch's tip is read once, and that commit is what the version files are read at, what
+a published tag is compared against, and what is merged into the base. A commit pushed to the branch
+after the check is not merged by that run; run the step again for it. The branch name appears in
+the merge message and in the messages, not in what the API is asked.
+
 ## Inputs
 
 | Input | Required | Default | What it is |

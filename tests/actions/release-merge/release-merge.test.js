@@ -66,8 +66,9 @@ const API = {
   tagObject: `${REPO}/git/tags/${TAG_OBJECT}`,
   releaseByTag: `${REPO}/releases/tags/4.17.0`,
   branch: (name) => `${REPO}/branches/${encodeURIComponent(name)}`,
-  file: (name, branch = 'release/M26.test') => `${REPO}/contents/${name}?ref=${encodeURIComponent(branch)}`,
-  compare: (sha) => `${REPO}/compare/${encodeURIComponent(`release/M26.test...${sha}`)}`,
+  // The files are read at the release branch's tip, the commit, not at the branch by name.
+  file: (name, ref = TIP['release/M26.test']) => `${REPO}/contents/${name}?ref=${encodeURIComponent(ref)}`,
+  compare: (sha, ref = TIP['release/M26.test']) => `${REPO}/compare/${encodeURIComponent(`${ref}...${sha}`)}`,
   merges: `${REPO}/merges`,
 }
 
@@ -311,7 +312,8 @@ describe('release-merge', () => {
         `POST ${API.merges}`,
       ])
       assert.deepStrictEqual(mergesAsked(requests), [
-        { base: 'main', head: 'release/M26.test', commit_message: 'Merge release/M26.test into main' },
+        // The tip the version check read, not the branch by name: what was checked is what is merged.
+        { base: 'main', head: TIP['release/M26.test'], commit_message: 'Merge release/M26.test into main' },
         // The commit just made on main, not main by name: develop gets exactly what is released.
         { base: 'develop', head: MERGED.main, commit_message: 'Merge main back into develop (release/M26.test)' },
       ])
@@ -325,6 +327,50 @@ describe('release-merge', () => {
         conflict: '',
       })
       assert.match(summary(), /merged `release\/M26\.test` into `main`, merged `main` into `develop`/)
+    })
+
+    it('checks, compares and merges the tip it read, so a commit pushed to the branch meanwhile is not merged', async (t) => {
+      // The branch by name answers with a later commit that holds another version, as a push between
+      // the tip read and the merge would leave it. Nothing the action does may reach it.
+      const pushed = '9999999999999999999999999999999999999999'
+      const byName = ['.puprc', 'plugin.php', 'readme.txt'].map((name) => ({
+        method: 'GET',
+        path: API.file(name, 'release/M26.test'),
+        body: {
+          type: 'file',
+          path: name,
+          encoding: 'base64',
+          content: Buffer.from(name === '.puprc' ? JSON.stringify(PUPRC) : 'Version: 4.18.0\nStable tag: 4.18.0\n').toString('base64'),
+        },
+      }))
+      const { github, requests } = await octokitFor(
+        repositoryWith({
+          tag: PUBLISHED,
+          extra: [
+            ...byName,
+            { method: 'GET', path: API.compare(TAG_COMMIT), body: { status: 'ahead' } },
+            { method: 'GET', path: API.compare(TAG_COMMIT, 'release/M26.test'), body: { status: 'diverged' } },
+            { method: 'GET', path: API.branch('release/M26.test'), body: { commit: { sha: pushed } } },
+          ],
+        })
+      )
+      const { core } = await coreWithOutputs(t)
+
+      await runMerge({ github, core, env: mergeEnv() })
+
+      const tip = TIP['release/M26.test']
+      assert.deepStrictEqual(
+        requested(requests).filter((line) => line.includes('/contents/') || line.includes('/compare/')),
+        [
+          `GET ${API.file('.puprc', tip)}`,
+          `GET ${API.file('plugin.php', tip)}`,
+          `GET ${API.file('readme.txt', tip)}`,
+          `GET ${API.compare(TAG_COMMIT, tip)}`,
+        ],
+        'every read names the tip, never the branch'
+      )
+      assert.strictEqual(mergesAsked(requests)[0].head, tip, 'the merge takes the tip that was checked')
+      assert.ok(!JSON.stringify(requests).includes(pushed), 'the later commit is never read or merged')
     })
 
     it('merges only into the base when develop-branch is empty, for a repository without develop', async (t) => {
@@ -466,7 +512,7 @@ describe('release-merge', () => {
       assert.deepStrictEqual(mergesAsked(requests), [])
     })
 
-    it('reads the version files from the release branch, not from the base', async (t) => {
+    it("reads the version files at the release branch's tip, not from the base", async (t) => {
       const { github, requests } = await octokitFor(repositoryWith())
       const { core } = await coreWithOutputs(t)
 
@@ -474,7 +520,7 @@ describe('release-merge', () => {
 
       const reads = requests.filter((request) => request.path.startsWith(`${REPO}/contents/`))
       assert.strictEqual(reads.length, 3)
-      assert.ok(reads.every((request) => request.path.endsWith('?ref=release%2FM26.test')), requested(reads).join('\n'))
+      assert.ok(reads.every((request) => request.path.endsWith(`?ref=${TIP['release/M26.test']}`)), requested(reads).join('\n'))
     })
 
     it('refuses a branch whose version file does not match the .puprc regex', async (t) => {

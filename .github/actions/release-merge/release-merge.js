@@ -171,7 +171,9 @@ async function readBranchTip({ github, owner, repo, branch }) {
  * @param {object} options.github The Octokit github-script supplies.
  * @param {string} options.owner  The repository owner.
  * @param {string} options.repo   The repository name.
- * @param {string} options.branch The branch, known to exist.
+ * @param {string} options.branch The branch, known to exist, for the message.
+ * @param {string} options.ref    The commit to read at: the branch's tip as it was read, so every
+ *                                read sees the same commit whatever is pushed to the branch meanwhile.
  * @param {string} options.file   The path in the repository.
  *
  * @throws {Error} When the read fails for any reason but 404.
@@ -179,10 +181,10 @@ async function readBranchTip({ github, owner, repo, branch }) {
  * @returns {Promise<string|null>} The contents, or null when the branch has no such file (or the
  *          path is a directory).
  */
-async function fileAt({ github, owner, repo, branch, file }) {
+async function fileAt({ github, owner, repo, branch, ref, file }) {
   let data
   try {
-    data = (await github.rest.repos.getContent({ owner, repo, path: file, ref: branch })).data
+    data = (await github.rest.repos.getContent({ owner, repo, path: file, ref })).data
   } catch (error) {
     if (isNotFound(error)) {
       return null
@@ -207,7 +209,8 @@ async function fileAt({ github, owner, repo, branch, file }) {
  * @param {object} options.github  The Octokit github-script supplies.
  * @param {string} options.owner   The repository owner.
  * @param {string} options.repo    The repository name.
- * @param {string} options.branch  The release branch.
+ * @param {string} options.branch  The release branch, for the messages.
+ * @param {string} options.ref     The commit to read the files at: the branch's tip as it was read.
  * @param {string} options.version The version to release, validated.
  *
  * @throws {Error} When the branch has no usable .puprc, a version file holds no version, or any of
@@ -215,8 +218,8 @@ async function fileAt({ github, owner, repo, branch, file }) {
  *
  * @returns {Promise<void>} Resolves when every version file holds `version`.
  */
-async function assertBranchHoldsVersion({ github, owner, repo, branch, version }) {
-  const read = (file) => fileAt({ github, owner, repo, branch, file })
+async function assertBranchHoldsVersion({ github, owner, repo, branch, ref, version }) {
+  const read = (file) => fileAt({ github, owner, repo, branch, ref, file })
   const files = readVersionFiles(await read('.puprc'), 'Nothing was merged.')
 
   for (const { file, regex } of files) {
@@ -255,7 +258,9 @@ async function assertBranchHoldsVersion({ github, owner, repo, branch, version }
  * @param {object} options.github The Octokit github-script supplies.
  * @param {string} options.owner  The repository owner.
  * @param {string} options.repo   The repository name.
- * @param {string} options.branch The branch.
+ * @param {string} options.branch The branch, for the message.
+ * @param {string} options.ref    The branch's tip as it was read, a hash: what the commit has to
+ *                                contain, so a push to the branch meanwhile changes nothing here.
  * @param {string} options.sha    The commit; a hash rather than the tag's name, which a branch of
  *                                the same name would shadow.
  *
@@ -263,9 +268,9 @@ async function assertBranchHoldsVersion({ github, owner, repo, branch, version }
  *
  * @returns {Promise<boolean>} True when the commit is the branch's tip or descends from it.
  */
-async function commitContainsBranch({ github, owner, repo, branch, sha }) {
+async function commitContainsBranch({ github, owner, repo, branch, ref, sha }) {
   try {
-    const { data } = await github.rest.repos.compareCommitsWithBasehead({ owner, repo, basehead: `${branch}...${sha}` })
+    const { data } = await github.rest.repos.compareCommitsWithBasehead({ owner, repo, basehead: `${ref}...${sha}` })
 
     return data.status === 'ahead' || data.status === 'identical'
   } catch (error) {
@@ -373,18 +378,23 @@ async function runMerge({ github, core, env }) {
 
   const { tagged, tagSha, releaseUrl } = await runPreflight({ github, owner, repo, version })
 
-  for (const name of develop === null ? [branch, base] : [branch, base, develop]) {
+  // The release branch's tip is read once and that commit is what the version files are read at,
+  // what the tag is compared against and what is merged. Read by name at each step, a commit pushed
+  // to the branch between the version check and the merge would reach the base unchecked; a tag
+  // named like the branch could also change what a read by name returns.
+  const branchSha = await readBranchTip({ github, owner, repo, branch })
+  for (const name of develop === null ? [base] : [base, develop]) {
     await readBranchTip({ github, owner, repo, branch: name })
   }
 
-  await assertBranchHoldsVersion({ github, owner, repo, branch, version })
+  await assertBranchHoldsVersion({ github, owner, repo, branch, ref: branchSha, version })
 
   // A tag with a published release is a retry only when that release came from this branch: its
   // commit then contains the branch, and the merges below find nothing to do. A tag that does not
   // contain the branch is an earlier release of the same version, which the branch was never bumped
   // past; merging it would put a second set of changes under a version that is already out.
   if (tagged) {
-    if (!(await commitContainsBranch({ github, owner, repo, branch, sha: tagSha }))) {
+    if (!(await commitContainsBranch({ github, owner, repo, branch, ref: branchSha, sha: tagSha }))) {
       throw new Error(
         `The tag ${version} already exists and does not contain ${branch}: ${version} was released ` +
           `from another commit, and the branch was never bumped past it. Give the release a new ` +
@@ -400,7 +410,7 @@ async function runMerge({ github, core, env }) {
     owner,
     repo,
     into: base,
-    head: branch,
+    head: branchSha,
     message: mergeMessage(branch, base),
     label: branch,
   })
