@@ -290,7 +290,8 @@ async function coreWithOutputs(t) {
  * A rule matches on `command` and, when it has one, on `args`, a RegExp tested against the
  * arguments joined by spaces. The first match wins. It answers with `exitCode` (default 0),
  * `stdout` and `stderr`, and runs `effect(args, options)` first when it has one, which is how a test
- * stands in for a file the command would have written.
+ * stands in for a file the command would have written. `stdout` may be a function of the arguments,
+ * for a command whose answer repeats one of them, as `pup zip-name <version>` does.
  *
  * A call no rule matches answers exit code 127, the shell's "command not found", so a call the test
  * did not plan for fails rather than passing silently.
@@ -318,7 +319,11 @@ function recordingExec(rules = []) {
     }
 
     const result = rule
-      ? { exitCode: rule.exitCode ?? 0, stdout: rule.stdout ?? '', stderr: rule.stderr ?? '' }
+      ? {
+          exitCode: rule.exitCode ?? 0,
+          stdout: (typeof rule.stdout === 'function' ? rule.stdout(args) : rule.stdout) ?? '',
+          stderr: rule.stderr ?? '',
+        }
       : { exitCode: 127, stdout: '', stderr: `${command}: no test rule answers this call` }
 
     if (result.exitCode !== 0 && !options.ignoreReturnCode) {

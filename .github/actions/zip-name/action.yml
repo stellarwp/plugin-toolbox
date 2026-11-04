@@ -1,0 +1,94 @@
+# Resolves the name of the zip a build will produce, before the build: the version the checkout
+# holds, the pre-release suffix of a QA build, and the slug pup gives the zip. A caller uses the
+# name to ask the S3 bucket whether the zip already exists and skip the build, then hands the
+# version to release-zip, which builds and packages it.
+#
+# The checks live in zip-name.js, run by actions/github-script, so there is no dependency to install
+# and nothing to build. The version and the slug come from pup itself, downloaded into the runner's
+# temp directory, so the rules in .puprc are read once, by the tool that packages.
+name: Zip name
+description: Resolves the version and the zip name a build will produce, with a pre-release suffix for a QA build
+
+inputs:
+  production:
+    description: >-
+      `yes` for a production build, named `<slug>.<version>.zip` with the version files untouched;
+      `no` for a QA build, whose version carries a pre-release suffix. With `yes`, `prerelease` and
+      `sequence` are ignored with a warning. Anything else fails before anything runs.
+    required: false
+    default: 'no'
+  prerelease:
+    description: >-
+      The label a QA build is named with: `dev`, `alpha`, `beta` or `rc`. `dev` with no `sequence`
+      is `-dev-<timestamp>-<hash>`, the suffix `pup get-version --dev` gives, so the default name is
+      the one every QA build had until now. Anything else fails before anything runs.
+    required: false
+    default: 'dev'
+  sequence:
+    description: >-
+      The number of a build numbered by hand, digits from 1 with no leading zero: `2` names the build
+      `<version>-rc-2`. Empty names it after the commit, `<version>-rc-<timestamp>-<hash>`, unique
+      per commit. Anything else fails before anything runs.
+    required: false
+    default: ''
+  expected-version:
+    description: >-
+      When set, the version the files .puprc lists have to hold, before any suffix. A different
+      version prints `VERSION_MISMATCH` on a line of its own and fails the step, so a build of the
+      wrong ref stops before it starts.
+    required: false
+    default: ''
+  pup-version:
+    description: >-
+      The pup release that reads the version and names the zip: a release number, such as 2.0.0,
+      or 'latest' for the newest release. It has to ship a pup.phar asset, which every release from
+      1.2.4 to 2.0.0 does; a release without one fails the step and names a pin to use instead.
+    required: false
+    default: 'latest'
+  token:
+    description: >-
+      Authenticates the 'latest' lookup of pup-version against the GitHub API, so the runner's shared
+      quota is not spent. A pinned pup-version never uses it.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  base-version:
+    description: 'The version the files .puprc lists hold, e.g. `4.19.0.1`.'
+    value: ${{ steps.name.outputs.base-version }}
+  version:
+    description: >-
+      The version the build carries: the base version for a production build, the base version with
+      the pre-release suffix for a QA build, e.g. `4.19.0.1-rc-1792689067-fbcf8681`. Pass it to
+      release-zip.
+    value: ${{ steps.name.outputs.version }}
+  zip-name:
+    description: 'The zip name without `.zip`, as `pup zip-name` gives it, e.g. `give.4.19.0.1-rc-1792689067-fbcf8681`.'
+    value: ${{ steps.name.outputs.zip-name }}
+  prerelease:
+    description: 'The pre-release label the build carries: `dev`, `alpha`, `beta` or `rc`. Empty for a production build.'
+    value: ${{ steps.name.outputs.prerelease }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check the inputs, read the version and name the zip
+      id: name
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so an input is data and
+        # never part of the program.
+        INPUT_PRODUCTION: ${{ inputs.production }}
+        INPUT_PRERELEASE: ${{ inputs.prerelease }}
+        INPUT_SEQUENCE: ${{ inputs.sequence }}
+        INPUT_EXPECTED_VERSION: ${{ inputs.expected-version }}
+        INPUT_PUP_VERSION: ${{ inputs.pup-version }}
+        INPUT_TOKEN: ${{ inputs.token }}
+      with:
+        script: |
+          const { runZipName } = require(`${process.env.ACTION_PATH}/zip-name.js`)
+          await runZipName({ core, exec, env: process.env })
