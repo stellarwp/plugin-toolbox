@@ -32,7 +32,10 @@ const path = require('node:path')
  * @returns {Response} The response for the fetch to return.
  */
 function jsonResponse({ status = 200, body = {}, headers = {} }) {
-  return new Response(JSON.stringify(body), {
+  // A 204 or 304 has no body, and Response refuses one.
+  const content = status === 204 || status === 304 ? null : JSON.stringify(body)
+
+  return new Response(content, {
     status,
     headers: { 'content-type': 'application/json', ...headers },
   })
