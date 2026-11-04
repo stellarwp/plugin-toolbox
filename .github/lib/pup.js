@@ -13,6 +13,7 @@
  * means a change in the actions that call it.
  */
 
+const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 
@@ -219,22 +220,66 @@ function noPharError(release, what) {
 }
 
 /**
- * Downloads the phar of a pup release into the runner's temp directory, so it never ends up in the
- * checkout or in a commit.
+ * Where the phar of a pup release lives on the runner: its temp directory, so it never ends up in
+ * the checkout or in a commit, and the same path for every action of the job, so one download
+ * serves them all.
+ *
+ * @param {object} env     The step environment, for RUNNER_TEMP.
+ * @param {string} release The resolved pup release tag.
+ *
+ * @returns {string} The path.
+ */
+function pharPath(env, release) {
+  return path.join(env.RUNNER_TEMP || os.tmpdir(), `pup-${release}.phar`)
+}
+
+/**
+ * Whether a phar an earlier step downloaded is there to reuse. An empty file is not: it is what a
+ * download that was cut off leaves.
+ *
+ * @param {string} phar The path.
+ *
+ * @returns {boolean} True for a file with content.
+ */
+function pharExists(phar) {
+  try {
+    return fs.statSync(phar).size > 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Downloads the phar of a pup release into the runner's temp directory, unless an earlier step of
+ * the job already did. A download that fails leaves no file behind, so the next step does not
+ * reuse half a phar.
  *
  * @param {object} options
  * @param {object} options.exec    The @actions/exec toolkit.
  * @param {object} options.env     The step environment, for RUNNER_TEMP.
  * @param {string} options.release The resolved pup release tag.
+ * @param {object} options.core    The @actions/core toolkit, to say when the phar is reused.
  *
  * @throws {Error} When the download fails.
  *
- * @returns {Promise<string>} The path of the downloaded phar.
+ * @returns {Promise<string>} The path of the phar.
  */
-async function downloadPhar({ exec, env, release }) {
-  const phar = path.join(env.RUNNER_TEMP || os.tmpdir(), `pup-${release}.phar`)
+async function downloadPhar({ exec, env, release, core }) {
+  const phar = pharPath(env, release)
 
-  await runOrFail(exec, 'curl', ['-fsSL', '--retry', '3', '-o', phar, pupDownloadUrl(release)], {}, `Downloading pup ${release}`)
+  if (pharExists(phar)) {
+    core?.info(`Reusing pup ${release}, downloaded by an earlier step of this job.`)
+
+    return phar
+  }
+
+  try {
+    await runOrFail(exec, 'curl', ['-fsSL', '--retry', '3', '-o', phar, pupDownloadUrl(release)], {}, `Downloading pup ${release}`)
+  } catch (error) {
+    fs.rmSync(phar, { force: true })
+
+    throw error
+  }
 
   return phar
 }
@@ -270,6 +315,7 @@ function pupRunner(exec, phar) {
  * @param {object}   options.exec       The @actions/exec toolkit.
  * @param {object}   options.env        The step environment: INPUT_PUP_VERSION, INPUT_TOKEN and
  *                                      RUNNER_TEMP.
+ * @param {object}   options.core       The @actions/core toolkit, for the log.
  * @param {Function} options.fetchImpl  What `fetch` to use for `latest`; a test passes a stand-in.
  * @param {string}   options.what       What was not done, to close each error message.
  *
@@ -279,7 +325,7 @@ function pupRunner(exec, phar) {
  * @returns {Promise<{release: string, pup: Function}>} The release that runs and the function to
  *          run it with, as pupRunner builds it.
  */
-async function setupPup({ exec, env, fetchImpl = globalThis.fetch, what = 'Nothing was changed.' }) {
+async function setupPup({ exec, env, core, fetchImpl = globalThis.fetch, what = 'Nothing was changed.' }) {
   const release = await resolvePupRelease({
     version: validatePupVersion(env.INPUT_PUP_VERSION),
     token: env.INPUT_TOKEN || '',
@@ -287,11 +333,13 @@ async function setupPup({ exec, env, fetchImpl = globalThis.fetch, what = 'Nothi
     what,
   })
 
-  if ((await resolvePupDistribution({ exec, release, what })) !== 'phar') {
+  // A phar already on the runner is proof enough that the release ships one: the check of the
+  // release page is for the first download of the job.
+  if (!pharExists(pharPath(env, release)) && (await resolvePupDistribution({ exec, release, what })) !== 'phar') {
     throw noPharError(release, what)
   }
 
-  const phar = await downloadPhar({ exec, env, release })
+  const phar = await downloadPhar({ exec, env, release, core })
 
   return { release, pup: pupRunner(exec, phar) }
 }
@@ -322,6 +370,8 @@ module.exports = {
   pupReleaseUrl,
   resolvePupDistribution,
   noPharError,
+  pharPath,
+  pharExists,
   downloadPhar,
   pupRunner,
   setupPup,

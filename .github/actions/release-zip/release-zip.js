@@ -144,7 +144,7 @@ async function runZip({ core, exec, env, cwd = process.cwd(), fetchImpl = global
 
   readVersionFiles(readCheckoutFile(cwd, '.puprc'), WHAT)
 
-  const { pup } = await setupPup({ exec, env, fetchImpl, what: WHAT })
+  const { pup } = await setupPup({ exec, env, core, fetchImpl, what: WHAT })
 
   for (const args of pupCommands({ version, production, check, i18n })) {
     await pup(args, { cwd })

@@ -250,7 +250,7 @@ async function runZipName({ core, exec, env, cwd = process.cwd(), fetchImpl = gl
     )
   }
 
-  const { pup } = await setupPup({ exec, env, fetchImpl, what: WHAT })
+  const { pup } = await setupPup({ exec, env, core, fetchImpl, what: WHAT })
 
   const baseVersion = readPrintedVersion(
     await pup(['get-version'], { cwd, silent: true, noticesToStderr: true })

@@ -460,6 +460,46 @@ describe('zip-name', () => {
       assert.equal(outputs().version, `4.19.0.1-dev-${TIMESTAMP}-${HASH}`)
     })
 
+    it('reuses the phar an earlier step of the job downloaded, without checking or downloading again', async (t) => {
+      const { core, outputs, logged } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed())
+      const cwd = checkoutWith({ '.puprc': PUPRC })
+      const runnerTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'zip-name-runner-'))
+      fs.writeFileSync(path.join(runnerTemp, 'pup-2.0.0.phar'), '<?php // pup')
+
+      await runZipName({ core, exec, env: nameEnv({ RUNNER_TEMP: runnerTemp }), cwd })
+
+      assert.ok(!calls.some((call) => call.command === 'curl'), `no curl at all, got ${JSON.stringify(sequence(calls))}`)
+      assert.ok(sequence(calls)[0].startsWith(`php -d display_errors=stderr ${path.join(runnerTemp, 'pup-2.0.0.phar')} get-version`))
+      assert.match(logged(), /Reusing pup 2\.0\.0, downloaded by an earlier step/)
+      assert.equal(outputs()['base-version'], '4.19.0.1')
+    })
+
+    it('downloads again over an empty phar a cut-off download left, and leaves none behind when the download fails', async (t) => {
+      const runnerTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'zip-name-runner-'))
+      const phar = path.join(runnerTemp, 'pup-2.0.0.phar')
+      fs.writeFileSync(phar, '')
+      const { core } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(
+        allSucceed([
+          {
+            command: 'curl',
+            args: /fsSL/,
+            // curl writes what it got before the connection dropped, then exits non-zero.
+            effect: () => fs.writeFileSync(phar, '<?php // half'),
+            exitCode: 56,
+            stderr: 'Recv failure: Connection reset by peer',
+          },
+        ])
+      )
+      const cwd = checkoutWith({ '.puprc': PUPRC })
+
+      await assert.rejects(runZipName({ core, exec, env: nameEnv({ RUNNER_TEMP: runnerTemp }), cwd }), /Downloading pup 2\.0\.0 failed.*Connection reset/s)
+
+      assert.ok(sequence(calls).some((call) => call.startsWith('curl -fsSL')), 'an empty phar is not reused')
+      assert.equal(fs.existsSync(phar), false, 'the half-written phar is removed')
+    })
+
     it('gives a real commit the suffix pup get-version --dev gives it', async (t) => {
       // The two git reads run for real, against a repository made here; pup stays a stand-in. What
       // DevSuffix.php would build from the same commit is computed alongside and has to match.

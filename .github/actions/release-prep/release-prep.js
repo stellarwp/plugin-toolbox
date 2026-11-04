@@ -577,7 +577,7 @@ async function runPrepare({ github, core, exec, env, cwd = process.cwd(), fetchI
  * @returns {Promise<void>} Resolves once pup has run.
  */
 async function runPrepareWithPhar({ core, exec, cwd, env, pharRelease, version, branch }) {
-  const phar = await downloadPhar({ exec, env, release: pharRelease })
+  const phar = await downloadPhar({ exec, env, release: pharRelease, core })
   const pup = pupRunner(exec, phar)
 
   // A version lower than the one the branch already has would bump it backwards: a wrong version, or
