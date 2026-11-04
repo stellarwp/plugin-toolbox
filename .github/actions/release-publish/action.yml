@@ -19,9 +19,11 @@ inputs:
     required: true
   target:
     description: >-
-      The commit to publish at: a full commit hash, or a branch name for its tip. After release-merge,
-      pass its `base-sha` output; for a release a person merged by hand, the branch. The tag is made
-      at this commit, whatever the branch points to by the time this runs.
+      The commit to publish at: a full commit hash, or a branch name, which is resolved to its tip
+      when the action runs. After release-merge, pass its `base-sha` output. For a release a person
+      merged by hand, pass the commit of the checkout the assets were built from, not the branch: a
+      push after the checkout would be tagged with assets built from another commit. The README
+      shows how.
     required: true
   title:
     description: 'The release title. The version when empty.'

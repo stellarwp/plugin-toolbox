@@ -84,7 +84,7 @@ In this order, stopping at the first failure:
 | Input | Required | Default | What it is |
 |---|---|---|---|
 | `version` | yes | | The version being released: three or four numeric parts. It becomes the tag. |
-| `target` | yes | | The commit to publish at: a full commit hash, or a branch name for its tip. |
+| `target` | yes | | The commit to publish at: release-merge's `base-sha`, or the commit of the checkout the assets were built from. A branch name is resolved to its tip when the action runs. |
 | `title` | no | the version | The release title, e.g. `Maintenance Release 6.18.3`. |
 | `notes-file` | no | | A file in the checkout whose contents are the notes, e.g. this version's changelog entry. Empty: GitHub generates them. |
 | `files` | no | | Assets to attach, one path per line, relative to the checkout. |
