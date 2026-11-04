@@ -1,2 +1,0 @@
-::warning title=Plugin Check::WordPress.Security.EscapeOutput.OutputNotEscaped has 3 errors, an older run of the target branch has 2. Not enforced, because the target may have changed since.
-Plugin Check error counts are within the baseline.

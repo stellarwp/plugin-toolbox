@@ -402,14 +402,12 @@ function buildRows(now, base) {
  * @param {object}  input
  * @param {object[]} input.rows       From buildRows.
  * @param {string}  input.mode        `baseline` or `strict`.
- * @param {boolean} input.advisory    The baseline is from an older commit than the target, so more
- *                                    errors are only reported.
  * @param {boolean} input.noBaseline  There was nothing to compare with: only the totals count.
  *
  * @returns {object} `messages` (`{level, text}` in print order), `totals`, `wentUp`, `wentDown`,
  *          `errorsUp`, `upList` and `failed`.
  */
-function evaluate({ rows, mode, advisory, noBaseline }) {
+function evaluate({ rows, mode, noBaseline }) {
   const totals = { errorsBase: 0, errorsNow: 0, warningsBase: 0, warningsNow: 0 }
   const messages = []
   let failed = false
@@ -452,18 +450,11 @@ function evaluate({ rows, mode, advisory, noBaseline }) {
       }
 
       errorsUp++
-      if (advisory) {
-        messages.push({
-          level: 'warning',
-          text: `${shown} has ${found} errors, an older run of the target branch has ${allowed}. Not enforced, because the target may have changed since.`,
-        })
-      } else {
-        failed = true
-        messages.push({
-          level: 'error',
-          text: `${shown} has ${found} errors, the baseline has ${allowed}. The full list is in the plugin-check-results artifact.`,
-        })
-      }
+      failed = true
+      messages.push({
+        level: 'error',
+        text: `${shown} has ${found} errors, the baseline has ${allowed}. The full list is in the plugin-check-results artifact.`,
+      })
     } else if (found < allowed) {
       wentDown++
       messages.push({ level: 'notice', text: `${shown} (${kind}) went down from ${allowed} to ${found}.` })
@@ -509,13 +500,12 @@ function change(now, base) {
  * @param {string}  input.mode       `baseline` or `strict`.
  * @param {boolean} input.failed     The check fails.
  * @param {boolean} input.noBaseline Nothing was compared.
- * @param {boolean} input.advisory   The baseline is from an older run of the target branch.
  * @param {number}  input.errorsUp   How many rules have more errors.
  * @param {number}  input.errorsNow  This run's error total.
  *
  * @returns {string} The line.
  */
-function statusLine({ mode, failed, noBaseline, advisory, errorsUp, errorsNow }) {
+function statusLine({ mode, failed, noBaseline, errorsUp, errorsNow }) {
   if (mode === 'strict' && failed) {
     return `❌ Plugin Check failed: ${errorsNow} errors, and strict mode allows none`
   }
@@ -524,9 +514,6 @@ function statusLine({ mode, failed, noBaseline, advisory, errorsUp, errorsNow })
   }
   if (noBaseline) {
     return '⚠️ Plugin Check ran, but there was no baseline to compare with'
-  }
-  if (errorsUp > 0 && advisory) {
-    return `⚠️ Plugin Check passed, not enforced: ${errorsUp} rule(s) have more errors than an older run of the target branch`
   }
   if (failed) {
     return errorsUp === 1
@@ -615,9 +602,8 @@ function buildComment({ marker, status, badge, column, noBaseline, totals, wentU
  *                              the results file.
  * @param {object}   input.env  Environment. PLUGIN_CHECK_MODE (`baseline`, the default, or `strict`),
  *                              COMMENT_MARKER, PLUGIN_CHECK_BASELINE (default: baseline.json next
- *                              to this file), BASELINE_LABEL, BASELINE_URL, PLUGIN_CHECK_ADVISORY
- *                              (`true` when the baseline is from an older commit than the target),
- *                              COMMENT_BADGE, RUN_URL, ARTIFACT_URL, GITHUB_STEP_SUMMARY.
+ *                              to this file), COMMENT_BADGE, RUN_URL, ARTIFACT_URL,
+ *                              GITHUB_STEP_SUMMARY.
  * @param {object}   input.log  Where messages go: `out`, `err`, `error`, `warning`, `notice`.
  *
  * @returns {number} The exit status: 0 passes, 1 fails the check, another number is a file that
@@ -720,8 +706,7 @@ function compareOrThrow({ args, env, log }) {
     base = readBaseline(fs.readFileSync(baselinePath, 'utf8'))
   }
 
-  const advisory = env.PLUGIN_CHECK_ADVISORY === 'true'
-  const verdict = evaluate({ rows: buildRows(now, base), mode, advisory, noBaseline })
+  const verdict = evaluate({ rows: buildRows(now, base), mode, noBaseline })
   for (const { level, text: message } of verdict.messages) {
     log[level](message)
   }
@@ -738,18 +723,11 @@ function compareOrThrow({ args, env, log }) {
     runUrl = `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}`
   }
 
-  // The column is named after where the baseline came from ("Target branch", "Previous run"), and
-  // links to that run when known.
-  let column = env.BASELINE_LABEL || 'Baseline'
-  if (env.BASELINE_URL) {
-    column = `[${column}](${env.BASELINE_URL})`
-  }
-
   const body = buildComment({
     marker: env.COMMENT_MARKER || '<!-- plugin-check -->',
-    status: statusLine({ mode, advisory, noBaseline, ...verdict, errorsNow: verdict.totals.errorsNow }),
+    status: statusLine({ mode, noBaseline, ...verdict, errorsNow: verdict.totals.errorsNow }),
     badge: env.COMMENT_BADGE || '',
-    column,
+    column: 'Baseline',
     noBaseline,
     totals: verdict.totals,
     wentUp: verdict.wentUp,
