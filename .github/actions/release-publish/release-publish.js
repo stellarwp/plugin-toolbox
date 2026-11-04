@@ -27,6 +27,13 @@ const { readRepository, isNotFound, readTag, tagExists } = require('../../lib/gi
 const NOTHING = 'Nothing was published.'
 
 /**
+ * What the action appends to the name of a draft it creates, and takes off when it publishes. A
+ * rerun deletes only drafts that carry it: a draft a person made by hand for the same version, to
+ * write the notes in the GitHub UI, has the same tag name and is left alone.
+ */
+const DRAFT_MARK = ' [release-publish draft]'
+
+/**
  * Reads the version to release: the shared rule, with this action's closing line.
  *
  * @param {string} version The `version` input.
@@ -345,11 +352,14 @@ async function runPublish({ github, core, env, cwd = process.cwd() }) {
     core.info(`${version} is below the current latest release, so it is published without taking "Latest".`)
   }
 
-  // A draft of this version left by a run that was cancelled while uploading, or whose publish
-  // failed before the draft could be deleted. getReleaseByTag does not return drafts, so a rerun
-  // would otherwise leave it there and add a second one.
+  // A draft of this version left by a run of this action that was cancelled while uploading, or
+  // whose publish failed before the draft could be deleted. getReleaseByTag does not return
+  // drafts, so a rerun would otherwise leave it there and add a second one. Only drafts carrying
+  // the action's mark in their name: one a person made for the version is theirs.
   const releases = await listReleases({ github, owner, repo })
-  for (const stale of releases.filter((release) => release.draft && release.tag_name === version)) {
+  const leftBehind = (release) =>
+    release.draft && release.tag_name === version && String(release.name ?? '').endsWith(DRAFT_MARK)
+  for (const stale of releases.filter(leftBehind)) {
     try {
       await github.rest.repos.deleteRelease({ owner, repo, release_id: stale.id })
       core.info(`Deleted a draft of ${version} left behind by an earlier run (${stale.html_url}).`)
@@ -410,14 +420,14 @@ async function runPublish({ github, core, env, cwd = process.cwd() }) {
     }
   } else {
     // A draft makes no tag, so a failed upload can be undone by deleting it, and the release is
-    // never public without its files.
+    // never public without its files. Its name carries the mark until it is published.
     const draft = (
       await github.rest.repos.createRelease({
         owner,
         repo,
         tag_name: version,
         target_commitish: sha,
-        name: title,
+        name: `${title}${DRAFT_MARK}`,
         body,
         draft: true,
       })
@@ -455,7 +465,14 @@ async function runPublish({ github, core, env, cwd = process.cwd() }) {
     // draft is deleted here too, or a rerun would find none by the tag and leave it behind.
     try {
       release = (
-        await github.rest.repos.updateRelease({ owner, repo, release_id: draft.id, draft: false, make_latest: latest })
+        await github.rest.repos.updateRelease({
+          owner,
+          repo,
+          release_id: draft.id,
+          draft: false,
+          name: title,
+          make_latest: latest,
+        })
       ).data
     } catch (error) {
       const deleted = await deleteDraft({ github, owner, repo, draft })
@@ -481,4 +498,5 @@ module.exports = {
   readFiles,
   makeLatest,
   previousVersion,
+  DRAFT_MARK,
 }

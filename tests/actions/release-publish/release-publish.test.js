@@ -16,6 +16,7 @@ const {
   readFiles,
   makeLatest,
   previousVersion,
+  DRAFT_MARK,
 } = require('../../../.github/actions/release-publish/release-publish.js')
 const { coreWithOutputs, octokitFor } = require('../../support/actions.js')
 
@@ -350,16 +351,17 @@ describe('release-publish', () => {
         `GET ${API.tag}`,
         `PATCH ${API.release}`,
       ])
-      // Created as a draft, with no make_latest yet: that is decided when it is published.
+      // Created as a draft, marked as the action's in its name, with no make_latest yet: that is
+      // decided when it is published, and the mark comes off then.
       assert.deepStrictEqual(requests[5].body, {
         tag_name: '4.17.0',
         target_commitish: SHA,
-        name: '4.17.0',
+        name: `4.17.0${DRAFT_MARK}`,
         body: '## What changed\n* Fix (#12)',
         draft: true,
       })
       assert.strictEqual(String(requests[6].body), 'PK zip bytes')
-      assert.deepStrictEqual(requests[9].body, { draft: false, make_latest: 'true' })
+      assert.deepStrictEqual(requests[9].body, { draft: false, name: '4.17.0', make_latest: 'true' })
       assert.deepStrictEqual(outputs(), { published: 'true', 'release-url': RELEASE_URL, sha: SHA })
       assert.match(logged(), /Attached plugin\.zip.*Attached plugin\.pot/s)
       assert.match(summary(), /with `plugin\.zip`, `plugin\.pot`/)
@@ -476,9 +478,27 @@ describe('release-publish', () => {
       )
     })
 
+    it('leaves alone a draft of the version a person made by hand', async (t) => {
+      // Same tag name, no mark: someone is writing the notes for 4.17.0 in the GitHub UI.
+      const theirs = { id: 69, tag_name: '4.17.0', name: '4.17.0', draft: true, html_url: 'https://github.com/stellarwp/plugin/releases/untagged-theirs' }
+      const { github, requests } = await octokitFor([
+        { method: 'POST', path: API.notes, body: { body: 'notes' } },
+        { method: 'GET', path: API.latest, body: { tag_name: '4.16.0' } },
+        { method: 'GET', path: API.list, body: [theirs, ...RELEASES] },
+        { method: 'POST', path: API.releases, status: 201, body: { id: 77, html_url: RELEASE_URL } },
+      ])
+      const { core, outputs } = await coreWithOutputs(t)
+
+      await runPublish({ github, core, env: publishEnv(), cwd: checkoutWith() })
+
+      assert.ok(!requested(requests).some((line) => line.startsWith('DELETE')), 'nothing is deleted')
+      assert.strictEqual(outputs().published, 'true')
+    })
+
     it('deletes a draft of the version left behind by an earlier run before publishing', async (t) => {
-      // A run cancelled while uploading leaves its draft; getReleaseByTag does not return drafts.
-      const stale = { id: 70, tag_name: '4.17.0', draft: true, html_url: 'https://github.com/stellarwp/plugin/releases/untagged-abc' }
+      // A run cancelled while uploading leaves its draft, named with the mark; getReleaseByTag does
+      // not return drafts.
+      const stale = { id: 70, tag_name: '4.17.0', name: `4.17.0${DRAFT_MARK}`, draft: true, html_url: 'https://github.com/stellarwp/plugin/releases/untagged-abc' }
       const { github, requests } = await octokitFor([
         { method: 'POST', path: API.notes, body: { body: 'notes' } },
         { method: 'GET', path: API.latest, body: { tag_name: '4.16.0' } },
@@ -496,7 +516,7 @@ describe('release-publish', () => {
     })
 
     it('warns and goes on when a draft left behind cannot be deleted', async (t) => {
-      const stale = { id: 70, tag_name: '4.17.0', draft: true, html_url: 'https://github.com/stellarwp/plugin/releases/untagged-abc' }
+      const stale = { id: 70, tag_name: '4.17.0', name: `4.17.0${DRAFT_MARK}`, draft: true, html_url: 'https://github.com/stellarwp/plugin/releases/untagged-abc' }
       const { github } = await octokitFor([
         { method: 'POST', path: API.notes, body: { body: 'notes' } },
         { method: 'GET', path: API.latest, body: { tag_name: '4.16.0' } },

@@ -72,10 +72,10 @@ In this order, stopping at the first failure:
    release is chosen here, not left to GitHub: the highest published version below this one, so a
    hotfix on an older line (`2.1.38.3` after `2.1.46` is out) gets the changes since `2.1.38.2`,
    not since `2.1.46`. A first release, with nothing below it, leaves the start to GitHub.
-6. With `files`, creates the release as a **draft**, uploads every file, then publishes it. A draft
-   makes no tag, so an upload that fails, or a publish the repository refuses (a tag ruleset that
-   blocks the tag), is undone by deleting the draft: nothing is left behind, and the release is
-   never public without its files. That is also what a repository with immutable releases needs,
+6. With `files`, creates the release as a **draft** named `<title> [release-publish draft]`,
+   uploads every file, then publishes it under `title`. A draft makes no tag, so an upload that
+   fails, or a publish the repository refuses (a tag ruleset that blocks the tag), is undone by
+   deleting the draft: nothing is left behind, and the release is never public without its files. That is also what a repository with immutable releases needs,
    since a published release cannot be changed afterwards. When the draft cannot be deleted, the
    error says so and where to delete it by hand.
 
@@ -119,10 +119,12 @@ attached because the run died between the publish and a later step stays missing
 hand, or not at all on a repository with immutable releases. With `files`, the window is closed:
 the release is only published once every file is on it.
 
-A draft of the version left behind, by a run cancelled while it was uploading or whose draft could
-not be deleted, is deleted by the next run of the same version before it publishes; a draft is not
-found by its tag, so it would otherwise stay there next to the new one. When that delete fails, the
-run warns and goes on.
+A draft the action created and left behind, by a run cancelled while it was uploading or whose
+draft could not be deleted, is deleted by the next run of the same version before it publishes; a
+draft is not found by its tag, so it would otherwise stay there next to the new one. The action
+knows its own drafts by the ` [release-publish draft]` it appends to their name until they are
+published; a draft a person made by hand for the same version, to write the notes in the GitHub UI,
+has no mark and is left alone. When that delete fails, the run warns and goes on.
 
 ## The token
 
