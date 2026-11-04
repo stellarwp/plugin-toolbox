@@ -329,17 +329,16 @@ function readChangeloggerStrategy(text) {
 }
 
 /**
- * The pup commands that prepare a version, in the order they run.
+ * The pup commands that prepare a version, in the order they run, as the arguments `pup()` takes.
  *
- * @param {string} phar    Path to the downloaded pup.phar.
  * @param {string} version The version to prepare, already validated.
  *
- * @returns {{command: string, args: string[]}[]} The version bump, then the TBD replacement.
+ * @returns {string[][]} The version bump, then the TBD replacement.
  */
-function pupCommands(phar, version) {
+function pupCommands(version) {
   return [
-    { command: 'php', args: [phar, 'replace-version', version] },
-    { command: 'php', args: [phar, 'replace-tbd', version] },
+    ['replace-version', version],
+    ['replace-tbd', version],
   ]
 }
 
@@ -583,10 +582,8 @@ async function runPrepareWithPhar({ core, exec, cwd, env, pharRelease, version, 
     )
   }
 
-  for (const { args } of pupCommands(phar, version)) {
-    // Each entry names the phar first, as the command line runs it; pup() adds that itself.
-    const [, ...pupArgs] = args
-    await pup(pupArgs, { cwd })
+  for (const args of pupCommands(version)) {
+    await pup(args, { cwd })
   }
 }
 
