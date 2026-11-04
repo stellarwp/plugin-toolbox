@@ -236,6 +236,6 @@ describe('exclude-checks on the command line', () => {
     const status = await report.main(['nope'], {}, { out: () => {}, err: (line) => err.push(line) })
 
     assert.equal(status, 2)
-    assert.match(err[0], /compare\|fetch\|exclude-checks/)
+    assert.match(err[0], /compare\|exclude-checks/)
   })
 })
