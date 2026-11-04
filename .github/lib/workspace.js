@@ -45,4 +45,26 @@ function readWorkingDirectory(input, { base = process.cwd(), what }) {
   return dir
 }
 
-module.exports = { readWorkingDirectory }
+/**
+ * Reads a file of the checkout.
+ *
+ * @param {string} cwd  The checkout.
+ * @param {string} name The file, relative to it.
+ *
+ * @throws {Error} When it exists but cannot be read.
+ *
+ * @returns {string|null} The contents, or null when the file does not exist.
+ */
+function readCheckoutFile(cwd, name) {
+  try {
+    return fs.readFileSync(path.join(cwd, name), 'utf8')
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return null
+    }
+
+    throw error
+  }
+}
+
+module.exports = { readWorkingDirectory, readCheckoutFile }

@@ -13,13 +13,11 @@
  * commands run through `exec`, so a test can pass stand-ins and assert the calls.
  */
 
-const fs = require('node:fs')
-const path = require('node:path')
-
 const { runOrFail } = require('../../lib/exec.js')
+const { readYesNo: readYesNoInput } = require('../../lib/inputs.js')
 const { readVersionFiles } = require('../../lib/puprc.js')
 const { setupPup, lastLine } = require('../../lib/pup.js')
-const { readWorkingDirectory } = require('../../lib/workspace.js')
+const { readWorkingDirectory, readCheckoutFile } = require('../../lib/workspace.js')
 
 /** What was not done, to close every error message. */
 const WHAT = 'No zip name was resolved.'
@@ -41,11 +39,7 @@ const DEV_SUFFIX_COMMANDS = [
 ]
 
 /**
- * Reads a yes/no input.
- *
- * The workflow declares these as a `choice` of yes/no rather than a boolean: the packaging bot
- * sends `yes` and `no`, and a boolean input would make it send `true`. The action checks the
- * value itself, so a dispatch by hand or by a tool gets the same refusal.
+ * Reads a yes/no input: the shared rule, with this action's closing line.
  *
  * @param {string} value The input value.
  * @param {string} input The input's name, for the message.
@@ -55,15 +49,7 @@ const DEV_SUFFIX_COMMANDS = [
  * @returns {boolean} True for `yes`.
  */
 function readYesNo(value, input) {
-  const trimmed = String(value ?? '')
-    .trim()
-    .toLowerCase()
-
-  if (trimmed !== 'yes' && trimmed !== 'no') {
-    throw new Error(`${input} '${String(value ?? '').trim()}' is not yes or no. ${WHAT}`)
-  }
-
-  return trimmed === 'yes'
+  return readYesNoInput(value, input, WHAT)
 }
 
 /**
@@ -183,28 +169,6 @@ async function readCommitStamp(exec, cwd) {
 }
 
 /**
- * Reads a file of the checkout.
- *
- * @param {string} cwd  The checkout.
- * @param {string} name The file, relative to it.
- *
- * @throws {Error} When it exists but cannot be read.
- *
- * @returns {string|null} The contents, or null when the file does not exist.
- */
-function readCheckoutFile(cwd, name) {
-  try {
-    return fs.readFileSync(path.join(cwd, name), 'utf8')
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return null
-    }
-
-    throw error
-  }
-}
-
-/**
  * Validates the inputs, reads the version the checkout holds, builds the suffix and asks pup for
  * the zip name.
  *
@@ -237,6 +201,8 @@ async function runZipName({ core, exec, env, cwd: workspace = process.cwd(), fet
   const expected = String(env.INPUT_EXPECTED_VERSION ?? '').trim()
   const cwd = readWorkingDirectory(env.INPUT_WORKING_DIRECTORY, { base: workspace, what: WHAT })
 
+  // Only the check: pup reads the files itself. A .puprc pup would read as empty is refused here,
+  // before pup is downloaded.
   readVersionFiles(readCheckoutFile(cwd, '.puprc'), WHAT)
 
   if (production && (prerelease !== 'dev' || sequence !== null)) {

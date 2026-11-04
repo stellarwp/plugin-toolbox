@@ -14,9 +14,10 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
+const { readYesNo: readYesNoInput } = require('../../lib/inputs.js')
 const { readVersionFiles } = require('../../lib/puprc.js')
 const { setupPup, lastLine } = require('../../lib/pup.js')
-const { readWorkingDirectory } = require('../../lib/workspace.js')
+const { readWorkingDirectory, readCheckoutFile } = require('../../lib/workspace.js')
 
 /** What was not done, to close every error message. */
 const WHAT = 'No zip was built.'
@@ -43,7 +44,7 @@ function readVersion(version) {
 }
 
 /**
- * Reads a yes/no input.
+ * Reads a yes/no input: the shared rule, with this action's closing line.
  *
  * @param {string} value The input value.
  * @param {string} input The input's name, for the message.
@@ -53,15 +54,7 @@ function readVersion(version) {
  * @returns {boolean} True for `yes`.
  */
 function readYesNo(value, input) {
-  const trimmed = String(value ?? '')
-    .trim()
-    .toLowerCase()
-
-  if (trimmed !== 'yes' && trimmed !== 'no') {
-    throw new Error(`${input} '${String(value ?? '').trim()}' is not yes or no. ${WHAT}`)
-  }
-
-  return trimmed === 'yes'
+  return readYesNoInput(value, input, WHAT)
 }
 
 /**
@@ -96,28 +89,6 @@ function pupCommands({ version, production, check, i18n }) {
 }
 
 /**
- * Reads a file of the checkout.
- *
- * @param {string} cwd  The checkout.
- * @param {string} name The file, relative to it.
- *
- * @throws {Error} When it exists but cannot be read.
- *
- * @returns {string|null} The contents, or null when the file does not exist.
- */
-function readCheckoutFile(cwd, name) {
-  try {
-    return fs.readFileSync(path.join(cwd, name), 'utf8')
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return null
-    }
-
-    throw error
-  }
-}
-
-/**
  * Validates the inputs, then builds and packages the version with pup.
  *
  * Every input check and the .puprc read run before pup is downloaded. A pup command that fails
@@ -145,6 +116,8 @@ async function runZip({ core, exec, env, cwd: workspace = process.cwd(), fetchIm
   const i18n = readYesNo(env.INPUT_I18N, 'i18n')
   const cwd = readWorkingDirectory(env.INPUT_WORKING_DIRECTORY, { base: workspace, what: WHAT })
 
+  // Only the check: pup reads the files itself. A .puprc pup would read as empty is refused here,
+  // before pup is downloaded.
   readVersionFiles(readCheckoutFile(cwd, '.puprc'), WHAT)
 
   const { pup } = await setupPup({ exec, env, core, fetchImpl, what: WHAT })

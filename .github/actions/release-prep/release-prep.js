@@ -11,8 +11,6 @@
  * the API calls, so a test can pass stand-ins and assert the calls and the requests.
  */
 
-const fs = require('node:fs')
-const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 
 // The three-or-four-parts pattern lives with the other version rules, shared with release-merge.
@@ -31,6 +29,7 @@ const {
   pupRunner,
   lastLine,
 } = require('../../lib/pup.js')
+const { readCheckoutFile } = require('../../lib/workspace.js')
 
 /**
  * A semver version as semver.org defines it: MAJOR.MINOR.PATCH, an optional pre-release and
@@ -410,28 +409,6 @@ function numericPrefix(version) {
   const match = NUMERIC_PREFIX.exec(version)
 
   return match ? match[0] : null
-}
-
-/**
- * Reads a file of the checkout.
- *
- * @param {string} cwd  The checkout.
- * @param {string} name The file, relative to it.
- *
- * @throws {Error} When it exists but cannot be read.
- *
- * @returns {string|null} The contents, or null when the file does not exist.
- */
-function readCheckoutFile(cwd, name) {
-  try {
-    return fs.readFileSync(path.join(cwd, name), 'utf8')
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return null
-    }
-
-    throw error
-  }
 }
 
 /**
