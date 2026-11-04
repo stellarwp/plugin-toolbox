@@ -8,8 +8,8 @@ name: Plugin Check
 #
 # The plugin is built with pup by default (`pup build`, then `pup package`), so the repository's
 # .puprc and ignore files decide what is checked, the same as the release. pup comes from the shared
-# .github/actions/pup action, so the repository does not need a copy of it or a Composer script for
-# it. A repository without pup passes `build-command` instead; see the plugin-check-report README.
+# zip-name and release-zip actions, so the repository does not need a copy of it or a Composer
+# script for it. A repository without pup passes `build-command` instead; see the plugin-check-report README.
 #
 # Four jobs, so the third-party action never holds a token that can write. The comments are written
 # by .github/actions/pr-comment, which calls the GitHub API itself:
@@ -275,16 +275,6 @@ jobs:
           php-version: ${{ inputs.php-version }}
           coverage: none
 
-      # pup is a PHP archive, so PHP is set up first. One pup release builds, packages and names the
-      # zip below, so the name it looks for is always the name the package step made. The action's
-      # `read` input is not used: it reads from the workspace root, and the repository is in source/.
-      - name: Install pup
-        id: pup
-        if: ${{ inputs.build-command == '' }}
-        uses: $/.github/actions/pup
-        with:
-          pup-version: ${{ inputs.pup-version }}
-
       - name: Find the Composer cache
         id: composer-cache
         working-directory: source
@@ -346,16 +336,49 @@ jobs:
           restore-keys: |
             plugin-check-${{ runner.os }}-${{ hashFiles('source/package-lock.json', 'source/bun.lock', 'source/bun.lockb') }}-
 
-      # The same pup steps the release zip uses, so .puprc and the ignore files decide what is checked.
+      # pup builds and packages the plugin, so .puprc and the ignore files decide what is checked,
+      # the same as the release. The version and the zip name come from the zip-name action, the zip
+      # from release-zip: the same QA build the zip workflow makes, without `pup check` and `pup i18n`,
+      # which this workflow does not need. pup runs on the PHP set up above. The repository is in
+      # source/, so both actions run there.
+      - name: Name the zip
+        id: zip-name
+        if: ${{ inputs.build-command == '' }}
+        uses: $/.github/actions/zip-name
+        with:
+          production: 'no'
+          prerelease: dev
+          pup-version: ${{ inputs.pup-version }}
+          working-directory: source
+
       # The secrets reach this step only, never the job, so the third-party action later in this
-      # job does not see them in its environment.
-      - name: Build the plugin
+      # job does not see them in its environment. The build runs with them in its environment, as
+      # pup build needs them to install private packages.
+      - name: Build the plugin with pup
+        id: zip
+        if: ${{ inputs.build-command == '' }}
+        uses: $/.github/actions/release-zip
+        with:
+          version: ${{ steps.zip-name.outputs.version }}
+          production: 'no'
+          check: 'no'
+          i18n: 'no'
+          pup-version: ${{ inputs.pup-version }}
+          working-directory: source
+        env:
+          COMPOSER_AUTH: >-
+            ${{ secrets.composer-token != '' && format('{{"github-oauth": {{"github.com": "{0}"}}}}', secrets.composer-token) || '' }}
+          NODE_AUTH_TOKEN: ${{ secrets.package-token }}
+          BUN_AUTH_TOKEN: ${{ secrets.package-token }}
+          GITHUB_TOKEN: ${{ secrets.package-token != '' && secrets.package-token || github.token }}
+
+      - name: Build the plugin with build-command
+        if: ${{ inputs.build-command != '' }}
         working-directory: source
         env:
           BUILD_COMMAND: ${{ inputs.build-command }}
-          PUP_PHAR: ${{ steps.pup.outputs.phar }}
-          COMPOSER_TOKEN: ${{ secrets.composer-token }}
           PACKAGE_TOKEN: ${{ secrets.package-token }}
+          COMPOSER_TOKEN: ${{ secrets.composer-token }}
         run: |
           if [ -n "$COMPOSER_TOKEN" ]; then
             COMPOSER_AUTH=$(jq -cn --arg token "$COMPOSER_TOKEN" '{"github-oauth": {"github.com": $token}}')
@@ -366,21 +389,16 @@ jobs:
           fi
           unset COMPOSER_TOKEN PACKAGE_TOKEN
           mkdir -p "$PLUGIN_CHECK_BUILD_DIR"
+          echo "Building with build-command."
+          bash -eo pipefail -c "$BUILD_COMMAND"
 
-          if [ -n "$BUILD_COMMAND" ]; then
-            echo "Building with build-command."
-            bash -eo pipefail -c "$BUILD_COMMAND"
-            exit 0
-          fi
-
-          # The last line pup prints is the value, as the pup action reads it; PHP's own errors go to
-          # stderr so they never reach it.
-          pup() { php -d display_errors=stderr "$PUP_PHAR" "$@"; }
-          pup build
-          version=$(pup get-version --dev | tail -n 1)
-          pup package "$version"
-          name=$(pup zip-name "$version" | tail -n 1)
-          unzip -q "$name.zip" -d "$PLUGIN_CHECK_BUILD_DIR"
+      - name: Unpack the zip
+        if: ${{ inputs.build-command == '' }}
+        env:
+          ZIP_PATH: ${{ steps.zip.outputs.zip-path }}
+        run: |
+          mkdir -p "$PLUGIN_CHECK_BUILD_DIR"
+          unzip -q "$ZIP_PATH" -d "$PLUGIN_CHECK_BUILD_DIR"
 
       # The one contract every build has to meet, pup or not: a folder named after the slug, with
       # the main plugin file in it. Plugin Check takes the slug from the folder name, so a wrong

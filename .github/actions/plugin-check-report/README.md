@@ -28,7 +28,7 @@ jobs:
 - A `.puprc` whose `build` makes the plugin as it ships, and whose `zip_name` equals `plugin-slug`.
   The zip's top folder is named after `zip_name`, and Plugin Check takes the slug from the folder
   name.
-- Nothing for pup itself. The workflow installs it with the shared [pup](../pup/) action, so the
+- Nothing for pup itself. The workflow downloads it in the shared [zip-name](../zip-name/) and [release-zip](../release-zip/) actions, so the
   repository needs no copy of `pup.phar` and no `pup` Composer script. Set the `pup-version` input
   to the release the repository's own release build uses, so the check sees the same files.
 - Ignore rules that keep dev-only files out of the zip: a `.distignore`, `export-ignore` lines in
@@ -42,19 +42,14 @@ The JavaScript toolchain comes from files the repository already has: `.nvmrc` s
 
 ## How the plugin is built
 
-By default, with pup, the same steps the release zip uses, from the root of the checkout. `pup`
-here is `php pup.phar`, with the phar the shared pup action installed:
+By default, with pup, the same QA build the release zip makes, from the root of the checkout (the
+`source/` folder of the job). Two shared actions do it: [zip-name](../zip-name/) reads the version
+and names the zip (`production: no`, `prerelease: dev`), and [release-zip](../release-zip/) runs
+`pup build` and `pup package <version>` with `check: no` and `i18n: no`, since this workflow needs
+neither. The workflow then unpacks the zip into `$PLUGIN_CHECK_BUILD_DIR`.
 
-```bash
-pup build
-version=$(pup get-version --dev | tail -n 1)
-pup package "$version"
-name=$(pup zip-name "$version" | tail -n 1)
-unzip -q "$name.zip" -d "$PLUGIN_CHECK_BUILD_DIR"
-```
-
-One pup release builds, packages and names the zip, so the name looked for is always the name the
-package step made. The last line pup prints is the value, as the pup action reads it.
+One pup release (the `pup-version` input) reads the version, builds, packages and names the zip, so
+the name looked for is always the name the package step made.
 
 So `.puprc` and the ignore files decide what is checked. If the release needs a step the check should
 see too, such as making the POT file, put it in `.puprc`'s `build`, not in the workflow.
