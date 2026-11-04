@@ -84,9 +84,9 @@ jobs:
       # artifact; only the upload and the notice are skipped.
       S3_CONFIGURED: ${{ secrets.ZIP_S3_BUCKET != '' }}
       SLACK_CONFIGURED: ${{ secrets.SLACK_PACKAGING_SECRET != '' }}
-      # For a build that installs packages from GitHub Packages. Both are empty without the secret.
-      NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
-      BUN_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+      # For a build that installs packages from GitHub Packages. The token itself goes only to the
+      # two steps that use it, below, not to every step of the job.
+      NPM_AUTH_CONFIGURED: ${{ secrets.NODE_AUTH_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -113,7 +113,9 @@ jobs:
           cache: ${{ steps.node.outputs.cache }}
 
       - name: Authenticate npm against GitHub Packages
-        if: env.NODE_AUTH_TOKEN != ''
+        if: env.NPM_AUTH_CONFIGURED == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
         run: echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -175,9 +177,12 @@ jobs:
           version: ${{ steps.name.outputs.version }}
           production: ${{ inputs.production }}
         env:
-          # For a build that installs private composer packages. Empty without the secret.
+          # For a build that installs private composer packages or packages from GitHub Packages.
+          # All three are empty without their secret.
           COMPOSER_AUTH: >-
             ${{ secrets.COMPOSER_TOKEN != '' && format('{{"github-oauth": {{"github.com": "{0}"}}}}', secrets.COMPOSER_TOKEN) || '' }}
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+          BUN_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
       - name: Stage the zip for the bucket
         if: env.S3_CONFIGURED == 'true' && steps.zip.outcome == 'success'
