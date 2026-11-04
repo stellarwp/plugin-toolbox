@@ -80,6 +80,12 @@ outputs:
   prerelease:
     description: 'The pre-release label the build carries: `dev`, `alpha`, `beta` or `rc`. Empty for a production build.'
     value: ${{ steps.name.outputs.prerelease }}
+  pup-release:
+    description: >-
+      The pup release that read the version, e.g. `2.0.0`: what `pup-version` resolved to. Pass it to
+      release-zip as its `pup-version`, so the zip is packaged by the same pup that named it, even
+      when `latest` is a newer release by then.
+    value: ${{ steps.name.outputs.pup-release }}
 
 runs:
   using: 'composite'

@@ -176,6 +176,8 @@ jobs:
         with:
           version: ${{ steps.name.outputs.version }}
           production: ${{ inputs.production }}
+          # The pup that named the zip packages it: `latest` is resolved once, by zip-name.
+          pup-version: ${{ steps.name.outputs.pup-release }}
         env:
           # For a build that installs private composer packages or packages from GitHub Packages.
           # All three are empty without their secret.

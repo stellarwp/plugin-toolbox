@@ -227,7 +227,7 @@ async function runZipName({ core, exec, env, cwd: workspace = process.cwd(), fet
     }
   }
 
-  const { pup } = await setupPup({ exec, env, core, fetchImpl, what: WHAT })
+  const { pup, release } = await setupPup({ exec, env, core, fetchImpl, what: WHAT })
 
   const baseVersion = readPrintedVersion(
     await pup(['get-version'], { cwd, silent: true, noticesToStderr: true })
@@ -267,6 +267,9 @@ async function runZipName({ core, exec, env, cwd: workspace = process.cwd(), fet
   core.setOutput('version', version)
   core.setOutput('zip-name', zipName)
   core.setOutput('prerelease', production ? '' : prerelease)
+  // The release `latest` resolved to, so release-zip runs the same pup, not a newer one published
+  // in between, and reuses the phar.
+  core.setOutput('pup-release', release)
 }
 
 module.exports = {

@@ -21,6 +21,7 @@ holds, the pre-release suffix of a QA build, and the slug pup gives the zip.
   with:
     version: ${{ steps.name.outputs.version }}
     production: ${{ inputs.production }}
+    pup-version: ${{ steps.name.outputs.pup-release }}
 ```
 
 The name is known before the build so a caller can ask the S3 bucket whether that zip already
@@ -134,6 +135,7 @@ produces the right production build.
 | `version` | `4.19.0.1-rc-1792689067-fbcf8681` | The version the build carries, suffix included. Pass it to release-zip |
 | `zip-name` | `give.4.19.0.1-rc-1792689067-fbcf8681` | The zip name without `.zip` |
 | `prerelease` | `rc` | The label the build carries. Empty for a production build, so a step can read `== 'dev'` without looking at `production` |
+| `pup-release` | `2.0.0` | The pup release that read the version, what `pup-version` resolved to. Pass it to release-zip as `pup-version` |
 
 ## Which pup runs
 
@@ -153,8 +155,9 @@ downloads nothing; a download that fails leaves no file behind to be reused by m
 
 How pup is resolved, downloaded and run is shared with release-prep and release-zip, in
 [`.github/lib/pup.js`](../../lib/pup.js). When the TypeScript line of pup publishes a distribution,
-that file changes and this action runs it without an edit of its own. Pass release-zip the same
-`pup-version`, so the zip is named by the pup that read the version.
+that file changes and this action runs it without an edit of its own. Pass release-zip the
+`pup-release` output as its `pup-version`, so the zip is packaged by the pup that named it: with
+`latest`, a release published between the two steps would otherwise give the two a different pup.
 
 ## How it runs
 

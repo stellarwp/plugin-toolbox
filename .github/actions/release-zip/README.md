@@ -14,6 +14,7 @@ Builds and packages a version of the plugin with pup, from the root of the check
   with:
     version: ${{ steps.name.outputs.version }}
     production: ${{ inputs.production }}
+    pup-version: ${{ steps.name.outputs.pup-release }}
 
 - uses: actions/upload-artifact@v7
   with:
@@ -110,7 +111,7 @@ name in `composer.json`.
 | `check` | no | `yes` | Whether `pup check` runs |
 | `i18n` | no | `yes` | Whether `pup i18n` runs |
 | `working-directory` | no | the workspace | Where the repository is checked out, relative to the workspace or absolute, e.g. `source`. pup runs and writes the zip there; `zip-path` is absolute either way. The caller's own value, trusted like the checkout's `ref` |
-| `pup-version` | no | `latest` | The pup release to run: a number such as `2.0.0`, or `latest`. Pass the same value zip-name got. See [Which pup runs](#which-pup-runs) |
+| `pup-version` | no | `latest` | The pup release to run: a number such as `2.0.0`, or `latest`. Pass zip-name's `pup-release` output, the release that named the zip. See [Which pup runs](#which-pup-runs) |
 | `token` | no | `github.token` | Authenticates the `latest` lookup. A pinned `pup-version` never uses it |
 
 ## Outputs
@@ -125,8 +126,10 @@ name in `composer.json`.
 `pup-version` pins a pup release (`2.0.0`) or tracks the newest one (`latest`, the default). A
 pinned release downloads straight from its release page; `latest` reads the newest release through
 the GitHub API, authenticated with `token`. The release has to publish a `pup.phar` asset, which
-every release from 1.2.4 to 2.0.0 does; one without it fails the step and names a pin to use. The
-phar zip-name downloaded earlier in the job is reused. How pup is resolved, downloaded and run is
+every release from 1.2.4 to 2.0.0 does; one without it fails the step and names a pin to use. Pass
+zip-name's `pup-release` output here: the pup that named the zip packages it, and the phar it
+downloaded earlier in the job is reused. With `latest` on both, a release published between the two
+steps would give them a different pup. How pup is resolved, downloaded and run is
 shared with release-prep and zip-name, in [`.github/lib/pup.js`](../../lib/pup.js).
 
 ## How it runs

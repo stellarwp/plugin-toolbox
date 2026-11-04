@@ -43,8 +43,9 @@ inputs:
     description: >-
       The pup release that builds and packages: a release number, such as 2.0.0, or 'latest' for the
       newest release. It has to ship a pup.phar asset, which every release from 1.2.4 to 2.0.0 does;
-      a release without one fails the step and names a pin to use instead. Pass the same value
-      zip-name got, so the zip is named by the pup that read the version.
+      a release without one fails the step and names a pin to use instead. Pass zip-name's
+      `pup-release` output, so the zip is packaged by the pup that named it even when `latest`
+      is a newer release by then.
     required: false
     default: 'latest'
   token:

@@ -222,6 +222,7 @@ describe('zip-name', () => {
       )
       assert.deepEqual(outputs(), {
         'base-version': '4.19.0.1',
+        'pup-release': '2.0.0',
         version,
         'zip-name': `give.${version}`,
         prerelease: 'dev',
@@ -237,6 +238,7 @@ describe('zip-name', () => {
 
       assert.deepEqual(outputs(), {
         'base-version': '4.19.0.1',
+        'pup-release': '2.0.0',
         version: `4.19.0.1-rc-${TIMESTAMP}-${HASH}`,
         'zip-name': `give.4.19.0.1-rc-${TIMESTAMP}-${HASH}`,
         prerelease: 'rc',
@@ -253,6 +255,7 @@ describe('zip-name', () => {
       assert.deepEqual(sequence(calls), [...UP_TO_VERSION, `php -d display_errors=stderr ${PHAR} zip-name 4.19.0.1-beta-2`])
       assert.deepEqual(outputs(), {
         'base-version': '4.19.0.1',
+        'pup-release': '2.0.0',
         version: '4.19.0.1-beta-2',
         'zip-name': 'give.4.19.0.1-beta-2',
         prerelease: 'beta',
@@ -269,6 +272,7 @@ describe('zip-name', () => {
       assert.deepEqual(sequence(calls), [...UP_TO_VERSION, `php -d display_errors=stderr ${PHAR} zip-name 4.19.0.1`])
       assert.deepEqual(outputs(), {
         'base-version': '4.19.0.1',
+        'pup-release': '2.0.0',
         version: '4.19.0.1',
         'zip-name': 'give.4.19.0.1',
         prerelease: '',
@@ -293,6 +297,7 @@ describe('zip-name', () => {
         assert.match(logged(), warning)
         assert.deepEqual(outputs(), {
           'base-version': '4.19.0.1',
+        'pup-release': '2.0.0',
           version: '4.19.0.1',
           'zip-name': 'give.4.19.0.1',
           prerelease: '',
@@ -311,6 +316,7 @@ describe('zip-name', () => {
       assert.match(logged(), /::warning::production is yes, so prerelease 'nightly' and sequence 'abc' are ignored/)
       assert.deepEqual(outputs(), {
         'base-version': '4.19.0.1',
+        'pup-release': '2.0.0',
         version: '4.19.0.1',
         'zip-name': 'give.4.19.0.1',
         prerelease: '',
@@ -475,6 +481,7 @@ describe('zip-name', () => {
       ])
       assert.ok(sequence(calls).some((call) => call.includes('download/2.0.0/pup.phar')))
       assert.equal(outputs().version, `4.19.0.1-dev-${TIMESTAMP}-${HASH}`)
+      assert.equal(outputs()['pup-release'], '2.0.0', 'the release latest resolved to, for release-zip to take')
     })
 
     it('reads the checkout in working-directory, resolved against the workspace', async (t) => {
