@@ -69,9 +69,11 @@ In this order, stopping at the first failure:
    hotfix on an older line (`2.1.38.3` after `2.1.46` is out) gets the changes since `2.1.38.2`,
    not since `2.1.46`. A first release, with nothing below it, leaves the start to GitHub.
 6. With `files`, creates the release as a **draft**, uploads every file, then publishes it. A draft
-   makes no tag, so an upload that fails is undone by deleting the draft: nothing is left behind,
-   and the release is never public without its files. That is also what a repository with
-   immutable releases needs, since a published release cannot be changed afterwards.
+   makes no tag, so an upload that fails, or a publish the repository refuses (a tag ruleset that
+   blocks the tag), is undone by deleting the draft: nothing is left behind, and the release is
+   never public without its files. That is also what a repository with immutable releases needs,
+   since a published release cannot be changed afterwards. When the draft cannot be deleted, the
+   error says so and where to delete it by hand.
 
 ## Inputs
 
@@ -99,6 +101,11 @@ after publishing is rerun as it is. An existing release is not changed: a file t
 attached because the run died between the publish and a later step stays missing, and is added by
 hand, or not at all on a repository with immutable releases. With `files`, the window is closed:
 the release is only published once every file is on it.
+
+A draft of the version left behind, by a run cancelled while it was uploading or whose draft could
+not be deleted, is deleted by the next run of the same version before it publishes; a draft is not
+found by its tag, so it would otherwise stay there next to the new one. When that delete fails, the
+run warns and goes on.
 
 ## The token
 

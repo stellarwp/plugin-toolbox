@@ -249,6 +249,31 @@ function previousVersion(version, releases) {
 }
 
 /**
+ * Deletes a draft release, reporting whether it worked rather than assuming so.
+ *
+ * @param {object} options
+ * @param {object} options.github The Octokit github-script supplies.
+ * @param {string} options.owner  The repository owner.
+ * @param {string} options.repo   The repository name.
+ * @param {object} options.draft  The draft, as the API returned it.
+ *
+ * @returns {Promise<string>} A sentence for the error message: that the draft was deleted, or that
+ *          it was not and where to delete it by hand.
+ */
+async function deleteDraft({ github, owner, repo, draft }) {
+  try {
+    await github.rest.repos.deleteRelease({ owner, repo, release_id: draft.id })
+
+    return 'The draft was deleted and no tag was made.'
+  } catch (error) {
+    return (
+      `The draft could not be deleted (HTTP ${error.status}): delete it by hand at ${draft.html_url}. ` +
+      'No tag was made.'
+    )
+  }
+}
+
+/**
  * Whether the new release takes "Latest": yes, unless the current latest is a higher version, as
  * when a hotfix goes out on an older line after a newer version is released. A latest whose tag is
  * not a plain version (a `v` prefix, a name) is not compared, and the new release takes it.
@@ -320,9 +345,25 @@ async function runPublish({ github, core, env, cwd = process.cwd() }) {
     core.info(`${version} is below the current latest release, so it is published without taking "Latest".`)
   }
 
+  // A draft of this version left by a run that was cancelled while uploading, or whose publish
+  // failed before the draft could be deleted. getReleaseByTag does not return drafts, so a rerun
+  // would otherwise leave it there and add a second one.
+  const releases = await listReleases({ github, owner, repo })
+  for (const stale of releases.filter((release) => release.draft && release.tag_name === version)) {
+    try {
+      await github.rest.repos.deleteRelease({ owner, repo, release_id: stale.id })
+      core.info(`Deleted a draft of ${version} left behind by an earlier run (${stale.html_url}).`)
+    } catch (error) {
+      core.warning(
+        `A draft of ${version} left behind by an earlier run could not be deleted (HTTP ${error.status}): ` +
+          `delete it by hand at ${stale.html_url}.`
+      )
+    }
+  }
+
   let body = notes
   if (body === null) {
-    const previous = previousVersion(version, await listReleases({ github, owner, repo }))
+    const previous = previousVersion(version, releases)
     core.info(
       previous
         ? `The notes cover the changes since ${previous}.`
@@ -378,18 +419,24 @@ async function runPublish({ github, core, env, cwd = process.cwd() }) {
           headers: { 'content-type': 'application/octet-stream', 'content-length': asset.size },
         })
       } catch (error) {
-        await github.rest.repos.deleteRelease({ owner, repo, release_id: draft.id }).catch(() => {})
+        const deleted = await deleteDraft({ github, owner, repo, draft })
         throw new Error(
-          `Uploading ${asset.name} to the release failed (HTTP ${error.status}): ${error.message}. ` +
-            `The draft was deleted and no tag was made. ${NOTHING}`
+          `Uploading ${asset.name} to the release failed (HTTP ${error.status}): ${error.message}. ${deleted} ${NOTHING}`
         )
       }
       core.info(`Attached ${asset.name}.`)
     }
 
-    release = (
-      await github.rest.repos.updateRelease({ owner, repo, release_id: draft.id, draft: false, make_latest: latest })
-    ).data
+    // Publishing the draft is what makes the tag, so this is the call a tag ruleset refuses. The
+    // draft is deleted here too, or a rerun would find none by the tag and leave it behind.
+    try {
+      release = (
+        await github.rest.repos.updateRelease({ owner, repo, release_id: draft.id, draft: false, make_latest: latest })
+      ).data
+    } catch (error) {
+      const deleted = await deleteDraft({ github, owner, repo, draft })
+      throw new Error(`Publishing the draft failed (HTTP ${error.status}): ${error.message}. ${deleted} ${NOTHING}`)
+    }
   }
 
   core.info(`Published ${version} at ${sha.slice(0, 7)}: ${release.html_url}`)

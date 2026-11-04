@@ -270,6 +270,7 @@ describe('release-publish', () => {
       const { github, requests } = await octokitFor([
         { method: 'GET', path: API.branch, body: { commit: { sha: SHA } } },
         { method: 'GET', path: API.latest, body: { tag_name: '4.16.0' } },
+        { method: 'GET', path: API.list, body: RELEASES },
         { method: 'POST', path: API.releases, status: 201, body: { id: 77, html_url: RELEASE_URL } },
       ])
       const { core } = await coreWithOutputs(t)
@@ -377,6 +378,78 @@ describe('release-publish', () => {
 
       assert.deepStrictEqual(requested(requests).slice(-2), ['POST uploads:/repos/stellarwp/plugin/releases/77/assets?name=plugin.zip', `DELETE ${API.release}`])
       assert.deepStrictEqual(outputs(), {})
+    })
+
+    it('deletes the draft when publishing it fails, as when a tag ruleset refuses the tag', async (t) => {
+      const cwd = checkoutWith({ 'build/plugin.zip': 'zip' })
+      const { github, requests } = await octokitFor([
+        ...FRESH,
+        { method: 'POST', path: API.releases, status: 201, body: { id: 77, html_url: RELEASE_URL } },
+        { method: 'POST', path: API.assets, status: 201, body: { id: 1 } },
+        { method: 'PATCH', path: API.release, status: 422, body: { message: 'Tag creation is blocked by a ruleset' } },
+        { method: 'DELETE', path: API.release, status: 204, body: {} },
+      ])
+      const { core, outputs } = await coreWithOutputs(t)
+
+      await assert.rejects(
+        runPublish({ github, core, env: publishEnv({ INPUT_FILES: 'build/plugin.zip' }), cwd }),
+        /Publishing the draft failed \(HTTP 422\): Tag creation is blocked.*The draft was deleted and no tag was made.*Nothing was published/s
+      )
+
+      assert.deepStrictEqual(requested(requests).slice(-2), [`PATCH ${API.release}`, `DELETE ${API.release}`])
+      assert.deepStrictEqual(outputs(), {})
+    })
+
+    it('says where to delete the draft by hand when deleting it fails too', async (t) => {
+      const cwd = checkoutWith({ 'build/plugin.zip': 'zip' })
+      const { github } = await octokitFor([
+        ...FRESH,
+        { method: 'POST', path: API.releases, status: 201, body: { id: 77, html_url: RELEASE_URL } },
+        { method: 'POST', path: API.assets, status: 502, body: { message: 'bad gateway' } },
+        { method: 'DELETE', path: API.release, status: 500, body: { message: 'boom' } },
+      ])
+      const { core } = await coreWithOutputs(t)
+
+      await assert.rejects(
+        runPublish({ github, core, env: publishEnv({ INPUT_FILES: 'build/plugin.zip' }), cwd }),
+        /Uploading plugin\.zip.*The draft could not be deleted \(HTTP 500\): delete it by hand at https:\/\/github\.com\/stellarwp\/plugin\/releases\/tag\/4\.17\.0\. No tag was made/s
+      )
+    })
+
+    it('deletes a draft of the version left behind by an earlier run before publishing', async (t) => {
+      // A run cancelled while uploading leaves its draft; getReleaseByTag does not return drafts.
+      const stale = { id: 70, tag_name: '4.17.0', draft: true, html_url: 'https://github.com/stellarwp/plugin/releases/untagged-abc' }
+      const { github, requests } = await octokitFor([
+        { method: 'POST', path: API.notes, body: { body: 'notes' } },
+        { method: 'GET', path: API.latest, body: { tag_name: '4.16.0' } },
+        { method: 'GET', path: API.list, body: [stale, ...RELEASES] },
+        { method: 'DELETE', path: '/repos/stellarwp/plugin/releases/70', status: 204, body: {} },
+        { method: 'POST', path: API.releases, status: 201, body: { id: 77, html_url: RELEASE_URL } },
+      ])
+      const { core, outputs, logged } = await coreWithOutputs(t)
+
+      await runPublish({ github, core, env: publishEnv(), cwd: checkoutWith() })
+
+      assert.deepStrictEqual(requested(requests).slice(4), ['DELETE /repos/stellarwp/plugin/releases/70', `POST ${API.notes}`, `POST ${API.releases}`])
+      assert.match(logged(), /Deleted a draft of 4\.17\.0 left behind by an earlier run/)
+      assert.strictEqual(outputs().published, 'true')
+    })
+
+    it('warns and goes on when a draft left behind cannot be deleted', async (t) => {
+      const stale = { id: 70, tag_name: '4.17.0', draft: true, html_url: 'https://github.com/stellarwp/plugin/releases/untagged-abc' }
+      const { github } = await octokitFor([
+        { method: 'POST', path: API.notes, body: { body: 'notes' } },
+        { method: 'GET', path: API.latest, body: { tag_name: '4.16.0' } },
+        { method: 'GET', path: API.list, body: [stale] },
+        { method: 'DELETE', path: '/repos/stellarwp/plugin/releases/70', status: 403, body: { message: 'forbidden' } },
+        { method: 'POST', path: API.releases, status: 201, body: { id: 77, html_url: RELEASE_URL } },
+      ])
+      const { core, outputs, logged } = await coreWithOutputs(t)
+
+      await runPublish({ github, core, env: publishEnv(), cwd: checkoutWith() })
+
+      assert.match(logged(), /::warning::A draft of 4\.17\.0 left behind by an earlier run could not be deleted \(HTTP 403\): delete it by hand at https:\/\/github\.com\/stellarwp\/plugin\/releases\/untagged-abc/)
+      assert.strictEqual(outputs().published, 'true')
     })
 
     it('refuses a missing file before creating anything', async (t) => {
