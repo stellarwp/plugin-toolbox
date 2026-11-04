@@ -1,0 +1,75 @@
+# Builds the text of the "Try in WordPress Playground" comment for a pull request: "building", the
+# links when the zip is ready, or "failed". The text starts with a hidden first line, the marker.
+#
+# It neither builds the zip nor posts the comment. The reusable workflow
+# .github/workflows/playground-preview.yml builds the zip, and passes the file this action writes
+# (the `comment-file` output) to the pr-comment action, which finds the earlier comment by its marker
+# and replaces it. So the action also works with a zip from anywhere, and with any way of posting.
+#
+# The work is in playground-preview.js, run by actions/github-script, so there is nothing to install
+# or build: the file in the repository is the file that runs.
+name: Playground preview
+description: Writes the pull request comment text with WordPress Playground links for a plugin zip
+
+inputs:
+  status:
+    description: '`building`, `ready` or `failed`. Picks the comment to write.'
+    required: true
+  zip-url:
+    description: >-
+      Public https link to the plugin zip. Required for `ready`: it replaces {{ZIP_URL}} in the
+      blueprints and is the "Download zip" link.
+    required: false
+    default: ''
+  blueprints:
+    description: >-
+      Blueprint files, one path per line, relative to the repository root. Each file becomes one
+      link, in this order. Empty uses the default blueprint next to this action: install the zip,
+      activate it, turn on WP_DEBUG and WP_DEBUG_DISPLAY. Read only for `ready`, from the checkout,
+      so the job has to check out the repository first.
+    required: false
+    default: ''
+  comment-marker:
+    description: >-
+      Hidden first line of the comment, used to find it again. Empty uses
+      `<!-- playground-preview:<owner>/<repo> -->`.
+    required: false
+    default: ''
+  time-zone:
+    description: 'IANA time zone of the time on the badge, e.g. America/New_York.'
+    required: false
+    default: 'America/New_York'
+  sha:
+    description: 'The commit the comment names. Only the first 7 characters are shown.'
+    required: false
+    default: ${{ github.event.pull_request.head.sha }}
+
+outputs:
+  comment-file:
+    description: >-
+      Path of the file that holds the comment text, under the runner's temp directory. Pass it to
+      the pr-comment action as `body-file`.
+    value: ${{ steps.comment.outputs.comment-file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Write the Playground preview comment text
+      id: comment
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than written into the script, so an input is data and never
+        # part of the program.
+        INPUT_STATUS: ${{ inputs.status }}
+        INPUT_ZIP_URL: ${{ inputs.zip-url }}
+        INPUT_BLUEPRINTS: ${{ inputs.blueprints }}
+        INPUT_COMMENT_MARKER: ${{ inputs.comment-marker }}
+        INPUT_TIME_ZONE: ${{ inputs.time-zone }}
+        INPUT_SHA: ${{ inputs.sha }}
+      with:
+        script: |
+          const { run } = require(`${process.env.ACTION_PATH}/playground-preview.js`)
+          await run({ core, env: process.env })
