@@ -23,8 +23,9 @@ const {
   readyComment,
   DEFAULT_BLUEPRINT,
   MAX_COMMENT_LENGTH,
+  COMMENT_FILE,
 } = require('../../../.github/actions/playground-preview/playground-preview.js')
-const { actionsFor, octokitFor } = require('../../support/actions.js')
+const { coreWithOutputs } = require('../../support/actions.js')
 
 const SCRIPT = path.join(__dirname, '../../../.github/actions/playground-preview/playground-preview.js')
 const FIXTURES = path.join(__dirname, 'fixtures')
@@ -106,16 +107,10 @@ function actionEnv(overrides = {}) {
     INPUT_COMMENT_MARKER: '',
     INPUT_TIME_ZONE: 'America/New_York',
     INPUT_SHA: SHA,
-    INPUT_PULL_REQUEST: '12',
+    RUNNER_TEMP: fs.mkdtempSync(path.join(os.tmpdir(), 'playground-preview-temp-')),
     ...overrides,
   }
 }
-
-/** API answers for a pull request with no preview comment yet. */
-const NO_COMMENT = [
-  { method: 'GET', path: /^\/repos\/example-org\/my-plugin\/issues\/12\/comments/, body: [{ id: 1, body: 'Looks good.' }] },
-  { method: 'POST', path: '/repos/example-org/my-plugin/issues/12/comments', status: 201, body: { id: 99 } },
-]
 
 describe('playground-preview.js', () => {
   describe('readBlueprintList', () => {
@@ -380,64 +375,71 @@ describe('playground-preview.js', () => {
   })
 
   describe('run', () => {
-    it('posts the links under the marker named after the repository', async (t) => {
-      const { github, requests, core, summary } = await actionsFor(t, NO_COMMENT)
+    /** What the `comment-file` output points to. */
+    const written = (outputs) => fs.readFileSync(outputs()['comment-file'], 'utf8')
 
-      await run({ github, core, env: actionEnv({ GITHUB_WORKSPACE: checkoutWith() }), now: WINTER })
+    it('writes the links under the marker named after the repository', async (t) => {
+      const { core, outputs, summary } = await coreWithOutputs(t)
+      const env = actionEnv({ GITHUB_WORKSPACE: checkoutWith() })
 
-      const body = requests.at(-1).body.body
+      await run({ core, env, now: WINTER })
+
+      assert.equal(outputs()['comment-file'], path.join(env.RUNNER_TEMP, COMMENT_FILE))
+      const body = written(outputs)
       assert.ok(body.startsWith('<!-- playground-preview:example-org/my-plugin -->\n🎉 Playground preview ready for commit 15e470c\n'))
       assert.match(body, /Built-01%2F15%2005%3A43%20PM%20EST-darkgreen/)
       assert.match(summary(), /Playground preview ready/, 'the links are in the job summary too')
     })
 
-    it('replaces the earlier preview comment rather than adding a second one', async (t) => {
-      const { github, requests, core } = await actionsFor(t, [
-        { method: 'GET', path: /^\/repos\/example-org\/my-plugin\/issues\/12\/comments/, body: [{ id: 5, body: `${MARKER}\nbuilding` }] },
-        { method: 'PATCH', path: '/repos/example-org/my-plugin/issues/comments/5', body: { id: 5 } },
-      ])
-
-      await run({ github, core, env: actionEnv({ INPUT_STATUS: 'building' }), now: WINTER })
-
-      assert.equal(requests.at(-1).method, 'PATCH')
-      assert.equal(requests.filter((request) => request.method === 'POST').length, 0)
-    })
-
     it('uses the marker it is given', async (t) => {
-      const { github, requests, core } = await actionsFor(t, NO_COMMENT)
+      const { core, outputs } = await coreWithOutputs(t)
 
-      await run({ github, core, env: actionEnv({ INPUT_STATUS: 'building', INPUT_COMMENT_MARKER: '<!-- custom -->' }), now: WINTER })
+      await run({ core, env: actionEnv({ INPUT_STATUS: 'building', INPUT_COMMENT_MARKER: '<!-- custom -->' }), now: WINTER })
 
-      assert.ok(requests.at(-1).body.body.startsWith('<!-- custom -->\n🏗️ Playground preview building'))
+      assert.ok(written(outputs).startsWith('<!-- custom -->\n🏗️ Playground preview building'))
     })
 
     it('links "failed" to this run', async (t) => {
-      const { github, requests, core } = await actionsFor(t, NO_COMMENT)
+      const { core, outputs } = await coreWithOutputs(t)
 
-      await run({ github, core, env: actionEnv({ INPUT_STATUS: 'failed', INPUT_ZIP_URL: '' }), now: WINTER })
+      await run({ core, env: actionEnv({ INPUT_STATUS: 'failed', INPUT_ZIP_URL: '' }), now: WINTER })
 
-      assert.match(requests.at(-1).body.body, /\(https:\/\/github\.com\/example-org\/my-plugin\/actions\/runs\/777\)/)
+      assert.match(written(outputs), /\(https:\/\/github\.com\/example-org\/my-plugin\/actions\/runs\/777\)/)
     })
 
-    it('refuses an unknown status before calling the API', async (t) => {
-      const { github, requests, core } = await actionsFor(t, NO_COMMENT)
+    it('replaces the file of an earlier status, so the next step reads the newest text', async (t) => {
+      const { core, outputs } = await coreWithOutputs(t)
+      const env = actionEnv({ INPUT_STATUS: 'building' })
 
-      await assert.rejects(run({ github, core, env: actionEnv({ INPUT_STATUS: 'done' }) }), /Unknown status 'done'/)
-      assert.equal(requests.length, 0)
+      await run({ core, env, now: WINTER })
+      await run({ core, env: { ...env, INPUT_STATUS: 'failed' }, now: WINTER })
+
+      assert.match(written(outputs), /build failed for commit 15e470c/)
     })
 
-    it('refuses to run outside a pull request', async (t) => {
-      const { github, core } = await actionsFor(t, NO_COMMENT)
+    it('refuses an unknown status and writes nothing', async (t) => {
+      const { core, outputs } = await coreWithOutputs(t)
+      const env = actionEnv({ INPUT_STATUS: 'done' })
 
-      await assert.rejects(run({ github, core, env: actionEnv({ INPUT_PULL_REQUEST: '' }) }), /only runs for pull_request events/)
+      await assert.rejects(run({ core, env }), /Unknown status 'done'/)
+      assert.equal(fs.existsSync(path.join(env.RUNNER_TEMP, COMMENT_FILE)), false)
+      assert.equal(outputs()['comment-file'], undefined)
     })
 
-    it('posts nothing when a blueprint is broken, so the "failed" job can say so', async (t) => {
-      const { github, requests, core } = await actionsFor(t, NO_COMMENT)
+    it('writes nothing when a blueprint is broken, so the "failed" job can say so', async (t) => {
+      const { core, outputs } = await coreWithOutputs(t)
       const dir = checkoutWith({ 'bad.json': 'not json' })
+      const env = actionEnv({ GITHUB_WORKSPACE: dir, INPUT_BLUEPRINTS: 'bad.json' })
 
-      await assert.rejects(run({ github, core, env: actionEnv({ GITHUB_WORKSPACE: dir, INPUT_BLUEPRINTS: 'bad.json' }) }), /bad\.json is not valid JSON/)
-      assert.equal(requests.length, 0)
+      await assert.rejects(run({ core, env }), /bad\.json is not valid JSON/)
+      assert.equal(fs.existsSync(path.join(env.RUNNER_TEMP, COMMENT_FILE)), false)
+      assert.equal(outputs()['comment-file'], undefined)
+    })
+
+    it('does not call the GitHub API, so it needs no token', async (t) => {
+      const { core } = await coreWithOutputs(t)
+
+      await assert.doesNotReject(run({ core, env: actionEnv({ INPUT_STATUS: 'building' }), now: WINTER }))
     })
   })
 
