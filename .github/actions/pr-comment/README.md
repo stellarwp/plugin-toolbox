@@ -27,7 +27,7 @@ A pull request comment is an issue comment in the API, so the action also works 
 | `operation` | `upsert` | `upsert`, `create`, `update`, `delete` or `find` |
 | `marker` | empty | Hidden first line that finds the comment. Needed for `upsert` and `find`. For `update` and `delete` it finds the comment when there is no `comment-id` |
 | `body` | empty | The comment text. Give `body` or `body-file`, not both |
-| `body-file` | empty | Path of a file that holds the comment text. Prefer it for long text |
+| `body-file` | empty | Path of a file that holds the comment text. Prefer it for long text. See [Body from a file](#body-from-a-file) |
 | `comment-id` | empty | The comment to `update` or `delete`, instead of searching by `marker` |
 | `issue-number` | the pull request or issue of the event | The pull request or issue to read and write |
 | `repository` | current repository | The `<owner>/<repo>` of the comment |
@@ -40,6 +40,34 @@ A pull request comment is an issue comment in the API, so the action also works 
 | `comment-id` | The comment found, created, updated or deleted. Empty when there was none |
 | `comment-url` | Link to the comment. Empty when there was none, and after a delete |
 | `result` | `created`, `updated`, `deleted`, `found` or `not-found` |
+
+## Body from a file
+
+Most checks write their report to a file. Without `body-file`, a caller has to turn that file into
+a multi-line step output first, which takes a step of its own and a delimiter that the text must
+never contain:
+
+```yaml
+- id: text
+  run: |
+    {
+      echo 'body<<EOF'
+      cat result.md
+      echo 'EOF'
+    } >> "$GITHUB_OUTPUT"
+- uses: stellarwp/plugin-toolbox/.github/actions/pr-comment@main
+  with:
+    body: ${{ steps.text.outputs.body }}
+```
+
+With `body-file` the caller passes the path and nothing else:
+
+```yaml
+- uses: stellarwp/plugin-toolbox/.github/actions/pr-comment@main
+  with:
+    marker: '<!-- my-check:example-org/my-plugin -->'
+    body-file: result.md
+```
 
 ## Operations
 
