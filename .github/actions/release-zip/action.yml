@@ -31,6 +31,14 @@ inputs:
     description: '`yes` runs `pup i18n`, which downloads the finished translations; `no` skips it. Anything else fails before anything runs.'
     required: false
     default: 'yes'
+  after-build:
+    description: >-
+      Shell commands to run after `pup build` and before `pup check`, `pup i18n` and
+      `pup package`, in the checkout, with the step's environment: what a plugin generates from the
+      built assets and ships in the zip, such as a POT file made with WP-CLI. Run by bash with `-e`
+      and `pipefail`, like a `run:` step. Empty runs nothing.
+    required: false
+    default: ''
   working-directory:
     description: >-
       Where the repository is checked out, relative to the workspace or absolute, for a workflow
@@ -80,6 +88,7 @@ runs:
         INPUT_PRODUCTION: ${{ inputs.production }}
         INPUT_CHECK: ${{ inputs.check }}
         INPUT_I18N: ${{ inputs.i18n }}
+        INPUT_AFTER_BUILD: ${{ inputs.after-build }}
         INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
         INPUT_PUP_VERSION: ${{ inputs.pup-version }}
         INPUT_TOKEN: ${{ inputs.token }}

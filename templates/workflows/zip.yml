@@ -164,12 +164,6 @@ jobs:
           COMMAND: exists
           FILE: ${{ steps.name.outputs.zip-name }}.zip
 
-      # The plugin's own steps before packaging go here, under the same condition. Give generates
-      # the POT file, which pup i18n does not: `pup i18n` downloads finished translations.
-      # - name: Generate the POT file
-      #   if: steps.s3_zip_exists.outcome != 'success'
-      #   run: php -d xdebug.mode=off "$(command -v wp)" i18n make-pot . languages/my-plugin.pot
-
       - uses: stellarwp/plugin-toolbox/.github/actions/release-zip@v1
         id: zip
         if: steps.s3_zip_exists.outcome != 'success'
@@ -178,6 +172,13 @@ jobs:
           production: ${{ inputs.production }}
           # The pup that named the zip packages it: `latest` is resolved once, by zip-name.
           pup-version: ${{ steps.name.outputs.pup-release }}
+          # The plugin's own commands between `pup build` and `pup package`, for what it generates
+          # from the built assets and ships in the zip. Give makes the POT file here: WP-CLI reads
+          # the strings of the built JavaScript, so it has to run after the build, and pup i18n does
+          # not generate it (it downloads finished translations). Remove the input when there is
+          # nothing to generate.
+          after-build: |
+            php -d xdebug.mode=off "$(command -v wp)" i18n make-pot . languages/my-plugin.pot
         env:
           # For a build that installs private composer packages or packages from GitHub Packages.
           # All three are empty without their secret.

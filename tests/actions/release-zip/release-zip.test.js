@@ -6,7 +6,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 
-const { runZip, readVersion, readYesNo, pupCommands } = require('../../../.github/actions/release-zip/release-zip.js')
+const { runZip, readVersion, readYesNo, readAfterBuild, pupCommands } = require('../../../.github/actions/release-zip/release-zip.js')
 const { coreWithOutputs, recordingExec } = require('../../support/actions.js')
 
 /** A .puprc that names the zip and lists one version file. */
@@ -52,6 +52,7 @@ function zipEnv(overrides = {}) {
     INPUT_PRODUCTION: 'no',
     INPUT_CHECK: 'yes',
     INPUT_I18N: 'yes',
+    INPUT_AFTER_BUILD: '',
     INPUT_PUP_VERSION: '2.0.0',
     INPUT_TOKEN: '',
     RUNNER_TEMP: '/runner/temp',
@@ -121,6 +122,18 @@ describe('release-zip', () => {
       for (const value of ['', 'true', 'false', 'on', undefined]) {
         assert.throws(() => readYesNo(value, 'i18n'), /i18n '.*' is not yes or no\. No zip was built\./)
       }
+    })
+  })
+
+  describe('readAfterBuild', () => {
+    it('keeps the commands as given', () => {
+      assert.equal(readAfterBuild('wp i18n make-pot . languages/give.pot\n'), 'wp i18n make-pot . languages/give.pot\n')
+    })
+
+    it('reads an empty or blank input as nothing to run', () => {
+      assert.equal(readAfterBuild(''), '')
+      assert.equal(readAfterBuild('  \n'), '')
+      assert.equal(readAfterBuild(undefined), '')
     })
   })
 
@@ -211,6 +224,73 @@ describe('release-zip', () => {
         sequence(calls).filter((call) => call.startsWith('php')),
         [`php ${PHAR} build`, `php ${PHAR} package ${VERSION}`, `php -d display_errors=stderr ${PHAR} zip-name ${VERSION}`]
       )
+    })
+
+    it('runs the after-build commands between pup build and pup check, in the checkout, like a run step', async (t) => {
+      const { core } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed([{ command: 'bash' }]))
+      const cwd = checkoutWith({ '.puprc': PUPRC })
+      const commands = 'php -d xdebug.mode=off "$(command -v wp)" i18n make-pot . languages/give.pot\n'
+
+      await runZip({ core, exec, env: zipEnv({ INPUT_AFTER_BUILD: commands }), cwd })
+
+      assert.deepEqual(sequence(calls), [
+        ...DOWNLOAD,
+        `php ${PHAR} build`,
+        `bash --noprofile --norc -eo pipefail -c ${commands}`,
+        `php ${PHAR} check --dev`,
+        `php ${PHAR} i18n`,
+        `php ${PHAR} package ${VERSION}`,
+        `php -d display_errors=stderr ${PHAR} zip-name ${VERSION}`,
+      ])
+      const bash = calls.find((call) => call.command === 'bash')
+      assert.equal(bash.options.cwd, cwd, 'the commands run in the checkout')
+      assert.ok(!bash.options.silent, 'what they print goes to the log')
+    })
+
+    it('runs the after-build commands in working-directory', async (t) => {
+      const { core } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed([{ command: 'bash' }]))
+      const workspace = checkoutWith()
+      const cwd = path.join(workspace, 'source')
+      fs.mkdirSync(cwd)
+      fs.writeFileSync(path.join(cwd, '.puprc'), JSON.stringify(PUPRC))
+
+      await runZip({
+        core,
+        exec,
+        env: zipEnv({ INPUT_AFTER_BUILD: 'echo pot', INPUT_WORKING_DIRECTORY: 'source' }),
+        cwd: workspace,
+      })
+
+      assert.equal(calls.find((call) => call.command === 'bash').options.cwd, cwd)
+    })
+
+    it('runs no shell when after-build is empty', async (t) => {
+      const { core } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(allSucceed())
+      const cwd = checkoutWith({ '.puprc': PUPRC })
+
+      await runZip({ core, exec, env: zipEnv({ INPUT_AFTER_BUILD: '  \n' }), cwd })
+
+      assert.ok(!calls.some((call) => call.command === 'bash'))
+    })
+
+    it('fails with the script output when an after-build command fails, and runs nothing after it', async (t) => {
+      const { core, outputs } = await coreWithOutputs(t)
+      const { exec, calls } = recordingExec(
+        allSucceed([{ command: 'bash', exitCode: 1, stderr: 'Error: No such file or directory: languages' }])
+      )
+      const cwd = checkoutWith({ '.puprc': PUPRC })
+
+      await assert.rejects(
+        runZip({ core, exec, env: zipEnv({ INPUT_AFTER_BUILD: 'wp i18n make-pot . languages/give.pot' }), cwd }),
+        /The after-build commands failed \(exit code 1\):\nError: No such file or directory: languages/
+      )
+
+      const php = sequence(calls).filter((call) => call.startsWith('php'))
+      assert.deepEqual(php, [`php ${PHAR} build`], 'pup build ran, and no pup command after the failure')
+      assert.deepEqual(outputs(), {})
     })
 
     it('builds in working-directory and reports the zip there, as an absolute path', async (t) => {

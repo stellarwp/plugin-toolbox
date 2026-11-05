@@ -14,6 +14,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
+const { runOrFail } = require('../../lib/exec.js')
 const { readYesNo: readYesNoInput } = require('../../lib/inputs.js')
 const { readVersionFiles } = require('../../lib/puprc.js')
 const { setupPup, lastLine } = require('../../lib/pup.js')
@@ -58,6 +59,33 @@ function readYesNo(value, input) {
 }
 
 /**
+ * Reads the commands to run after `pup build`: the text as given, or nothing when it is blank.
+ *
+ * @param {string} value The `after-build` input.
+ *
+ * @returns {string} The commands, or an empty string when there are none.
+ */
+function readAfterBuild(value) {
+  return String(value ?? '').trim() === '' ? '' : String(value)
+}
+
+/**
+ * Runs the after-build commands in the checkout, the way a `run:` step would: bash with `-e` and
+ * `pipefail`, so the first command that fails fails the step, and with the step's environment.
+ *
+ * @param {object} exec     The @actions/exec toolkit.
+ * @param {string} commands The shell script.
+ * @param {string} cwd      The checkout.
+ *
+ * @throws {Error} When the script exits non-zero, holding what it printed.
+ *
+ * @returns {Promise<string>} What the script printed to stdout.
+ */
+function runAfterBuild(exec, commands, cwd) {
+  return runOrFail(exec, 'bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', commands], { cwd }, 'The after-build commands')
+}
+
+/**
  * The pup commands a build runs, in order.
  *
  * `pup check` runs strict on a production build, so a `TBD` left behind or a version conflict fails
@@ -91,10 +119,12 @@ function pupCommands({ version, production, check, i18n }) {
 /**
  * Validates the inputs, then builds and packages the version with pup.
  *
- * Every input check and the .puprc read run before pup is downloaded. A pup command that fails
- * fails the step with pup's output, and the commands after it do not run. `COMPOSER_AUTH`, when the
- * caller's step sets it, reaches the build commands through the environment, as every variable
- * does.
+ * Every input check and the .puprc read run before pup is downloaded. The `after-build` commands,
+ * when there are any, run between `pup build` and the commands that follow it, so a file they
+ * write (a POT generated from the built assets, say) is checked and packaged. A pup command or the
+ * after-build script that fails fails the step with its output, and nothing after it runs.
+ * `COMPOSER_AUTH`, when the caller's step sets it, reaches the build commands through the
+ * environment, as every variable does.
  *
  * @param {object}   options
  * @param {object}   options.core      The @actions/core toolkit, for the log and the outputs.
@@ -114,6 +144,7 @@ async function runZip({ core, exec, env, cwd: workspace = process.cwd(), fetchIm
   const production = readYesNo(env.INPUT_PRODUCTION, 'production')
   const check = readYesNo(env.INPUT_CHECK, 'check')
   const i18n = readYesNo(env.INPUT_I18N, 'i18n')
+  const afterBuild = readAfterBuild(env.INPUT_AFTER_BUILD)
   const cwd = readWorkingDirectory(env.INPUT_WORKING_DIRECTORY, { base: workspace, what: WHAT })
 
   // Only the check: pup reads the files itself. A .puprc pup would read as empty is refused here,
@@ -122,7 +153,13 @@ async function runZip({ core, exec, env, cwd: workspace = process.cwd(), fetchIm
 
   const { pup } = await setupPup({ exec, env, core, fetchImpl, what: WHAT })
 
-  for (const args of pupCommands({ version, production, check, i18n })) {
+  const [build, ...rest] = pupCommands({ version, production, check, i18n })
+
+  await pup(build, { cwd })
+  if (afterBuild !== '') {
+    await runAfterBuild(exec, afterBuild, cwd)
+  }
+  for (const args of rest) {
     await pup(args, { cwd })
   }
 
@@ -142,4 +179,4 @@ async function runZip({ core, exec, env, cwd: workspace = process.cwd(), fetchIm
   core.setOutput('zip-path', zipPath)
 }
 
-module.exports = { runZip, readVersion, readYesNo, pupCommands }
+module.exports = { runZip, readVersion, readYesNo, readAfterBuild, pupCommands }

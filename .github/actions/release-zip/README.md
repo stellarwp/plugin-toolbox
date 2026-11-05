@@ -39,13 +39,29 @@ Four pup commands run, in this order, from the root of the checkout:
    default. Skipped with `check: no`.
 3. `pup i18n` downloads the finished translations the `i18n` section of `.puprc` points at. Nothing
    happens without the section. Skipped with `i18n: no`. It does not generate the POT file; a
-   plugin that ships one generates it in a step of its own, before this action.
+   plugin that ships one generates it with `after-build`, below.
 4. `pup package <version>` writes `version` into every file `.puprc` lists under `paths.versions`,
    syncs the files `.distignore` or `.distfiles` keep into `.pup-zip/`, zips them as
    `<zip-name>.zip` in the root of the checkout, and restores the version files with git. The
    checkout is left as it was; only the zip carries the suffix.
 
-A command that fails fails the step with pup's output in the log, and the commands after it do not
+Between `pup build` and `pup check`, the `after-build` commands run when the caller passes any:
+what a plugin generates from the built assets and ships in the zip. Give makes its POT file there,
+since WP-CLI reads the strings of the built JavaScript, which is only there after the build, and
+`pup package` takes the file along:
+
+```yaml
+- uses: stellarwp/plugin-toolbox/.github/actions/release-zip@v1
+  with:
+    version: ${{ steps.name.outputs.version }}
+    after-build: |
+      php -d xdebug.mode=off "$(command -v wp)" i18n make-pot . languages/give.pot
+```
+
+They run in the checkout (`working-directory` when set) through bash with `-e` and `pipefail`, as a
+`run:` step does, with the step's environment; what they print goes to the log.
+
+A command that fails fails the step with its output in the log, and the commands after it do not
 run. The action then asks `pup zip-name <version>` for the name pup gave the zip and checks that the
 file is there, so the `zip-path` output always names a file that exists.
 
@@ -110,6 +126,7 @@ name in `composer.json`.
 | `production` | no | `no` | `yes` runs `pup check` strict; `no` runs it with `--dev` |
 | `check` | no | `yes` | Whether `pup check` runs |
 | `i18n` | no | `yes` | Whether `pup i18n` runs |
+| `after-build` | no | | Shell commands to run after `pup build` and before `pup check`, in the checkout: a POT file, say. bash with `-e` and `pipefail`, like a `run:` step. The caller's own script, trusted like its workflow |
 | `working-directory` | no | the workspace | Where the repository is checked out, relative to the workspace or absolute, e.g. `source`. pup runs and writes the zip there; `zip-path` is absolute either way. The caller's own value, trusted like the checkout's `ref` |
 | `pup-version` | no | `latest` | The pup release to run: a number such as `2.0.0`, or `latest`. Pass zip-name's `pup-release` output, the release that named the zip. See [Which pup runs](#which-pup-runs) |
 | `token` | no | `github.token` | Authenticates the `latest` lookup. A pinned `pup-version` never uses it |
@@ -142,8 +159,9 @@ action's directory.
 
 Inputs reach the script through `process.env`, never by being interpolated into it, so a version is
 data and cannot become part of the program. The commands run with their arguments as a list,
-without a shell. `pup build`, `check`, `i18n` and `package` print to the log; only `pup zip-name`,
-whose output the action reads, runs silently.
+without a shell; the one exception is `after-build`, which is a script by definition and runs
+through bash, like a `run:` step. `pup build`, `check`, `i18n` and `package` and the after-build
+commands print to the log; only `pup zip-name`, whose output the action reads, runs silently.
 
 `tests/actions/release-zip/release-zip.test.js` covers the rules above against a stand-in for
 `exec`. Run `npm install` once, then `node --test`.
