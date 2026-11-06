@@ -175,8 +175,9 @@ jobs:
           # The plugin's own commands between `pup build` and `pup package`, for what it generates
           # from the built assets and ships in the zip. Give makes the POT file here: WP-CLI reads
           # the strings of the built JavaScript, so it has to run after the build, and pup i18n does
-          # not generate it (it downloads finished translations). Remove the input when there is
-          # nothing to generate.
+          # not generate it (it downloads finished translations). Replace `my-plugin` with the
+          # plugin's text domain, the name wordpress.org expects for the POT (`give` writes
+          # `languages/give.pot`), or remove the input when there is nothing to generate.
           after-build: |
             php -d xdebug.mode=off "$(command -v wp)" i18n make-pot . languages/my-plugin.pot
         env:
