@@ -29,7 +29,7 @@ tag  ->  QA the new tag, approve  ->  set-stable  ->  update-trunk
 
 ## Example
 
-A plugin repository's release workflow. The `concurrency` lock and the protected `environment` are the caller's job: a composite action can't enforce either.
+A plugin repository's release workflow. The `concurrency` lock and the protected `environment` are the caller's job: a composite action can't enforce either. Create the `wordpress-org` environment in the repository settings, with required reviewers, before the first run: a workflow that names an environment that doesn't exist gets one created with no protection rules, and the release job then runs without anyone approving it.
 
 ```yaml
 # A plugin repository's release workflow. Replace my-plugin, and replace
