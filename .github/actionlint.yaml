@@ -1,0 +1,6 @@
+# actionlint 1.7.12 doesn't know concurrency.queue, which GitHub documents and this workflow
+# relies on. Drop this once it does: https://github.com/rhysd/actionlint/issues/657
+paths:
+  .github/workflows/release-tags.yml:
+    ignore:
+      - 'unexpected key "queue" for "concurrency" section'

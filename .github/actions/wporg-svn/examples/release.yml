@@ -1,0 +1,63 @@
+# A plugin repository's release workflow. Replace my-plugin, and replace
+# <full-commit-sha> with a full commit SHA of stellarwp/plugin-toolbox.
+name: Release to WordPress.org
+
+on:
+  workflow_dispatch:
+    inputs:
+      plugin-slug:
+        description: The plugin's wordpress.org slug
+        required: true
+      zip-url:
+        description: HTTPS URL of the built plugin ZIP (prefer a short-lived signed URL)
+        required: true
+
+# One release at a time per plugin, held for the whole sequence. This lock only
+# covers workflows in this repository: release each plugin from one place.
+concurrency:
+  group: wporg-${{ inputs.plugin-slug }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      revision: ${{ steps.tag.outputs.revision }}
+    steps:
+      - name: Install Subversion
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends subversion
+      - id: tag
+        uses: stellarwp/plugin-toolbox/.github/actions/wporg-svn/tag@<full-commit-sha>
+        with:
+          plugin-slug: ${{ inputs.plugin-slug }}
+          zip-url: ${{ inputs.zip-url }}
+          wporg-username: ${{ secrets.WPORG_USERNAME }}
+          wporg-password: ${{ secrets.WPORG_PASSWORD }}
+
+  release:
+    needs: tag
+    runs-on: ubuntu-24.04
+    # A protected environment: its reviewers QA tags/<version> at the tag job's
+    # revision output before approving this job.
+    environment: wordpress-org
+    steps:
+      - name: Install Subversion
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends subversion
+      - uses: stellarwp/plugin-toolbox/.github/actions/wporg-svn/set-stable@<full-commit-sha>
+        with:
+          plugin-slug: ${{ inputs.plugin-slug }}
+          version: ${{ needs.tag.outputs.version }}
+          expected-revision: ${{ needs.tag.outputs.revision }}
+          wporg-username: ${{ secrets.WPORG_USERNAME }}
+          wporg-password: ${{ secrets.WPORG_PASSWORD }}
+      - uses: stellarwp/plugin-toolbox/.github/actions/wporg-svn/update-trunk@<full-commit-sha>
+        with:
+          plugin-slug: ${{ inputs.plugin-slug }}
+          version: ${{ needs.tag.outputs.version }}
+          expected-revision: ${{ needs.tag.outputs.revision }}
+          wporg-username: ${{ secrets.WPORG_USERNAME }}
+          wporg-password: ${{ secrets.WPORG_PASSWORD }}

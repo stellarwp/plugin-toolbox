@@ -1,0 +1,46 @@
+name: "WordPress.org SVN: update trunk"
+description: >-
+  Post-release housekeeping: replace trunk with tags/<version> in one atomic server-side commit. This also
+  replaces trunk/readme.txt, so it refuses to run until set-stable has pointed the Stable Tag at the version.
+inputs:
+  plugin-slug:
+    description: The plugin's wordpress.org slug.
+    required: true
+  version:
+    description: The released tag to copy into trunk.
+    required: true
+  expected-revision:
+    description: >-
+      Optional: the tag action's revision output. When set, refuse unless tags/<version> last changed at
+      exactly this revision, so the release is the tag that was QA'd. Leave it empty for a manual run or rollback.
+    required: false
+  wporg-username:
+    description: WordPress.org account with commit access to the plugin.
+    required: true
+  wporg-password:
+    description: That account's SVN password, not its login password.
+    required: true
+outputs:
+  version:
+    description: The version trunk now matches.
+    value: ${{ steps.release.outputs.version }}
+  revision:
+    description: The revision that replaced trunk, or the observed revision for a verified no-op.
+    value: ${{ steps.release.outputs.revision }}
+runs:
+  using: composite
+  steps:
+    - name: Mask the password
+      shell: bash
+      env:
+        PASSWORD: ${{ inputs.wporg-password }}
+      run: printf '%s\n' "$PASSWORD" | while IFS= read -r line; do [ -z "$line" ] || { line=${line//%/%25}; echo "::add-mask::${line//$'\r'/%0D}"; }; done
+    - id: release
+      shell: bash
+      env:
+        WPORG_SLUG: ${{ inputs.plugin-slug }}
+        WPORG_VERSION: ${{ inputs.version }}
+        WPORG_EXPECTED_REVISION: ${{ inputs.expected-revision }}
+        WPORG_USERNAME: ${{ inputs.wporg-username }}
+        WPORG_PASSWORD: ${{ inputs.wporg-password }}
+      run: bash "$GITHUB_ACTION_PATH/update-trunk.sh"
