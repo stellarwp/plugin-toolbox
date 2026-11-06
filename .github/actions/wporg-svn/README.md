@@ -170,13 +170,7 @@ New files are added without SVN auto-props, including any a repository inherits.
 - **Not supported:** first releases, prerelease versions (`1.2-beta`), building the ZIP, confirming a release on WordPress.org, and Git tags or releases.
 - **Races are narrowed, not prevented.** The pinned base revision protects only the paths each action writes. The rechecks shrink the windows. Neither replaces running one release at a time.
 - **Success means the commit landed and was verified.** WordPress.org processing, ZIP building and Release Confirmation happen afterwards and aren't checked.
-- **Not tested against wordpress.org writes.** The tests write only to throwaway local repositories; reads were checked against real plugins. Still unverified:
-  - authentication with an SVN password;
-  - out-of-date detection over HTTPS;
-  - real lost responses;
-  - whether wordpress.org's server-side rules accept a new tag committed as a copy with changes, the shape common deploy scripts use.
-
-  Supervise the first real release, with this page at hand.
+- **Some failure paths are untested against wordpress.org.** The actions have shipped real releases of The Events Calendar and Event Tickets. The automated tests write only to throwaway local repositories, so two paths have never run against the real server: out-of-date detection over HTTPS and a lost response to a commit that landed. Supervise your plugin's first release with this page at hand.
 
 ## Recovery
 
