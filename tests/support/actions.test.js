@@ -107,6 +107,14 @@ describe('tests/support/actions', () => {
       assert.equal(result.exitCode, 127)
     })
 
+    it('answers with stdout built from the arguments when the rule gives a function', async () => {
+      const { exec } = recordingExec([{ command: 'php', stdout: (args) => `give.${args.at(-1)}\n` }])
+
+      const result = await exec.getExecOutput('php', ['pup.phar', 'zip-name', '4.19.0-rc-2'])
+
+      assert.equal(result.stdout, 'give.4.19.0-rc-2\n')
+    })
+
     it('runs a rule effect, so a test can stand in for what the command writes', async () => {
       const written = []
       const { exec } = recordingExec([

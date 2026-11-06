@@ -488,9 +488,9 @@ describe('release-prep', () => {
     })
 
     it('bumps the version files, then replaces the TBDs', () => {
-      assert.deepEqual(pupCommands('/tmp/pup.phar', '4.17.0'), [
-        { command: 'php', args: ['/tmp/pup.phar', 'replace-version', '4.17.0'] },
-        { command: 'php', args: ['/tmp/pup.phar', 'replace-tbd', '4.17.0'] },
+      assert.deepEqual(pupCommands('4.17.0'), [
+        ['replace-version', '4.17.0'],
+        ['replace-tbd', '4.17.0'],
       ])
     })
   })
