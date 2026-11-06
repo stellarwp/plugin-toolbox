@@ -1,5 +1,5 @@
+.idea/
 __pycache__/
-
 node_modules/
 
 # No lockfile is committed. Each install resolves the newest versions the ranges in package.json

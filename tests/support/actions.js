@@ -12,6 +12,10 @@
  * outputs are read back the way a later workflow step would see them.
  *
  * Both packages are ESM only, so they are loaded with dynamic import and these factories are async.
+ *
+ * `exec` is the one stand-in. An action that shells out (git, php) would otherwise need those tools
+ * and a network at test time, so recordingExec answers from rules the way recordingFetch does, and
+ * records the calls for the test to assert.
  */
 
 const fs = require('node:fs')
@@ -28,10 +32,38 @@ const path = require('node:path')
  * @returns {Response} The response for the fetch to return.
  */
 function jsonResponse({ status = 200, body = {}, headers = {} }) {
+  // A 204 carries no body, and Response refuses one: the merge endpoint answers it when the base
+  // already contains the head.
+  if (status === 204 || status === 205 || status === 304) {
+    return new Response(null, { status, headers })
+  }
+
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'content-type': 'application/json', ...headers },
   })
+}
+
+/**
+ * The body of a recorded request: JSON parsed, anything else (an asset upload) as it was sent.
+ *
+ * @param {*} body What the request carried.
+ *
+ * @returns {*} The parsed JSON, the raw body, or undefined for none.
+ */
+function parseBody(body) {
+  if (body === undefined || body === null) {
+    return undefined
+  }
+  if (typeof body === 'string') {
+    try {
+      return JSON.parse(body)
+    } catch {
+      return body
+    }
+  }
+
+  return body
 }
 
 /**
@@ -65,7 +97,7 @@ function recordingFetch(rules = []) {
       method,
       url: href,
       path: requestPath,
-      body: options.body ? JSON.parse(options.body) : undefined,
+      body: parseBody(options.body),
     })
 
     for (const [index, rule] of rules.entries()) {
@@ -136,6 +168,22 @@ let realStdoutWrite = null
 let collecting = null
 
 /**
+ * Whether a stdout write is the action's log, which a test collects, or the test runner's own.
+ *
+ * node --test runs each file in a child process that reports its results to the parent over stdout,
+ * as serialized Buffers written whenever the runner flushes, which can be in the middle of a later
+ * test that awaits. Collecting those swallowed the reports of every test before it, and the file
+ * counted as a single test. @actions/core writes its log as strings, so only strings are collected.
+ *
+ * @param {string|Uint8Array} chunk What was written.
+ *
+ * @returns {boolean} True for a write to collect.
+ */
+function isLogWrite(chunk) {
+  return typeof chunk === 'string'
+}
+
+/**
  * Collects what is written to stdout for the length of one test.
  *
  * @actions/core writes its log there, including the `::notice::` and `::warning::` commands the
@@ -157,7 +205,7 @@ function captureStdout(t) {
     realStdoutWrite = process.stdout.write.bind(process.stdout)
 
     process.stdout.write = (chunk, encoding, callback) => {
-      if (!collecting) {
+      if (!collecting || !isLogWrite(chunk)) {
         return realStdoutWrite(chunk, encoding, callback)
       }
 
@@ -182,6 +230,30 @@ function captureStdout(t) {
   return () => written.join('')
 }
 
+/** The job summary file for this process, created on first use. */
+let summaryFile = null
+
+/**
+ * Collects what is written to the job summary for the length of one test.
+ *
+ * core.summary resolves GITHUB_STEP_SUMMARY on its first write and keeps the path for the life of
+ * the process, so a fresh file per test would be ignored after the first one. There is one file
+ * instead, and each test reads only what was appended after it began.
+ *
+ * @returns {Function} Reads back everything written to the summary since this call.
+ */
+function captureSummary() {
+  if (!summaryFile) {
+    summaryFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-summary-')), 'summary')
+    fs.writeFileSync(summaryFile, '')
+    process.env.GITHUB_STEP_SUMMARY = summaryFile
+  }
+
+  const from = fs.statSync(summaryFile).size
+
+  return () => fs.readFileSync(summaryFile, 'utf8').slice(from)
+}
+
 /**
  * The real @actions/core, pointed at a fresh GITHUB_OUTPUT file, with its log captured.
  *
@@ -194,10 +266,13 @@ function captureStdout(t) {
  * keeps the run clean and lets a test assert what was logged. stdout is restored when the test ends,
  * before the runner reports the result.
  *
+ * The job summary is collected too, so an action that writes one can be asserted on.
+ *
  * @param {object} t The node:test context, used to restore stdout afterwards.
  *
- * @returns {Promise<{core: object, outputs: Function, logged: Function}>} The toolkit, a reader for
- *          its outputs, and a reader for everything it wrote to the log.
+ * @returns {Promise<{core: object, outputs: Function, logged: Function, summary: Function}>} The
+ *          toolkit, and readers for its outputs, for everything it wrote to the log and for what it
+ *          wrote to the job summary.
  */
 async function coreWithOutputs(t) {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-output-')), 'output')
@@ -206,7 +281,91 @@ async function coreWithOutputs(t) {
 
   const core = await import('@actions/core')
 
-  return { core, outputs: () => readOutputs(file), logged: captureStdout(t) }
+  return { core, outputs: () => readOutputs(file), logged: captureStdout(t), summary: captureSummary() }
+}
+
+/**
+ * Stands in for @actions/exec: answers each call from a list of rules and records it.
+ *
+ * A rule matches on `command` and, when it has one, on `args`, a RegExp tested against the
+ * arguments joined by spaces. The first match wins. It answers with `exitCode` (default 0),
+ * `stdout` and `stderr`, and runs `effect(args, options)` first when it has one, which is how a test
+ * stands in for a file the command would have written.
+ *
+ * A call no rule matches answers exit code 127, the shell's "command not found", so a call the test
+ * did not plan for fails rather than passing silently.
+ *
+ * Like the real package, a non-zero exit rejects unless the caller passed `ignoreReturnCode`.
+ *
+ * @param {object[]} rules `{command, args, exitCode, stdout, stderr, effect}`.
+ *
+ * @returns {{exec: object, calls: object[]}} The stand-in, with `exec` and `getExecOutput`, and the
+ *          calls it recorded as `{command, args, options}`.
+ */
+function recordingExec(rules = []) {
+  const calls = []
+
+  const getExecOutput = async (command, args = [], options = {}) => {
+    calls.push({ command, args, options })
+
+    const rule = rules.find(
+      (candidate) =>
+        candidate.command === command && (!candidate.args || candidate.args.test(args.join(' ')))
+    )
+
+    if (rule?.effect) {
+      await rule.effect(args, options)
+    }
+
+    const result = rule
+      ? { exitCode: rule.exitCode ?? 0, stdout: rule.stdout ?? '', stderr: rule.stderr ?? '' }
+      : { exitCode: 127, stdout: '', stderr: `${command}: no test rule answers this call` }
+
+    if (result.exitCode !== 0 && !options.ignoreReturnCode) {
+      throw new Error(`The process '${command}' failed with exit code ${result.exitCode}`)
+    }
+
+    return result
+  }
+
+  const exec = {
+    getExecOutput,
+    exec: async (command, args, options) => (await getExecOutput(command, args, options)).exitCode,
+  }
+
+  return { exec, calls }
+}
+
+/**
+ * The real @actions/exec, wrapped to record each call and what it printed.
+ *
+ * For an action whose logic is in the commands themselves, such as git merges, a stand-in would only
+ * test the test. What a command prints is sent to a buffer of its own rather than to stdout, where
+ * the test runner reports results: that covers the `[command]` line @actions/exec echoes, so a test
+ * can assert what a run would have shown in the log.
+ *
+ * @returns {Promise<{exec: object, calls: object[], printed: Function}>} The wrapper, the calls it
+ *          recorded, and a reader for everything the commands printed.
+ */
+async function recordedRealExec() {
+  const { Writable } = require('node:stream')
+  const real = await import('@actions/exec')
+  const calls = []
+  const chunks = []
+  const sink = new Writable({
+    write(chunk, encoding, callback) {
+      chunks.push(String(chunk))
+      callback()
+    },
+  })
+
+  const getExecOutput = (command, args = [], options = {}) => {
+    calls.push({ command, args, options })
+
+    return real.getExecOutput(command, args, { ...options, outStream: sink, errStream: sink })
+  }
+
+  return { exec: { getExecOutput }, calls, printed: () => chunks.join('') }
 }
 
 /**
@@ -216,14 +375,23 @@ async function coreWithOutputs(t) {
  * @param {object[]} rules Passed to recordingFetch.
  *
  * @returns {Promise<{github: object, requests: object[], core: object, outputs: Function,
- *          logged: Function}>} Everything a test needs: the client, the requests it records, the
- *          toolkit, and readers for its outputs and its log.
+ *          logged: Function, summary: Function}>} Everything a test needs: the client, the
+ *          requests it records, the toolkit, and readers for its outputs, its log and its summary.
  */
 async function actionsFor(t, rules = []) {
   const { github, requests } = await octokitFor(rules)
-  const { core, outputs, logged } = await coreWithOutputs(t)
+  const { core, outputs, logged, summary } = await coreWithOutputs(t)
 
-  return { github, requests, core, outputs, logged }
+  return { github, requests, core, outputs, logged, summary }
 }
 
-module.exports = { actionsFor, octokitFor, coreWithOutputs, recordingFetch, readOutputs }
+module.exports = {
+  actionsFor,
+  octokitFor,
+  coreWithOutputs,
+  recordingFetch,
+  recordingExec,
+  recordedRealExec,
+  readOutputs,
+  isLogWrite,
+}

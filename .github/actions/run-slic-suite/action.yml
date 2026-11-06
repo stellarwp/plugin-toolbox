@@ -1,0 +1,117 @@
+# Runs a Codeception suite through slic. Provisioning the stack is a separate action: see
+# .github/actions/setup-slic, which must run first in the same job.
+name: Run a slic suite
+description: Runs a Codeception suite through slic, uploads its output on failure
+
+inputs:
+  suite:
+    description: 'The Codeception suite to run, e.g. integration or wpunit.'
+    required: true
+  target:
+    description: >-
+      The slic target the suite belongs to, e.g. sfwd-lms. Defaults to the one setup-slic selected,
+      so a job names its target once. Pass it to run against a different target. The action checks
+      Slic's current selection and calls `slic use` only when needed.
+    required: false
+    default: ''
+  suite-args:
+    description: 'Extra arguments appended to `slic run`, e.g. --ext DotReporter.'
+    required: false
+    default: ''
+  debug:
+    description: 'Add Codeception --debug output for this suite. Does not enable Slic logging or Xdebug.'
+    required: false
+    default: 'false'
+  upload-output-on-failure:
+    description: 'Upload the target test output directory as an artifact when the suite fails.'
+    required: false
+    default: 'false'
+  output-path:
+    description: >-
+      Custom test output directory, absolute or relative to the workspace. Defaults to
+      `tests/_output` inside the selected project's actual directory.
+    required: false
+    default: ''
+  output-artifact-name:
+    description: >-
+      Custom artifact name. The default includes target, PHP, suite, job, matrix index, run attempt,
+      and a unique step identifier so separate runs do not overwrite each other's output.
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    # ------------------------------------------------------------------------------
+    # setup-slic exports SLIC_BIN, SLIC_PHP_VERSION and SLIC_TOOLBOX_TARGET. Fail with a clear message rather than letting an empty
+    # ${SLIC_BIN} run the suite name as a command.
+    # ------------------------------------------------------------------------------
+    - name: Run suite ${{ inputs.suite }}
+      id: run
+      shell: bash
+      env:
+        SUITE: ${{ inputs.suite }}
+        SUITE_ARGS: ${{ inputs.suite-args }}
+        DEBUG: ${{ inputs.debug }}
+        TARGET: ${{ inputs.target }}
+        ARTIFACT_NAME: ${{ inputs.output-artifact-name }}
+        OUTPUT_PATH: ${{ inputs.output-path }}
+        UPLOAD_OUTPUT: ${{ inputs.upload-output-on-failure }}
+        MATRIX_JOB_INDEX: ${{ strategy.job-index }}
+      run: |
+        if [ -z "${SLIC_BIN:-}" ]; then
+          echo "::error::SLIC_BIN is not set. Run the setup-slic action earlier in this job."
+          exit 1
+        fi
+
+        if [ -z "${TARGET}" ]; then
+          TARGET="${SLIC_TOOLBOX_TARGET:-}"
+        fi
+
+        if [ -z "${TARGET}" ]; then
+          echo "::error::No slic target. Run the setup-slic action earlier in this job, or pass target."
+          exit 1
+        fi
+
+        source "${GITHUB_ACTION_PATH}/../slic-target.sh"
+        select_slic_target "${TARGET}"
+
+        # Resolve the artifact location before testing, while the selected target is known.
+        if [ -z "${OUTPUT_PATH}" ] && [ "${UPLOAD_OUTPUT}" == "true" ]; then
+          project_path=$(slic_target_path "${TARGET}")
+          OUTPUT_PATH="${project_path}/tests/_output"
+        fi
+
+        if [ -z "${ARTIFACT_NAME}" ]; then
+          # GITHUB_OUTPUT is unique to each step, including repeated uses of this composite action.
+          invocation_id="${GITHUB_OUTPUT##*/}"
+          invocation_id="${invocation_id#set_output_}"
+          ARTIFACT_NAME="test-output-${TARGET}-php${SLIC_PHP_VERSION:-unknown}-${SUITE}"
+          ARTIFACT_NAME+="-${GITHUB_JOB:-job}-matrix${MATRIX_JOB_INDEX:-0}-attempt${GITHUB_RUN_ATTEMPT:-1}-${invocation_id}"
+          ARTIFACT_NAME="$(printf '%s' "${ARTIFACT_NAME}" | tr -c 'a-zA-Z0-9._-' '-')"
+        fi
+
+        {
+          echo "artifact-name=${ARTIFACT_NAME}"
+          echo "output-path=${OUTPUT_PATH}"
+        } >> "$GITHUB_OUTPUT"
+
+        debug_args=()
+
+        if [ "${DEBUG}" == "true" ]; then
+          debug_args+=(--debug)
+        fi
+
+        set -f
+        # Word splitting is intended for the whitespace-separated suite options.
+        # shellcheck disable=SC2086
+        "${SLIC_BIN}" run "${SUITE}" ${SUITE_ARGS} "${debug_args[@]}"
+
+    - name: Upload failed test data as an artifact
+      if: failure() && steps.run.outcome == 'failure' && steps.run.outputs.output-path != '' && inputs.upload-output-on-failure == 'true'
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ steps.run.outputs.artifact-name }}
+        path: ${{ steps.run.outputs.output-path }}
+        retention-days: 2
+        overwrite: true

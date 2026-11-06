@@ -1,14 +1,22 @@
-# StellarWP Plugin Toolbox
+# Nexcess Plugin Toolbox
 
-One home for the CI that every StellarWP brand keeps rebuilding on its own.
+One home for the CI that every Nexcess brand keeps rebuilding on its own.
 
 It's a toolbox and not an actions repo because it holds more than actions. It has composite actions, full reusable workflows, and the config files every plugin repo needs. Grab whichever tools your repo needs and leave the rest.
 
 This file is the README and the build plan. Until Phase 2 ships, anything under [The plan](#the-plan) is a proposal, not a description of what exists.
 
+## Slic actions
+
+Use [setup-slic](.github/actions/setup-slic/) to provision the stack and
+[run-slic-suite](.github/actions/run-slic-suite/) to run Codeception tests. Playwright jobs can call
+Slic directly after setup. Persistent runners should finish with
+[cleanup-slic](.github/actions/cleanup-slic/). The setup guide includes a complete workflow and
+examples for different checkout layouts.
+
 ## Why
 
-All the StellarWP brands have built their own solid CI, but it is time to merge them all into one place to reduce duplication and increase efficiency of managing these tools.
+All the Nexcess brands have built their own solid CI, but it is time to merge them all into one place to reduce duplication and increase efficiency of managing these tools.
 
 This repo will start by merging TEC and LD's Cis. Both run phpcs. Both run slic. Both package with pup, process changelogs at release, and spit out QA zips. When one team fixes something, the other team never hears about it.
 
@@ -159,6 +167,9 @@ Each phase ends with something people can actually use.
 - [ ] Port `setup-slic`, `prepare-matrix`, `setup-bun` from LearnDash.
 - [ ] Port `check-php-changes`, `smart-checkout`, `process-changelog`, `add-changelog`, `generate-pot` from TEC.
 - [ ] Add `setup-node` for the npm crowd.
+- [x] Add `release-prep`: version bump, TBD replacement and changelog through pup and the changelogger action, committed to the release branch through the GitHub API. A caller to copy is in `templates/workflows/release-prep.yml`.
+- [x] Add `release-merge`: the release branch into the base branch, the base back into develop, each step safe to rerun and a conflict reported with a `MERGE_CONFLICT` line.
+- [x] Add `release-publish`: the GitHub release for a version at a commit, with a title, notes from a file and assets uploaded before the release is public, skipped when it already exists. The complete deploy workflow to copy, both actions with the build between them, is `templates/workflows/release.yml`.
 - [ ] Turn every hard-coded repo name, slug, or branch pattern into an input.
 - [ ] Self-checks: actionlint everything, unit test anything with real logic.
 - [ ] Tag `v1.0.0`.
@@ -170,7 +181,7 @@ Each phase ends with something people can actually use.
 - [ ] `tests.yml`: slic suites via `prepare-matrix`, with LD's cheap/expensive split. Review TEC's paused [#51](https://github.com/the-events-calendar/actions/pull/51) first so that work isn't lost.
 - [ ] `changelog.yml`: the changelogger check.
 - [ ] `zip.yml`: reconcile TEC's and LD's versions.
-- [ ] `release-prep.yml`: version bump, changelog, tested-up-to.
+- [ ] `release-prep.yml`: a `workflow_call` wrapper for the `release-prep` action, plus the tested-up-to bump it does not do yet.
 - [ ] `release-tags.yml`: a `workflow_call` wrapper for the floating tag actions, so a repo gets a `uses:` instead of copying the workflow. The actions have to be referenced by full path, not `./`, because a relative path in a called workflow resolves against the caller.
 - [ ] Document each in `docs/continuous-integration.md` with its local command.
 

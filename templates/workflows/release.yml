@@ -1,0 +1,94 @@
+name: Release
+
+# The deploy workflow the release dashboard dispatches, under the name it looks for by default. It
+# merges the release and publishes it on GitHub: the release branch into the base branch (`main`
+# here, `master` in some repositories), the base branch back into develop, then the GitHub release
+# for the version at the merged commit, with the build attached. The build itself is the plugin's:
+# add it between the checkout of the merged commit and release-publish, and attach its result with
+# `files`.
+#
+# A file to copy into .github/workflows/ of a plugin repository, not a workflow to call. Rename the
+# base branch below where it is `master`.
+#
+# The inputs are what the release dashboard sends for the deploy step: `branch` and `version`.
+#
+# Run it locally: you cannot, it pushes to two branches and publishes a release. Start it by hand on
+# the release branch, as the dashboard does:
+# `gh workflow run release.yml --ref release/M26.jigglypuff -f branch=release/M26.jigglypuff -f version=4.17.0`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Release branch to merge, e.g. release/M26.jigglypuff'
+        required: true
+        type: string
+      version:
+        description: 'Version being released, e.g. 4.17.0'
+        required: true
+        type: string
+
+# One deploy at a time for the whole repository, not one per release. Two releases prepared with the
+# same version would otherwise merge side by side, and the second would land its changes under a
+# version the first has just published. Run one after the other, the second finds the tag published
+# and release-merge refuses it before merging. A repository that also deploys from another workflow
+# (an `on: release` workflow, for instance) gives both the same group. GitHub keeps one run waiting
+# per group and cancels it when another arrives; a cancelled deploy is started again.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    # A release that reaches users should wait for a person: give this environment required reviewers
+    # in the repository settings, and let its branch policy accept the release branches the dashboard
+    # dispatches on.
+    environment: live
+    permissions:
+      contents: write # release-merge writes the merges, release-publish creates the tag and the release
+    steps:
+      # The environment's branch policy protects the branch the run was started on, not the input.
+      # The two have to be the same branch, so the policy covers what is actually merged and
+      # published. A failing step, not an `if:` on the job: a skipped job reads as a success to the
+      # tool that dispatched the run.
+      - name: Check that the run is on the release branch it merges
+        env:
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          if [ "$BRANCH" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::This run is on '$GITHUB_REF_NAME' but was asked to release '$BRANCH'. Start it on the release branch (the dashboard does; by hand, pass --ref)."
+            exit 1
+          fi
+
+      # The merges go through the GitHub API: no checkout is needed before this step.
+      - uses: stellarwp/plugin-toolbox/.github/actions/release-merge@v1
+        id: merge
+        with:
+          branch: ${{ inputs.branch }}
+          # The commit the run was started on. The environment's approval may come long after that,
+          # and a push to the branch in between is refused rather than merged unreviewed.
+          head: ${{ github.sha }}
+          version: ${{ inputs.version }}
+          # base-branch: master
+          # develop-branch: '' # for a repository without a develop branch
+
+      # The merged commit, the one the release is published at: build and deploy from it, so the
+      # release below is published only once the build exists, with it attached.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.merge.outputs.base-sha }}
+          persist-credentials: false
+
+      - uses: stellarwp/plugin-toolbox/.github/actions/release-publish@v1
+        id: release
+        with:
+          version: ${{ inputs.version }}
+          target: ${{ steps.merge.outputs.base-sha }}
+          # title: Maintenance Release ${{ inputs.version }}
+          # notes-file: release-notes.md
+          # files: |
+          #   build/my-plugin.zip
