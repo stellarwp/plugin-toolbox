@@ -29,7 +29,7 @@ tag  ->  QA the new tag, approve  ->  set-stable  ->  update-trunk
 
 ## Example
 
-A plugin repository's release workflow. The `concurrency` lock and the protected `environment` are the caller's job: a composite action can't enforce either. Create the `wordpress-org` environment in the repository settings, with required reviewers, before the first run: a workflow that names an environment that doesn't exist gets one created with no protection rules, and the release job then runs without anyone approving it.
+A plugin repository's release workflow. The `concurrency` lock and the protected `environment` are the caller's job: a composite action can't enforce either. Create the `wordpress-org` environment in the repository settings, with required reviewers, before the first run: a workflow that names an environment that doesn't exist gets one created with no protection rules, and the release job then runs without anyone approving it. Required reviewers are a [plan-gated feature](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments): on GitHub Free, Pro and Team they are only available in public repositories, so a private plugin repository needs GitHub Enterprise for this gate.
 
 ```yaml
 # A plugin repository's release workflow. Replace my-plugin, and replace
