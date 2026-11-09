@@ -93,14 +93,16 @@ function branches(names = Object.keys(TIP)) {
 }
 
 /**
- * Rules for the files the action reads from the release branch, as the contents endpoint sends
- * them. A file set to null is absent: no rule, so the read answers 404.
+ * Rules for the files the action reads from a branch, as the contents endpoint sends them. A file
+ * set to null is absent: no rule, so the read answers 404.
  *
  * @param {object} contents File name to contents; the fixture's defaults hold 4.17.0 everywhere.
+ * @param {string} ref      The commit the files are read at: the release branch's tip, or the
+ *                          base's tip on a retry that found the merge done.
  *
  * @returns {object[]} One rule per present file.
  */
-function files(contents = {}) {
+function files(contents = {}, ref = TIP['release/M26.test']) {
   const all = {
     '.puprc': JSON.stringify(PUPRC),
     'plugin.php': 'Version: 4.17.0\n',
@@ -112,7 +114,7 @@ function files(contents = {}) {
     .filter(([, body]) => body !== null)
     .map(([name, body]) => ({
       method: 'GET',
-      path: API.file(name),
+      path: API.file(name, ref),
       body: { type: 'file', path: name, encoding: 'base64', content: Buffer.from(body).toString('base64') },
     }))
 }
@@ -447,7 +449,7 @@ describe('release-merge', () => {
             PUBLISHED[1],
           ],
           merges: [MERGE.done, MERGE.done],
-          extra: [{ method: 'GET', path: API.compare(MERGED.main), body: { status: 'ahead' } }],
+          extra: [{ method: 'GET', path: API.compare(MERGED.main), body: { status: 'ahead' } }, ...files({}, MERGED.main)],
         }).map((rule) => (rule.path === API.branch('main') ? { ...rule, body: { name: 'main', commit: { sha: MERGED.main } } } : rule))
       )
       const { core, outputs, logged } = await coreWithOutputs(t)
@@ -462,6 +464,56 @@ describe('release-merge', () => {
       assert.strictEqual(outputs()['base-sha'], MERGED.main)
       // The second merge still asks for that commit, which develop already has.
       assert.strictEqual(mergesAsked(requests)[1].head, MERGED.main)
+    })
+
+    it('reads the version at the base\'s tip on a retry, since that tip is what the caller builds and publishes', async (t) => {
+      // The publish step failed after the deploy, so there is no tag, and main's tip is still the
+      // first run's merge commit: the retry goes on to publish it.
+      const { github, requests } = await octokitFor(
+        repositoryWith({
+          merges: [MERGE.done, MERGE.done],
+          extra: files({}, MERGED.main),
+        }).map((rule) => (rule.path === API.branch('main') ? { ...rule, body: { name: 'main', commit: { sha: MERGED.main } } } : rule))
+      )
+      const { core, outputs } = await coreWithOutputs(t)
+
+      await runMerge({ github, core, env: mergeEnv() })
+
+      // The base's files are read after the merge answered already merged, at the tip it then
+      // read, not by name, and before the develop merge.
+      assert.deepStrictEqual(requested(requests).slice(-7), [
+        `POST ${API.merges}`,
+        `GET ${API.branch('main')}`,
+        `GET ${API.file('.puprc', MERGED.main)}`,
+        `GET ${API.file('plugin.php', MERGED.main)}`,
+        `GET ${API.file('readme.txt', MERGED.main)}`,
+        `POST ${API.merges}`,
+        `GET ${API.branch('develop')}`,
+      ])
+      assert.strictEqual(outputs()['base-sha'], MERGED.main)
+    })
+
+    it('refuses a retry once the base has moved on to another release, so its code is not published under this version', async (t) => {
+      // 4.17.0 reached the deploy but its publish failed; 4.18.0 was released since, so main's tip
+      // holds 4.18.0. The caller's deploy would skip the tag it finds and zip the current trunk,
+      // and its publish would tag main's tip: 4.18.0's code under 4.17.0.
+      const later = '9999999999999999999999999999999999999999'
+      const { github, requests } = await octokitFor(
+        repositoryWith({
+          merges: [MERGE.done, MERGE.done],
+          extra: files({ 'plugin.php': 'Version: 4.18.0\n', 'readme.txt': 'Stable tag: 4.18.0\n' }, later),
+        }).map((rule) => (rule.path === API.branch('main') ? { ...rule, body: { name: 'main', commit: { sha: later } } } : rule))
+      )
+      const { core, outputs } = await coreWithOutputs(t)
+
+      await assert.rejects(
+        runMerge({ github, core, env: mergeEnv() }),
+        /main holds 4\.18\.0 in plugin\.php, not 4\.17\.0: main already had release\/M26\.test.*publish 4\.18\.0 under 4\.17\.0.*finish it by hand at the commit that merged release\/M26\.test into main.*Nothing was merged/s
+      )
+
+      // Refused before the develop merge, and the outputs are not set.
+      assert.strictEqual(mergesAsked(requests).length, 1)
+      assert.deepStrictEqual(outputs(), {})
     })
 
     it('says so when the release is already published from this branch, so the publish has nothing to do', async (t) => {

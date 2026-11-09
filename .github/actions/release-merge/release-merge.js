@@ -240,20 +240,26 @@ async function fileAt({ github, owner, repo, branch, ref, file }) {
  * under paths.versions. The tag and the title of the release come from `version`, so a value other
  * than what release-prep wrote into the branch would publish the code under the wrong version.
  *
- * @param {object} options
- * @param {object} options.github  The Octokit github-script supplies.
- * @param {string} options.owner   The repository owner.
- * @param {string} options.repo    The repository name.
- * @param {string} options.branch  The release branch, for the messages.
- * @param {string} options.ref     The commit to read the files at: the branch's tip as it was read.
- * @param {string} options.version The version to release, validated.
+ * Run again on the base branch when a retry finds the release already merged: the base's tip is
+ * then what the caller builds and publishes, and a base that has moved on to a later release
+ * would put that release's code under this version.
+ *
+ * @param {object}   options
+ * @param {object}   options.github   The Octokit github-script supplies.
+ * @param {string}   options.owner    The repository owner.
+ * @param {string}   options.repo     The repository name.
+ * @param {string}   options.branch   The branch the files are read from, for the messages.
+ * @param {string}   options.ref      The commit to read the files at: the branch's tip as it was read.
+ * @param {string}   options.version  The version to release, validated.
+ * @param {Function} options.mismatch The message for a file that holds another version, given
+ *                                    `(found, file)`; the release branch's when omitted.
  *
  * @throws {Error} When the branch has no usable .puprc, a version file holds no version, or any of
  *                 them holds a different version.
  *
  * @returns {Promise<void>} Resolves when every version file holds `version`.
  */
-async function assertBranchHoldsVersion({ github, owner, repo, branch, ref, version }) {
+async function assertBranchHoldsVersion({ github, owner, repo, branch, ref, version, mismatch = null }) {
   const read = (file) => fileAt({ github, owner, repo, branch, ref, file })
   const files = readVersionFiles(await read('.puprc'), 'Nothing was merged.')
 
@@ -279,8 +285,9 @@ async function assertBranchHoldsVersion({ github, owner, repo, branch, ref, vers
     }
     if (found !== version) {
       throw new Error(
-        `${branch} holds ${found} in ${file}, not ${version}. The version to release has to be the one ` +
-          'the branch was prepared with; check the version, or prepare the branch again. Nothing was merged.'
+        mismatch?.(found, file) ??
+          `${branch} holds ${found} in ${file}, not ${version}. The version to release has to be the one ` +
+            'the branch was prepared with; check the version, or prepare the branch again. Nothing was merged.'
       )
     }
   }
@@ -459,8 +466,29 @@ async function runMerge({ github, core, env }) {
   })
 
   // base-sha is the commit the release is published at and built from: the merge commit, or the
-  // base's tip on a retry that found the merge done. The second merge takes that commit, not the
-  // base's name, so develop receives exactly what is being released even if the base moves on.
+  // base's tip on a retry that found the merge done. That tip is only this release while no later
+  // one has been merged since: a publish that failed after the deploy, then another release, then
+  // a retry would build the later release's code and publish it under this version, since the
+  // caller's deploy and publish each skip what they find done. The merge commit itself holds the
+  // version the branch was checked for, so only a retry reads the base.
+  if (!mergedBase) {
+    await assertBranchHoldsVersion({
+      github,
+      owner,
+      repo,
+      branch: base,
+      ref: baseSha,
+      version,
+      mismatch: (found, file) =>
+        `${base} holds ${found} in ${file}, not ${version}: ${base} already had ${branch} and has moved on to ` +
+        `another release since, so a build from its tip would publish ${found} under ${version}. There is ` +
+        `nothing left to merge for ${version}; finish it by hand at the commit that merged ${branch} into ` +
+        `${base}, or release another version. Nothing was merged.`,
+    })
+  }
+
+  // The second merge takes that commit, not the base's name, so develop receives exactly what is
+  // being released even if the base moves on.
   let mergedDevelop = null
   if (develop === null) {
     core.info(`develop-branch is empty: ${base} is not merged back into a develop branch.`)
