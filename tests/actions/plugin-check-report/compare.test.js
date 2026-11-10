@@ -50,8 +50,8 @@ function compareWith(args, env = {}) {
 
   const result = execute(['--comment-file', comment, ...args], {
     GITHUB_STEP_SUMMARY: summary,
-    // A path that does not exist, so a test that wants no baseline gets none, instead of a
-    // baseline.json some earlier local run left next to the script.
+    // A path that does not exist, so a test that wants no baseline gets none, whatever file sits in
+    // the working directory.
     PLUGIN_CHECK_BASELINE: path.join(dir, 'no-baseline.json'),
     ...env,
   })

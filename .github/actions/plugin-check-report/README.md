@@ -262,8 +262,8 @@ in the same job does not see them there.
 ```yaml
 permissions:
   contents: read        # check out the repository, and read the baseline file
-  issues: write         # the sticky comment
-  pull-requests: write  # the sticky comment
+  issues: write         # the pull request comment
+  pull-requests: write  # the pull request comment
 ```
 
 A called workflow can only lower these. If the caller grants less than a job asks for, GitHub does

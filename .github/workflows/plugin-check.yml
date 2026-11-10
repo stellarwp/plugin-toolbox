@@ -122,7 +122,7 @@ on:
         required: false
 
 env:
-  # Hidden line that marks the sticky pull request comment. The report action writes it as the
+  # Hidden line that marks the pull request comment. The report action writes it as the
   # first line of the body, and the pr-comment action searches for it. Named after the repository, so
   # two plugin repositories never share a marker.
   COMMENT_MARKER: '<!-- plugin-check:${{ github.repository }} -->'
@@ -469,7 +469,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    # Writes one sticky comment on the pull request, and reads the repository's baseline file. The
+    # Writes one comment on the pull request, and reads the repository's baseline file. The
     # scripts come with the action.
     permissions:
       contents: read
