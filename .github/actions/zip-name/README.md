@@ -106,6 +106,9 @@ After the version is read, before the suffix is built:
   one prepared for that version, or the preparation did not run.
 - A version pup could not read: an empty answer, or `unknown`, which pup prints when the regex of
   the first version file matches nothing.
+- A version that does not start with two or more numeric parts, such as `TBD` or `v4.19.0`: the
+  regex of the first version file captured something else. What follows the numeric parts is not
+  checked; the regex defines the version.
 
 And at the end, a name from `pup zip-name` that does not end in `.<version>`, which means the name
 is not the one the S3 check and the upload would look for.

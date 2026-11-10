@@ -200,6 +200,16 @@ describe('zip-name', () => {
       assert.throws(() => readPrintedVersion(''), /read no version.*No zip name was resolved/s)
       assert.throws(() => readPrintedVersion('unknown\n'), /read no version.*printed 'unknown'/s)
     })
+
+    it('refuses a line that does not start with two numeric parts: the regex captured something else', () => {
+      for (const printed of ['TBD\n', 'v4.19.0\n', 'Version: 4.19.0\n', '4\n']) {
+        assert.throws(
+          () => readPrintedVersion(printed),
+          /printed '.*', which is not a version.*paths\.versions.*No zip name was resolved/s,
+          printed
+        )
+      }
+    })
   })
 
   describe('runZipName', () => {

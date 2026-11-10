@@ -124,15 +124,20 @@ function buildSuffix(label, sequence, timestamp, hash) {
   return sequence === null ? `-${label}-${timestamp}-${hash}` : `-${label}-${sequence}`
 }
 
+/** The start of anything that can be a version: two or more numeric parts, such as `4.19`. */
+const VERSION_START = /^\d+(\.\d+)+/
+
 /**
  * Reads the version pup printed: its last line, which has to be a version.
  *
  * `pup get-version` prints `unknown` when the regex of the first version file matches nothing, and
- * exits 0; the action fails on it, since a zip named `give.unknown.zip` helps nobody.
+ * exits 0; the action fails on it, since a zip named `give.unknown.zip` helps nobody. A regex that
+ * matches the wrong thing prints that thing instead, `TBD` or `v4.19.0`, so the line has to start
+ * with numeric parts. What follows them is not checked: the regex of `.puprc` defines the version.
  *
  * @param {string} output What pup printed.
  *
- * @throws {Error} When the line is empty or `unknown`.
+ * @throws {Error} When the line is empty, `unknown`, or does not start with two numeric parts.
  *
  * @returns {string} The version.
  */
@@ -143,6 +148,14 @@ function readPrintedVersion(output) {
     throw new Error(
       `pup get-version read no version from the first file .puprc lists under paths.versions` +
         `${version === '' ? '' : ` (it printed '${version}')`}. Check the file and its regex. ${WHAT}`
+    )
+  }
+
+  if (!VERSION_START.test(version)) {
+    throw new Error(
+      `pup get-version printed '${version}', which is not a version: it has to start with two or more ` +
+        `numeric parts, such as 4.19.0. Check the regex of the first file .puprc lists under ` +
+        `paths.versions. ${WHAT}`
     )
   }
 
