@@ -75,6 +75,13 @@ outputs:
       merges went through. A conflict fails the step, so a caller reads this with `continue-on-error`
       or in a later `if: failure()` step.
     value: ${{ steps.merge.outputs.conflict }}
+  published:
+    description: >-
+      `yes` when the version's GitHub release already existed when the step started, so the run is a
+      retry of a published release; `no` otherwise. release-publish skips a published version by
+      itself; a caller reads this to skip the steps of its own that are not safe to repeat, such as a
+      zip copied to a site or a version written there.
+    value: ${{ steps.merge.outputs.published }}
 
 runs:
   using: 'composite'

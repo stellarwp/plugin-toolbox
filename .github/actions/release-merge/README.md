@@ -140,7 +140,8 @@ fails the step without the marker; running the step again is enough.
   commit it is given. So when the version has no tag yet, the base's tip has to be the commit that
   merged the branch, the merge commit whose second parent is the branch's tip; a tip that is any
   other commit, bump or not, is refused. Finish this release by hand at the commit that merged the
-  branch into the base, or release another version. A version already published is not refused:
+  branch into the base, or release another version. A version already published is not refused
+  (the `published` output says so, for the caller's own steps):
   its retry builds the commit the tag points at, what was published, and deploy and publish skip
   what they find.
 
@@ -177,6 +178,7 @@ this; without `head`, the tip at that moment is what merges.
 | `branch` | The release branch merged. |
 | `base-sha` | The commit on the base branch that holds the release: the merge commit, or the base's tip on a retry that found the merge done. The commit to check out and build from; pass it to release-publish as `target`. |
 | `conflict` | The branch a merge conflicted on, or empty. A conflict fails the step, so read it with `continue-on-error` or in a later `if: failure()` step. |
+| `published` | `yes` when the version's GitHub release already existed when the step started (a retry of a published release), `no` otherwise. release-publish skips a published version by itself; read this to skip the steps of your own that are not safe to repeat, such as a zip copied to a site or a version written there: `if: steps.merge.outputs.published != 'yes'`. |
 
 ## One deploy at a time
 

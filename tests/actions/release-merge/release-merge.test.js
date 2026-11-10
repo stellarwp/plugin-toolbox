@@ -356,6 +356,8 @@ describe('release-merge', () => {
         'base-sha': MERGED.main,
         'develop-branch': 'develop',
         conflict: '',
+        // A first release of the version: the caller's deploy and publish have everything to do.
+        published: 'no',
       })
       assert.match(summary(), /merged `release\/M26\.test` into `main`, merged `main` into `develop`/)
     })
@@ -554,6 +556,9 @@ describe('release-merge', () => {
       await runMerge({ github, core, env: mergeEnv() })
 
       assert.strictEqual(outputs()['base-sha'], TAG_COMMIT)
+      // What a caller reads to skip the writes its deploy would repeat: the site's zip, a version
+      // stored on the site, anything that is not idempotent.
+      assert.strictEqual(outputs().published, 'yes')
       assert.strictEqual(mergesAsked(requests)[1].head, TAG_COMMIT, 'develop is asked for the published commit')
       assert.match(logged(), /main already has release\/M26\.test.*4\.17\.0 builds at ffffffffffffffffffffffffffffffffffffffff, the commit it was published from/s)
       assert.ok(!requested(requests).includes(`GET ${API.commit(later)}`), 'nothing is read about the tip')
