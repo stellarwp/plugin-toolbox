@@ -150,7 +150,7 @@ how a repository with its own zip workflow uses this, and how to test it without
 A job in a called workflow reports as `<caller job id> / <job name>`. With the template's job id,
 the checks are `playground-preview / Playground preview start`, `playground-preview / Zip / ...`,
 `playground-preview / Playground preview` and, after a failure, `playground-preview / Playground
-preview failed`. Update branch protection if it required the old names.
+preview failed`. Branch protection that requires a check has to use these names.
 
 ## Inputs of the workflow
 
@@ -179,7 +179,7 @@ preview failed`. Update branch protection if it required the old names.
 ```yaml
 permissions:
   contents: read        # check out the repository
-  pull-requests: write  # the sticky comment
+  pull-requests: write  # the pull request comment
 ```
 
 A called workflow can only lower these. If the caller grants less than a job asks for, GitHub does

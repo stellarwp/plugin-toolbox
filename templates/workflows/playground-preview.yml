@@ -29,7 +29,7 @@ jobs:
     # The most any job of the shared workflow asks for. A called workflow cannot go above this.
     permissions:
       contents: read # check out the repository
-      pull-requests: write # the sticky pull request comment
+      pull-requests: write # the pull request comment
     uses: stellarwp/plugin-toolbox/.github/workflows/playground-preview.yml@main
     with:
       # The oldest PHP the plugin supports, so vendor/ is built for it.

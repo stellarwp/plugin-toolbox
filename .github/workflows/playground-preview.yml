@@ -128,7 +128,7 @@ on:
         required: false
 
 env:
-  # Hidden first line of the sticky comment. Named after the repository, so two plugin repositories
+  # Hidden first line of the pull request comment. Named after the repository, so two plugin repositories
   # never share a marker.
   COMMENT_MARKER: '<!-- playground-preview:${{ github.repository }} -->'
 
