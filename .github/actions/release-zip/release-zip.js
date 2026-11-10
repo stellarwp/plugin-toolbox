@@ -91,8 +91,8 @@ function runAfterBuild(exec, commands, cwd) {
  * `pup check` runs strict on a production build, so a `TBD` left behind or a version conflict fails
  * it, and with `--dev` on a QA build, where the same findings are warnings: the mode pup gives each
  * check's `fail_method_dev`. `pup i18n` downloads the finished translations; `pup package` writes
- * the version into the files `.puprc` lists, syncs the files `.distignore` or `.distfiles` keep into
- * `.pup-zip`, zips them and restores the files.
+ * the version into the files `.puprc` lists, syncs the files `.distignore`, the `export-ignore`
+ * lines of `.gitattributes` and `.distfiles` keep into `.pup-zip`, zips them and restores the files.
  *
  * @param {object}  options
  * @param {string}  options.version    The version to package.

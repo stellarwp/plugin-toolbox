@@ -41,8 +41,9 @@ Four pup commands run, in this order, from the root of the checkout:
    happens without the section. Skipped with `i18n: no`. It does not generate the POT file; a
    plugin that ships one generates it with `after-build`, below.
 4. `pup package <version>` writes `version` into every file `.puprc` lists under `paths.versions`,
-   syncs the files `.distignore` or `.distfiles` keep into `.pup-zip/`, zips them as
-   `<zip-name>.zip` in the root of the checkout, and restores the version files with git. The
+   syncs the files `.distignore`, the `export-ignore` lines of `.gitattributes` and `.distfiles`
+   keep into `.pup-zip/`, zips them as `<zip-name>.zip` in the root of the checkout, and restores
+   the version files with git. The
    checkout is left as it was; only the zip carries the suffix.
 
 Between `pup build` and `pup check`, the `after-build` commands run when the caller passes any:
