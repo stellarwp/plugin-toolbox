@@ -7,7 +7,7 @@ const os = require('node:os')
 const path = require('node:path')
 
 const report = require('../../../.github/actions/plugin-check-report/plugin-check-report.js')
-const { CASES, expectedFor, runCase } = require('./golden.js')
+const { CASES, expectedFor, runCase } = require('./expected-output.js')
 
 const FIXTURES = path.join(__dirname, 'fixtures')
 const BASELINE = path.join(FIXTURES, 'baseline.json')
@@ -168,17 +168,6 @@ describe('plugin-check-report compare', () => {
 
       assert.equal(run.status, 1)
       assert.match(run.stdout, /Unknown mode 'strcit'/)
-    })
-
-    it('refuses the old name ratchet, and says what to use', () => {
-      const run = compareWith([fixture('clean.txt')], { PLUGIN_CHECK_MODE: 'ratchet' })
-
-      assert.equal(run.status, 1)
-      assert.match(
-        run.stdout,
-        /::error title=Plugin Check::Unknown mode 'ratchet'\. Use 'baseline' or 'strict'\. 'ratchet' is now called 'baseline'\./
-      )
-      assert.equal(run.comment, '')
     })
 
     it('runs baseline mode when the mode is not set, and when it is empty', () => {

@@ -12,7 +12,8 @@ const { actionsFor } = require('../../support/actions.js')
 const URL_START = 'https://img.shields.io/badge/Check%20Finished-'
 
 /**
- * What the shell step this replaced printed for each moment, from the real `date` command:
+ * The URL for each moment, as the real `date` command makes it, as the "Check Started" badge in the
+ * workflow does:
  *
  *   stamp=$(LC_ALL=C TZ='America/New_York' date -r <epoch> '+%m/%d %I:%M %p %Z')
  *   stamp=${stamp// /%20}; stamp=${stamp//\//%2F}
@@ -21,7 +22,7 @@ const URL_START = 'https://img.shields.io/badge/Check%20Finished-'
  * The moments are the ones where a clock formatter goes wrong: both sides of both daylight saving
  * changes, the repeated hour of the fall change, midnight, noon and the end of a year.
  */
-const GOLDEN = [
+const MOMENTS = [
   ['winter, noon-ish', '2026-01-15T17:08:00Z', '01%2F15%2012:08%20PM%20EST'],
   ['summer', '2026-07-04T22:05:00Z', '07%2F04%2006:05%20PM%20EDT'],
   ['just before spring forward', '2026-03-08T06:59:59Z', '03%2F08%2001:59%20AM%20EST'],
@@ -36,8 +37,8 @@ const GOLDEN = [
 ]
 
 describe('finishBadge', () => {
-  for (const [name, moment, stamp] of GOLDEN) {
-    it(`makes the URL the shell step made: ${name}`, () => {
+  for (const [name, moment, stamp] of MOMENTS) {
+    it(`makes the URL for ${name}`, () => {
       assert.equal(report.finishBadge(new Date(moment)), `${URL_START}${stamp}-darkgreen`)
     })
   }
@@ -51,7 +52,7 @@ describe('finishBadge', () => {
     assert.match(report.finishBadge(), /^https:\/\/img\.shields\.io\/badge\/Check%20Finished-\d\d%2F\d\d%20\d\d:\d\d%20[AP]M%20E[SD]T-darkgreen$/)
   })
 
-  it('escapes only the spaces and the slash, as the shell did', () => {
+  it('escapes only the spaces and the slash, only those two characters', () => {
     const url = report.finishBadge(new Date('2026-07-04T22:05:00Z'))
 
     assert.doesNotMatch(url, / |\/\d/)

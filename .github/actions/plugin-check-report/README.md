@@ -159,6 +159,13 @@ A file that is not JSON (a merge conflict left markers in it, say) or not the sh
 check with an error annotation that names the file and says what is wrong. The comment then says
 Plugin Check could not run. Replace it with the `baseline.json` of the run's artifact.
 
+Two more cases fail the compare, because a comment would show a number that is not the file's:
+
+- A count that is not a whole number, such as `1.5`, fails with exit status 1. A count written as
+  `1.0` or `1e2` is read as the whole number it is.
+- A count above 9007199254740991 (2^53 - 1) fails with exit status 5 and says so, because
+  JavaScript cannot hold a larger number exactly.
+
 ## Modes
 
 - `baseline` (default): fail only when a rule has more errors than the baseline. More warnings, or
@@ -261,8 +268,6 @@ permissions:
 
 A called workflow can only lower these. If the caller grants less than a job asks for, GitHub does
 not start the run. The job that runs the Plugin Check action lowers itself to `contents: read`.
-A caller from an earlier version that still grants `actions: read` works: a caller may give more
-than a job asks for.
 
 ## Inputs of the action
 
@@ -316,32 +321,6 @@ You need Node 20 or newer. For a pull request's baseline, check out its branch: 
    `update` is short for `compare --update`. It writes `.plugin-check-baseline.json` in the current
    folder, with the same text as the `baseline.json` of the CI artifact.
 
-## Differences from the earlier bash scripts
-
-The first version of this action was two bash scripts. The JavaScript that replaced them gives the
-same results on every input Plugin Check can produce. These differences are on purpose, and only
-show with a hand-edited baseline or an odd results file, except the first two:
-
-- The mode `ratchet` is now called `baseline`. The old word is refused, and the message says what
-  to use.
-- The `workflow-file`, `baseline-wait`, `token` and `baseline-url` pieces are gone, and so is the
-  "older run" status and the "Target branch" / "Previous run" column names. The baseline is a
-  committed file now, not the artifact of an earlier run, so nothing is looked up or waited for.
-  The `fetch` command is gone with them.
-- The texts for a missing baseline, for error counts that went down and for an invalid baseline
-  file are new, and the job summary has the commands to update the file. These are the only
-  expected files under `fixtures/expected/` that no longer come from the bash script.
-- The `badge-url` input is gone. The action makes the "Check Finished" badge itself, and also writes
-  the "could not run" body that a shell step in the workflow wrote before. Both look as they did.
-- A rule with an empty code is counted like any other. Bash misread its row and showed wrong totals.
-- A count in the baseline that is not a whole number (such as `1.5`) fails the compare with exit
-  status 1. Bash printed an arithmetic error and passed with zero totals. A count written as `1.0`
-  or `1e2` is read as the whole number it is.
-
-- A baseline count above 9007199254740991 (2^53 - 1) fails the compare with exit status 5 and says
-  so. JavaScript cannot hold a larger number exactly, so a comment would show another number. Bash
-  compared them exactly.
-
 ## How it is tested
 
 The work is in `plugin-check-report.js`: small functions that take plain values, so a test calls
@@ -349,15 +328,11 @@ them directly. `tests/actions/plugin-check-report/` has four files, run with `no
 
 - `compare.test.js` runs the compare in-process on the sample results files in `fixtures/`, and
   checks the comment, the job summary and the annotations against the exact files in
-  `fixtures/expected/`. Most of those files were written by the original bash script, so they pin
-  that the JavaScript prints what it printed; the ones listed under "Differences" were rewritten for
-  the committed baseline. It also covers the missing file, the target branch as a baseline, the
-  invalid file and the command line.
+  `fixtures/expected/`, listed in `expected-output.js`. It also covers the missing file, the target
+  branch as a baseline, the invalid file and the command line.
 - `action.test.js` calls the step functions the way `actions/github-script` does.
-- `badge.test.js` checks the badge URL against what the old shell step printed, from the real
-  `date` command, for both sides of both daylight saving changes, midnight, noon and the end of a
-  year. It also covers the "could not run" body.
+- `badge.test.js` checks the badge URL against what the real `date` command prints, for both sides
+  of both daylight saving changes, midnight, noon and the end of a year. It also covers the "could
+  not run" body.
 - `exclude.test.js` covers the config file and the input, every way the file can be wrong, and the
   command line.
-
-No `jq` or `bash` is needed.

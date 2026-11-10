@@ -3,10 +3,9 @@
 /**
  * The cases whose exact output is pinned in fixtures/expected/.
  *
- * The files there were written by the original ratchet.sh. Every implementation of the compare has
- * to print the same status, the same stdout, the same comment, the same job summary and, for
- * --update, the same baseline file, byte for byte. A case is described once here and run by a
- * `execute` function, so the same list checks the bash script and the JavaScript that replaces it.
+ * A compare has to print the same status, the same stdout, the same comment, the same job summary
+ * and, for --update, the same baseline file, byte for byte. A case is described once here and run
+ * by an `execute` function, which returns what the compare printed and wrote.
  */
 
 const fs = require('node:fs')
@@ -126,7 +125,7 @@ const CASES = [
  *          What the script did. The temporary folder in stdout is written `<tmp>`.
  */
 function runCase(spec, execute) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-check-golden-'))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-check-expected-'))
   const comment = path.join(dir, 'comment.md')
   const summary = path.join(dir, 'summary.md')
   const written = path.join(dir, 'baseline.json')

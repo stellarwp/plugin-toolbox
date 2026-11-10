@@ -130,15 +130,6 @@ describe('plugin-check-report action steps', () => {
       assert.equal(fs.existsSync(commentFile), false)
     })
 
-    it('refuses the old mode name ratchet with a hint', async (t) => {
-      const { core, logged } = await actionsFor(t)
-
-      const status = report.runCompare({ core, env: { ...base(), PLUGIN_CHECK_MODE: 'ratchet' } })
-
-      assert.equal(status, 1)
-      assert.match(logged(), /::error title=Plugin Check::Unknown mode 'ratchet'\. Use 'baseline' or 'strict'\. 'ratchet' is now called 'baseline'\./)
-    })
-
     it('escapes a percent sign in a message, as the runner reads annotations', async (t) => {
       const { core, logged } = await actionsFor(t)
       const results = path.join(temp('compare'), 'results.txt')

@@ -40,9 +40,6 @@ const MAX_UNEXPECTED_BYTES = 200
 const MODES = ['baseline', 'strict']
 const DEFAULT_MODE = 'baseline'
 
-/** Modes that were renamed, so the message can say what to use now. */
-const RENAMED_MODES = { ratchet: 'baseline' }
-
 /** A line of Plugin Check output: a file name, a JSON array of its results, or the clean message. */
 const KNOWN_LINE = /^(FILE: |\[|Success:)/
 const OUTPUT_LINE = /^(FILE: |Success:)/
@@ -803,8 +800,7 @@ function compareOrThrow({ args, env, log }) {
   // Checked before anything else, so a typo in the caller never runs as the default.
   const mode = env.PLUGIN_CHECK_MODE || DEFAULT_MODE
   if (!MODES.includes(mode)) {
-    const renamed = RENAMED_MODES[mode] ? ` '${mode}' is now called '${RENAMED_MODES[mode]}'.` : ''
-    log.error(`Unknown mode '${mode}'. Use 'baseline' or 'strict'.${renamed}`)
+    log.error(`Unknown mode '${mode}'. Use 'baseline' or 'strict'.`)
 
     return 1
   }
@@ -1129,8 +1125,8 @@ function badgeStamp(now, timeZone) {
 
 /**
  * The "Check Finished" badge shown under the status line of the comment: a shields.io image with
- * the time the check finished. Only a space and a slash are escaped, as the shell step this
- * replaced did, so the colon of the time stays as it is.
+ * the time the check finished. Only a space and a slash are escaped, so the colon of the time stays
+ * as it is.
  *
  * The workflow's "Check Started" badge in the `start` job is made by a shell step of the same
  * shape. That job has no checkout to run this file from.
