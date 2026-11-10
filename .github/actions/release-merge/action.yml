@@ -79,8 +79,10 @@ outputs:
     description: >-
       `yes` when the version's GitHub release already existed when the step started, so the run is a
       retry of a published release; `no` otherwise. release-publish skips a published version by
-      itself; a caller reads this to skip the steps of its own that are not safe to repeat, such as a
-      zip copied to a site or a version written there.
+      itself; a caller reads this (`if: steps.merge.outputs.published == 'no'`) to skip the steps of
+      its own that write somewhere a retry of an older version must not touch, such as a zip copied to
+      a site or a version written there. It says nothing about whether those steps ran: keep them
+      before release-publish and safe to repeat for the same version. See the README.
     value: ${{ steps.merge.outputs.published }}
 
 runs:
