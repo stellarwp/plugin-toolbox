@@ -314,6 +314,33 @@ async function commitContainsBranch({ github, owner, repo, branch, ref, sha }) {
 }
 
 /**
+ * Whether a commit is the one that merged the branch: one of its parents is the branch's tip. The
+ * API never fast-forwards, so the merge of a release branch into the base is always a merge commit
+ * with the branch's tip as a parent; a commit pushed on top of it, bump or not, has other parents.
+ *
+ * @param {object} options
+ * @param {object} options.github The Octokit github-script supplies.
+ * @param {string} options.owner  The repository owner.
+ * @param {string} options.repo   The repository name.
+ * @param {string} options.branch The branch, for the message.
+ * @param {string} options.ref    The branch's tip as it was read, a hash.
+ * @param {string} options.sha    The commit to read, a hash: the base's tip as it was read.
+ *
+ * @throws {Error} When the read fails.
+ *
+ * @returns {Promise<boolean>} True when `ref` is one of the commit's parents.
+ */
+async function commitMergesBranch({ github, owner, repo, branch, ref, sha }) {
+  try {
+    const { data } = await github.rest.repos.getCommit({ owner, repo, ref: sha })
+
+    return (data.parents ?? []).some((parent) => parent.sha === ref)
+  } catch (error) {
+    throw new Error(`Reading ${sha} to check it merged ${branch} failed (HTTP ${error.status}): ${error.message}. Nothing was merged.`)
+  }
+}
+
+/**
  * Merges one branch, or commit, into another as a merge commit, through the API.
  *
  * GitHub makes the merge commit under the token's identity and signs it. A base that already holds
@@ -447,7 +474,7 @@ async function runMerge({ github, core, env }) {
     core.info(`${version} is already published (${releaseUrl}) from ${branch}: nothing to publish again.`)
   }
 
-  const { merged: mergedBase, sha: baseSha } = await mergeInto({
+  const { merged: mergedBase, sha: mergedSha } = await mergeInto({
     github,
     core,
     owner,
@@ -458,9 +485,31 @@ async function runMerge({ github, core, env }) {
     label: branch,
   })
 
-  // base-sha is the commit the release is published at and built from: the merge commit, or the
-  // base's tip on a retry that found the merge done. The second merge takes that commit, not the
-  // base's name, so develop receives exactly what is being released even if the base moves on.
+  // base-sha is the commit the release is published at and built from. A merge that was made is
+  // that merge commit, which holds the version the branch was just checked for. A retry that found
+  // the merge done gets the base's tip, and that tip is only this release while nothing has been
+  // merged or pushed since: a publish that failed after the deploy, then another release, then a
+  // retry would build the later release's code and publish it under this version, since the
+  // caller's deploy and publish each skip what they find done. So when the version is already
+  // published, the retry builds the commit the tag was made from, what was published, and the base
+  // moving on changes nothing; when it is not, the tip has to be the commit that merged the branch.
+  let baseSha = mergedSha
+  if (!mergedBase) {
+    if (tagged) {
+      baseSha = tagSha
+      core.info(`${version} builds at ${tagSha}, the commit it was published from.`)
+    } else if (!(await commitMergesBranch({ github, owner, repo, branch, ref: branchSha, sha: mergedSha }))) {
+      throw new Error(
+        `${base} already had ${branch} and has moved on since: its tip ${mergedSha} is not the commit that merged ` +
+          `${branch}, so a build from it would publish other changes under ${version}. There is nothing left ` +
+          `to merge for ${version}; finish it by hand at the commit that merged ${branch} into ${base}, or ` +
+          'release another version. Nothing was merged.'
+      )
+    }
+  }
+
+  // The second merge takes that commit, not the base's name, so develop receives exactly what is
+  // being released even if the base moves on.
   let mergedDevelop = null
   if (develop === null) {
     core.info(`develop-branch is empty: ${base} is not merged back into a develop branch.`)

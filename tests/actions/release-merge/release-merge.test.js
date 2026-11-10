@@ -70,7 +70,21 @@ const API = {
   // The files are read at the release branch's tip, the commit, not at the branch by name.
   file: (name, ref = TIP['release/M26.test']) => `${REPO}/contents/${name}?ref=${encodeURIComponent(ref)}`,
   compare: (sha, ref = TIP['release/M26.test']) => `${REPO}/compare/${encodeURIComponent(`${ref}...${sha}`)}`,
+  commit: (sha) => `${REPO}/commits/${sha}`,
   merges: `${REPO}/merges`,
+}
+
+/**
+ * The rule for a commit read, answering with its parents: a merge commit of the release branch
+ * into main has main's old tip and the branch's tip; any other commit has other parents.
+ *
+ * @param {string}   sha     The commit.
+ * @param {string[]} parents Its parents' hashes.
+ *
+ * @returns {object} The rule.
+ */
+function commit(sha, parents) {
+  return { method: 'GET', path: API.commit(sha), body: { sha, parents: parents.map((parent) => ({ sha: parent })) } }
 }
 
 const RELEASE_URL = 'https://github.com/stellarwp/plugin/releases/tag/4.17.0'
@@ -93,14 +107,16 @@ function branches(names = Object.keys(TIP)) {
 }
 
 /**
- * Rules for the files the action reads from the release branch, as the contents endpoint sends
- * them. A file set to null is absent: no rule, so the read answers 404.
+ * Rules for the files the action reads from a branch, as the contents endpoint sends them. A file
+ * set to null is absent: no rule, so the read answers 404.
  *
  * @param {object} contents File name to contents; the fixture's defaults hold 4.17.0 everywhere.
+ * @param {string} ref      The commit the files are read at: the release branch's tip, or the
+ *                          base's tip on a retry that found the merge done.
  *
  * @returns {object[]} One rule per present file.
  */
-function files(contents = {}) {
+function files(contents = {}, ref = TIP['release/M26.test']) {
   const all = {
     '.puprc': JSON.stringify(PUPRC),
     'plugin.php': 'Version: 4.17.0\n',
@@ -112,7 +128,7 @@ function files(contents = {}) {
     .filter(([, body]) => body !== null)
     .map(([name, body]) => ({
       method: 'GET',
-      path: API.file(name),
+      path: API.file(name, ref),
       body: { type: 'file', path: name, encoding: 'base64', content: Buffer.from(body).toString('base64') },
     }))
 }
@@ -458,10 +474,89 @@ describe('release-merge', () => {
       assert.match(logged(), /main already has release\/M26\.test: nothing to merge/)
       assert.match(logged(), /develop already has main: nothing to merge/)
       assert.strictEqual(outputs().conflict, '')
-      // Nothing was merged, so the commit to publish at is the base's tip, the one holding the release.
+      // Nothing was merged, so the commit to publish at is the one the tag was made from: what was
+      // published. Nothing else is read about main's tip.
       assert.strictEqual(outputs()['base-sha'], MERGED.main)
+      assert.ok(!requested(requests).some((line) => line.startsWith(`GET ${API.commit('')}`)), requested(requests).join('\n'))
       // The second merge still asks for that commit, which develop already has.
       assert.strictEqual(mergesAsked(requests)[1].head, MERGED.main)
+    })
+
+    it('goes on with an unpublished retry whose base tip is the commit that merged the branch', async (t) => {
+      // The publish step failed after the deploy, so there is no tag, and main's tip is still the
+      // first run's merge commit, whose second parent is the branch's tip: the retry publishes it.
+      const { github, requests } = await octokitFor(
+        repositoryWith({
+          merges: [MERGE.done, MERGE.done],
+          extra: [commit(MERGED.main, [TIP.main, TIP['release/M26.test']])],
+        }).map((rule) => (rule.path === API.branch('main') ? { ...rule, body: { name: 'main', commit: { sha: MERGED.main } } } : rule))
+      )
+      const { core, outputs } = await coreWithOutputs(t)
+
+      await runMerge({ github, core, env: mergeEnv() })
+
+      // The tip is read after the merge answered already merged, by the hash it then read, and
+      // before the develop merge; no version file is read at the base.
+      assert.deepStrictEqual(requested(requests).slice(-5), [
+        `POST ${API.merges}`,
+        `GET ${API.branch('main')}`,
+        `GET ${API.commit(MERGED.main)}`,
+        `POST ${API.merges}`,
+        `GET ${API.branch('develop')}`,
+      ])
+      assert.strictEqual(outputs()['base-sha'], MERGED.main)
+      assert.strictEqual(mergesAsked(requests)[1].head, MERGED.main)
+    })
+
+    it('refuses an unpublished retry once the base has moved on, bump or not, so other changes are not published under this version', async (t) => {
+      // 4.17.0 reached the deploy but its publish failed, and main moved on since: another release
+      // was merged, or a commit was pushed straight to main. The caller's deploy would skip the
+      // tag it finds and zip the current trunk, and its publish would tag main's tip: those
+      // changes under 4.17.0. The version is not what decides it, so a tip holding 4.17.0 is
+      // refused too.
+      const later = '9999999999999999999999999999999999999999'
+      const other = '8888888888888888888888888888888888888888'
+      for (const parents of [[MERGED.main, other], [MERGED.main]]) {
+        const { github, requests } = await octokitFor(
+          repositoryWith({
+            merges: [MERGE.done, MERGE.done],
+            extra: [commit(later, parents)],
+          }).map((rule) => (rule.path === API.branch('main') ? { ...rule, body: { name: 'main', commit: { sha: later } } } : rule))
+        )
+        const { core, outputs } = await coreWithOutputs(t)
+
+        await assert.rejects(
+          runMerge({ github, core, env: mergeEnv() }),
+          /main already had release\/M26\.test and has moved on since: its tip 9999999999999999999999999999999999999999 is not the commit that merged release\/M26\.test.*finish it by hand at the commit that merged release\/M26\.test into main.*Nothing was merged/s,
+          `parents ${parents.length}`
+        )
+
+        // Refused before the develop merge, and the outputs are not set.
+        assert.strictEqual(mergesAsked(requests).length, 1)
+        assert.deepStrictEqual(outputs(), {})
+      }
+    })
+
+    it('builds a published retry from the tagged commit, so the base moving on changes nothing', async (t) => {
+      // 4.17.0 was published, then 4.18.0: main's tip is 4.18.0's merge commit. The retry is a
+      // no-op that rebuilds what was published, the commit the tag points at; deploy and publish
+      // skip what they find.
+      const later = '9999999999999999999999999999999999999999'
+      const { github, requests } = await octokitFor(
+        repositoryWith({
+          tag: PUBLISHED,
+          merges: [MERGE.done, MERGE.done],
+          extra: [{ method: 'GET', path: API.compare(TAG_COMMIT), body: { status: 'ahead' } }],
+        }).map((rule) => (rule.path === API.branch('main') ? { ...rule, body: { name: 'main', commit: { sha: later } } } : rule))
+      )
+      const { core, outputs, logged } = await coreWithOutputs(t)
+
+      await runMerge({ github, core, env: mergeEnv() })
+
+      assert.strictEqual(outputs()['base-sha'], TAG_COMMIT)
+      assert.strictEqual(mergesAsked(requests)[1].head, TAG_COMMIT, 'develop is asked for the published commit')
+      assert.match(logged(), /main already has release\/M26\.test.*4\.17\.0 builds at ffffffffffffffffffffffffffffffffffffffff, the commit it was published from/s)
+      assert.ok(!requested(requests).includes(`GET ${API.commit(later)}`), 'nothing is read about the tip')
     })
 
     it('says so when the release is already published from this branch, so the publish has nothing to do', async (t) => {
