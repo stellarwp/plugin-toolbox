@@ -533,9 +533,10 @@ async function runMerge({ github, core, env }) {
   const developPart = develop === null ? 'no develop branch to merge back into' : did(mergedDevelop, base, develop)
   await core.summary.addRaw(`Release ${version}: ${did(mergedBase, branch, base)}, ${developPart}.`, true).write()
 
-  // The outputs are the last thing the step writes: a step that failed, on the summary above or
-  // anywhere before, leaves every output empty, so a caller that reads `published == 'no'` under
-  // `continue-on-error` skips its writes without checking the step's outcome as well.
+  // These outputs are the last thing the step writes: a step that failed, on the summary above or
+  // anywhere before, leaves them empty, so a caller that reads `published == 'no'` under
+  // `continue-on-error` skips its writes without checking the step's outcome as well. `conflict`
+  // is the one output a failure sets, in mergeInto, before it throws on a merge conflict.
   core.setOutput('branch', branch)
   core.setOutput('version', version)
   core.setOutput('base-branch', base)
