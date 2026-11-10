@@ -539,6 +539,17 @@ describe('release-merge', () => {
       }
     })
 
+    it('sets no output when the step fails after the merges, so a caller reading published under continue-on-error skips its writes', async (t) => {
+      // The job summary is the last write before the outputs; a summary that fails fails the step
+      // with every output still empty, so `published == 'no'` is false for a caller that kept going.
+      const { github } = await octokitFor(repositoryWith())
+      const { core, outputs } = await coreWithOutputs(t)
+      const failing = { ...core, summary: { addRaw: () => ({ write: async () => { throw new Error('summary write failed') } }) } }
+
+      await assert.rejects(runMerge({ github, core: failing, env: mergeEnv() }), /summary write failed/)
+      assert.deepStrictEqual(outputs(), {})
+    })
+
     it('builds a published retry from the tagged commit, so the base moving on changes nothing', async (t) => {
       // 4.17.0 was published, then 4.18.0: main's tip is 4.18.0's merge commit. The retry is a
       // no-op that rebuilds what was published, the commit the tag points at; deploy and publish

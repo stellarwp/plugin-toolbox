@@ -529,6 +529,13 @@ async function runMerge({ github, core, env }) {
     ).merged
   }
 
+  const did = (merged, from, into) => (merged ? `merged \`${from}\` into \`${into}\`` : `\`${into}\` already had \`${from}\``)
+  const developPart = develop === null ? 'no develop branch to merge back into' : did(mergedDevelop, base, develop)
+  await core.summary.addRaw(`Release ${version}: ${did(mergedBase, branch, base)}, ${developPart}.`, true).write()
+
+  // The outputs are the last thing the step writes: a step that failed, on the summary above or
+  // anywhere before, leaves every output empty, so a caller that reads `published == 'no'` under
+  // `continue-on-error` skips its writes without checking the step's outcome as well.
   core.setOutput('branch', branch)
   core.setOutput('version', version)
   core.setOutput('base-branch', base)
@@ -539,10 +546,6 @@ async function runMerge({ github, core, env }) {
   // its deploy would otherwise repeat on a published retry: release-publish skips the release by
   // itself, but a zip copied to a site or a version written there is not idempotent.
   core.setOutput('published', tagged ? 'yes' : 'no')
-
-  const did = (merged, from, into) => (merged ? `merged \`${from}\` into \`${into}\`` : `\`${into}\` already had \`${from}\``)
-  const developPart = develop === null ? 'no develop branch to merge back into' : did(mergedDevelop, base, develop)
-  await core.summary.addRaw(`Release ${version}: ${did(mergedBase, branch, base)}, ${developPart}.`, true).write()
 }
 
 module.exports = {
