@@ -11,10 +11,13 @@ name: Generate Zip
 # needs a .puprc with paths.versions and a zip_name (or a composer.json with a name); see the
 # zip-name action's README.
 #
-# The inputs are the interface the bot and the release dashboard dispatch: `ref` and `production`.
-# `prerelease` and `sequence` name a QA build; `expected_version` refuses a build of the wrong ref.
+# The inputs are the interface the packaging bot and the release dashboard dispatch. The bot sends
+# `ref` and `production`; the dashboard sends those and `prerelease: rc` for its RC build, so a copy
+# that drops `prerelease` fails that build with a 422. `prerelease` and `sequence` name a QA build;
+# `expected_version` refuses a build of the wrong ref.
 #
-# Run it locally: `pup build && pup check --dev && pup i18n && pup package "$(pup get-version --dev)"`.
+# Run it locally: `pup build`, then the after-build commands of the release-zip step when the file
+# keeps any (the POT below), then `pup check --dev && pup i18n && pup package "$(pup get-version --dev)"`.
 # Start it by hand with `gh workflow run zip.yml -f ref=release/M26.jigglypuff -f prerelease=rc`.
 
 on:
