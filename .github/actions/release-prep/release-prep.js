@@ -559,7 +559,7 @@ async function runPrepareWithPhar({ core, exec, cwd, env, pharRelease, version, 
   // A version lower than the one the branch already has would bump it backwards: a wrong version, or
   // the wrong branch. The same version is fine, it is what re-running a preparation finds. When pup
   // finds no version at all it exits non-zero, which fails here as replace-version would.
-  const printed = await pup(['get-version'], { cwd, silent: true, noticesToStderr: true })
+  const printed = await pup(['get-version'], { cwd, silent: true })
   const current = readCurrentVersion(printed)
   // Only the numeric start is compared: 4.17.0-beta.1 counts as 4.17.0, which compareVersions
   // reads; a pre-release of the version the branch holds is still that version.

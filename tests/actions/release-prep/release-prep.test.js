@@ -564,8 +564,8 @@ describe('release-prep', () => {
         'curl -fsSI https://github.com/stellarwp/pup/releases/download/2.0.0/pup.phar',
         `curl -fsSL --retry 3 -o ${phar} https://github.com/stellarwp/pup/releases/download/2.0.0/pup.phar`,
         `php -d display_errors=stderr ${phar} get-version`,
-        `php ${phar} replace-version 4.17.0`,
-        `php ${phar} replace-tbd 4.17.0`,
+        `php -d display_errors=stderr ${phar} replace-version 4.17.0`,
+        `php -d display_errors=stderr ${phar} replace-tbd 4.17.0`,
       ])
       assert.ok(
         calls.filter((call) => call.command === 'php').every((call) => call.options.cwd === cwd),

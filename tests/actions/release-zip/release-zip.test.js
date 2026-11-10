@@ -174,10 +174,10 @@ describe('release-zip', () => {
 
       assert.deepEqual(sequence(calls), [
         ...DOWNLOAD,
-        `php ${PHAR} build`,
-        `php ${PHAR} check --dev`,
-        `php ${PHAR} i18n`,
-        `php ${PHAR} package ${VERSION}`,
+        `php -d display_errors=stderr ${PHAR} build`,
+        `php -d display_errors=stderr ${PHAR} check --dev`,
+        `php -d display_errors=stderr ${PHAR} i18n`,
+        `php -d display_errors=stderr ${PHAR} package ${VERSION}`,
         `php -d display_errors=stderr ${PHAR} zip-name ${VERSION}`,
       ])
       assert.ok(
@@ -209,7 +209,7 @@ describe('release-zip', () => {
 
       await runZip({ core, exec, env: zipEnv({ INPUT_VERSION: '4.19.0.1', INPUT_PRODUCTION: 'yes' }), cwd })
 
-      assert.ok(sequence(calls).includes(`php ${PHAR} check`))
+      assert.ok(sequence(calls).includes(`php -d display_errors=stderr ${PHAR} check`))
       assert.ok(!sequence(calls).some((call) => call.endsWith('check --dev')))
     })
 
@@ -222,7 +222,7 @@ describe('release-zip', () => {
 
       assert.deepEqual(
         sequence(calls).filter((call) => call.startsWith('php')),
-        [`php ${PHAR} build`, `php ${PHAR} package ${VERSION}`, `php -d display_errors=stderr ${PHAR} zip-name ${VERSION}`]
+        [`php -d display_errors=stderr ${PHAR} build`, `php -d display_errors=stderr ${PHAR} package ${VERSION}`, `php -d display_errors=stderr ${PHAR} zip-name ${VERSION}`]
       )
     })
 
@@ -236,11 +236,11 @@ describe('release-zip', () => {
 
       assert.deepEqual(sequence(calls), [
         ...DOWNLOAD,
-        `php ${PHAR} build`,
+        `php -d display_errors=stderr ${PHAR} build`,
         `bash --noprofile --norc -eo pipefail -c ${commands}`,
-        `php ${PHAR} check --dev`,
-        `php ${PHAR} i18n`,
-        `php ${PHAR} package ${VERSION}`,
+        `php -d display_errors=stderr ${PHAR} check --dev`,
+        `php -d display_errors=stderr ${PHAR} i18n`,
+        `php -d display_errors=stderr ${PHAR} package ${VERSION}`,
         `php -d display_errors=stderr ${PHAR} zip-name ${VERSION}`,
       ])
       const bash = calls.find((call) => call.command === 'bash')
@@ -289,7 +289,7 @@ describe('release-zip', () => {
       )
 
       const php = sequence(calls).filter((call) => call.startsWith('php'))
-      assert.deepEqual(php, [`php ${PHAR} build`], 'pup build ran, and no pup command after the failure')
+      assert.deepEqual(php, [`php -d display_errors=stderr ${PHAR} build`], 'pup build ran, and no pup command after the failure')
       assert.deepEqual(outputs(), {})
     })
 

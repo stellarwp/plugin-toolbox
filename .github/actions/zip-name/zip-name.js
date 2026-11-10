@@ -230,7 +230,7 @@ async function runZipName({ core, exec, env, cwd: workspace = process.cwd(), fet
   const { pup, release } = await setupPup({ exec, env, core, fetchImpl, what: WHAT })
 
   const baseVersion = readPrintedVersion(
-    await pup(['get-version'], { cwd, silent: true, noticesToStderr: true })
+    await pup(['get-version'], { cwd, silent: true })
   )
 
   if (expected !== '' && expected !== baseVersion) {
@@ -251,7 +251,7 @@ async function runZipName({ core, exec, env, cwd: workspace = process.cwd(), fet
   }
 
   const version = `${baseVersion}${suffix}`
-  const zipName = lastLine(await pup(['zip-name', version], { cwd, silent: true, noticesToStderr: true }))
+  const zipName = lastLine(await pup(['zip-name', version], { cwd, silent: true }))
 
   // pup appends `.<version>` to the slug from zip_name or composer.json. Anything else means the
   // name is not what the S3 check and the upload will look for, so it is refused here.

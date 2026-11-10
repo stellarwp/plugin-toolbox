@@ -287,24 +287,21 @@ async function downloadPhar({ exec, env, release, core }) {
 /**
  * The function the actions run pup through: `pup(['package', version], { cwd })`.
  *
- * The phar runs on the runner's PHP, with the arguments as a list and no shell. A command whose
- * output the action reads passes `noticesToStderr`, which sends PHP's notices and deprecations to
- * stderr so the parsed stdout holds only what pup printed.
+ * The phar runs on the runner's PHP, with the arguments as a list and no shell, and with PHP's
+ * notices and deprecations sent to stderr: the stdout of a command whose output an action reads
+ * (`get-version`, `zip-name`) then holds only what pup printed, and the log of every other command
+ * shows both streams as before. This is the one place that knows pup is PHP.
  *
  * @param {object} exec The @actions/exec toolkit.
  * @param {string} phar Path to the downloaded pup.phar.
  *
- * @returns {Function} `pup(args, options, what)`: runs pup with `args`, the @actions/exec `options`
- *          plus `noticesToStderr`, and fails with pup's output when it exits non-zero; `what` opens
- *          that message, `pup <first argument>` by default. Resolves to what pup printed to stdout.
+ * @returns {Function} `pup(args, options, what)`: runs pup with `args` and the @actions/exec
+ *          `options`, and fails with pup's output when it exits non-zero; `what` opens that
+ *          message, `pup <first argument>` by default. Resolves to what pup printed to stdout.
  */
 function pupRunner(exec, phar) {
-  return async (args, options = {}, what = `pup ${args[0]}`) => {
-    const { noticesToStderr = false, ...execOptions } = options
-    const php = noticesToStderr ? ['-d', 'display_errors=stderr', phar, ...args] : [phar, ...args]
-
-    return runOrFail(exec, 'php', php, execOptions, what)
-  }
+  return (args, options = {}, what = `pup ${args[0]}`) =>
+    runOrFail(exec, 'php', ['-d', 'display_errors=stderr', phar, ...args], options, what)
 }
 
 /**

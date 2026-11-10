@@ -164,7 +164,7 @@ async function runZip({ core, exec, env, cwd: workspace = process.cwd(), fetchIm
   }
 
   // The name pup gave the zip, from the same rules package used, rather than a guess from here.
-  const zipName = lastLine(await pup(['zip-name', version], { cwd, silent: true, noticesToStderr: true }))
+  const zipName = lastLine(await pup(['zip-name', version], { cwd, silent: true }))
   const zipPath = path.join(cwd, `${zipName}.zip`)
 
   if (zipName === '' || !fs.existsSync(zipPath)) {
