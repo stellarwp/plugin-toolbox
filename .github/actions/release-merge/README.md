@@ -48,9 +48,10 @@ In this order, stopping at the first failure:
    tag contains the branch: a retry of this release goes on, a tag made from another commit is
    refused.
 3. Merges the release branch into the base branch as a merge commit, `Merge release/… into main`
-   (or `into master`). When the base already holds the branch, a retry, the same version files are
-   read at the base's tip too: that tip is what the caller builds and publishes, and a base that
-   has moved on to a later release is refused. See [Versions it refuses](#versions-it-refuses).
+   (or `into master`). When the base already holds the branch, a retry, nothing is merged: the
+   commit to build is then the one the tag points at when the version is already published, and
+   otherwise the base's tip, which has to be the commit that merged the branch. A base that has
+   moved on since, by any commit, is refused. See [Versions it refuses](#versions-it-refuses).
 4. Merges the **merged commit** into develop as a merge commit, `Merge main back into develop
    (release/…)`. The base branch rather than the release branch, so develop descends from the
    base and consecutive releases bring one version bump each instead of divergent copies of the
@@ -71,8 +72,9 @@ Every step is safe to run again after a late failure, which is what a retry from
 does:
 
 - A branch that already holds the other merges as nothing to merge: GitHub answers that the base
-  already contains the head, and nothing is written. The base's tip then has to hold the version,
-  since it is what the caller builds and publishes; see [Versions it refuses](#versions-it-refuses).
+  already contains the head, and nothing is written. What the caller then builds and publishes is
+  the commit the tag points at, or the base's tip when there is no tag yet, which has to be the
+  commit that merged the branch; see [Versions it refuses](#versions-it-refuses).
 - A version already published counts as a retry only when its tag contains the release branch,
   that is, when it was published from this branch. See [Versions it refuses](#versions-it-refuses).
   release-publish then skips the release.
@@ -130,14 +132,17 @@ fails the step without the marker; running the step again is enough.
   out, so the action refuses, with the branches untouched. Give the release a new version and
   prepare the branch again. A tag that does contain the branch is a retry of this release, and the
   action goes on.
-- **A retry after the base has moved on to another release.** When the base already holds the
-  release branch, nothing is merged and `base-sha` is the base's tip, which the caller builds and
-  publishes. A publish that failed after the deploy, then another release, then a retry of this one
-  would build that later release's code and publish it under this version: a deploy skips the tag
-  it finds on wordpress.org and zips the current trunk, and release-publish tags whatever commit it
-  is given. So the version files are read at the base's tip too, and a tip that holds another
-  version is refused, naming the file. Finish this release by hand at the commit that merged the
-  branch into the base, or release another version.
+- **An unpublished retry after the base has moved on.** When the base already holds the release
+  branch, nothing is merged, and what the caller builds and publishes is `base-sha`. A publish that
+  failed after the deploy, then another release or a commit pushed straight to the base, then a
+  retry of this one would build those changes and publish them under this version: a deploy skips
+  the tag it finds on wordpress.org and zips the current trunk, and release-publish tags whatever
+  commit it is given. So when the version has no tag yet, the base's tip has to be the commit that
+  merged the branch, the merge commit whose second parent is the branch's tip; a tip that is any
+  other commit, bump or not, is refused. Finish this release by hand at the commit that merged the
+  branch into the base, or release another version. A version already published is not refused:
+  its retry builds the commit the tag points at, what was published, and deploy and publish skip
+  what they find.
 
 The branches are checked too: each has to exist in the repository, the base and develop have to be
 two different branches (when there is a develop), and the release branch cannot be either of them.

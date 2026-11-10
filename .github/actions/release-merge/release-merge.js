@@ -240,26 +240,20 @@ async function fileAt({ github, owner, repo, branch, ref, file }) {
  * under paths.versions. The tag and the title of the release come from `version`, so a value other
  * than what release-prep wrote into the branch would publish the code under the wrong version.
  *
- * Run again on the base branch when a retry finds the release already merged: the base's tip is
- * then what the caller builds and publishes, and a base that has moved on to a later release
- * would put that release's code under this version.
- *
- * @param {object}   options
- * @param {object}   options.github   The Octokit github-script supplies.
- * @param {string}   options.owner    The repository owner.
- * @param {string}   options.repo     The repository name.
- * @param {string}   options.branch   The branch the files are read from, for the messages.
- * @param {string}   options.ref      The commit to read the files at: the branch's tip as it was read.
- * @param {string}   options.version  The version to release, validated.
- * @param {Function} options.mismatch The message for a file that holds another version, given
- *                                    `(found, file)`; the release branch's when omitted.
+ * @param {object} options
+ * @param {object} options.github  The Octokit github-script supplies.
+ * @param {string} options.owner   The repository owner.
+ * @param {string} options.repo    The repository name.
+ * @param {string} options.branch  The release branch, for the messages.
+ * @param {string} options.ref     The commit to read the files at: the branch's tip as it was read.
+ * @param {string} options.version The version to release, validated.
  *
  * @throws {Error} When the branch has no usable .puprc, a version file holds no version, or any of
  *                 them holds a different version.
  *
  * @returns {Promise<void>} Resolves when every version file holds `version`.
  */
-async function assertBranchHoldsVersion({ github, owner, repo, branch, ref, version, mismatch = null }) {
+async function assertBranchHoldsVersion({ github, owner, repo, branch, ref, version }) {
   const read = (file) => fileAt({ github, owner, repo, branch, ref, file })
   const files = readVersionFiles(await read('.puprc'), 'Nothing was merged.')
 
@@ -285,9 +279,8 @@ async function assertBranchHoldsVersion({ github, owner, repo, branch, ref, vers
     }
     if (found !== version) {
       throw new Error(
-        mismatch?.(found, file) ??
-          `${branch} holds ${found} in ${file}, not ${version}. The version to release has to be the one ` +
-            'the branch was prepared with; check the version, or prepare the branch again. Nothing was merged.'
+        `${branch} holds ${found} in ${file}, not ${version}. The version to release has to be the one ` +
+          'the branch was prepared with; check the version, or prepare the branch again. Nothing was merged.'
       )
     }
   }
@@ -317,6 +310,33 @@ async function commitContainsBranch({ github, owner, repo, branch, ref, sha }) {
     return data.status === 'ahead' || data.status === 'identical'
   } catch (error) {
     throw new Error(`Comparing ${branch} with ${sha} failed (HTTP ${error.status}): ${error.message}. Nothing was merged.`)
+  }
+}
+
+/**
+ * Whether a commit is the one that merged the branch: one of its parents is the branch's tip. The
+ * API never fast-forwards, so the merge of a release branch into the base is always a merge commit
+ * with the branch's tip as a parent; a commit pushed on top of it, bump or not, has other parents.
+ *
+ * @param {object} options
+ * @param {object} options.github The Octokit github-script supplies.
+ * @param {string} options.owner  The repository owner.
+ * @param {string} options.repo   The repository name.
+ * @param {string} options.branch The branch, for the message.
+ * @param {string} options.ref    The branch's tip as it was read, a hash.
+ * @param {string} options.sha    The commit to read, a hash: the base's tip as it was read.
+ *
+ * @throws {Error} When the read fails.
+ *
+ * @returns {Promise<boolean>} True when `ref` is one of the commit's parents.
+ */
+async function commitMergesBranch({ github, owner, repo, branch, ref, sha }) {
+  try {
+    const { data } = await github.rest.repos.getCommit({ owner, repo, ref: sha })
+
+    return (data.parents ?? []).some((parent) => parent.sha === ref)
+  } catch (error) {
+    throw new Error(`Reading ${sha} to check it merged ${branch} failed (HTTP ${error.status}): ${error.message}. Nothing was merged.`)
   }
 }
 
@@ -454,7 +474,7 @@ async function runMerge({ github, core, env }) {
     core.info(`${version} is already published (${releaseUrl}) from ${branch}: nothing to publish again.`)
   }
 
-  const { merged: mergedBase, sha: baseSha } = await mergeInto({
+  const { merged: mergedBase, sha: mergedSha } = await mergeInto({
     github,
     core,
     owner,
@@ -465,26 +485,27 @@ async function runMerge({ github, core, env }) {
     label: branch,
   })
 
-  // base-sha is the commit the release is published at and built from: the merge commit, or the
-  // base's tip on a retry that found the merge done. That tip is only this release while no later
-  // one has been merged since: a publish that failed after the deploy, then another release, then
-  // a retry would build the later release's code and publish it under this version, since the
-  // caller's deploy and publish each skip what they find done. The merge commit itself holds the
-  // version the branch was checked for, so only a retry reads the base.
+  // base-sha is the commit the release is published at and built from. A merge that was made is
+  // that merge commit, which holds the version the branch was just checked for. A retry that found
+  // the merge done gets the base's tip, and that tip is only this release while nothing has been
+  // merged or pushed since: a publish that failed after the deploy, then another release, then a
+  // retry would build the later release's code and publish it under this version, since the
+  // caller's deploy and publish each skip what they find done. So when the version is already
+  // published, the retry builds the commit the tag was made from, what was published, and the base
+  // moving on changes nothing; when it is not, the tip has to be the commit that merged the branch.
+  let baseSha = mergedSha
   if (!mergedBase) {
-    await assertBranchHoldsVersion({
-      github,
-      owner,
-      repo,
-      branch: base,
-      ref: baseSha,
-      version,
-      mismatch: (found, file) =>
-        `${base} holds ${found} in ${file}, not ${version}: ${base} already had ${branch} and has moved on to ` +
-        `another release since, so a build from its tip would publish ${found} under ${version}. There is ` +
-        `nothing left to merge for ${version}; finish it by hand at the commit that merged ${branch} into ` +
-        `${base}, or release another version. Nothing was merged.`,
-    })
+    if (tagged) {
+      baseSha = tagSha
+      core.info(`${version} builds at ${tagSha}, the commit it was published from.`)
+    } else if (!(await commitMergesBranch({ github, owner, repo, branch, ref: branchSha, sha: mergedSha }))) {
+      throw new Error(
+        `${base} already had ${branch} and has moved on since: its tip ${mergedSha} is not the commit that merged ` +
+          `${branch}, so a build from it would publish other changes under ${version}. There is nothing left ` +
+          `to merge for ${version}; finish it by hand at the commit that merged ${branch} into ${base}, or ` +
+          'release another version. Nothing was merged.'
+      )
+    }
   }
 
   // The second merge takes that commit, not the base's name, so develop receives exactly what is

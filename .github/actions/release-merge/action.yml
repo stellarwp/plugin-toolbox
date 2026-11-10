@@ -31,8 +31,10 @@ inputs:
       paths.versions is read, and a different version in any of them is refused. A pre-release such as
       4.17.0-beta.1 and an empty value are refused before anything is merged, and so is a version
       whose tag already exists, unless that tag's release was published from this branch, which makes
-      the run a retry. On a retry the base's tip, what the caller then builds and publishes, has to
-      hold the version too. The release itself is published by release-publish, after this action.
+      the run a retry. On a retry nothing is merged, and the commit the caller then builds and
+      publishes is the one the tag points at, or, before the tag exists, the base's tip, which has to
+      be the commit that merged the branch. The release itself is published by release-publish, after
+      this action.
     required: true
   base-branch:
     description: 'The branch the release is merged into: `main`, or `master` where that is the name.'
@@ -63,9 +65,9 @@ outputs:
     value: ${{ steps.merge.outputs.branch }}
   base-sha:
     description: >-
-      The commit on the base branch that holds the release: the merge commit, or the base's tip on a
-      retry that found the merge already done. The commit to check out and build from; pass it to
-      release-publish as `target`.
+      The commit that holds the release: the merge commit, or on a retry that found the merge already
+      done, the commit the tag points at, or the base's tip before the tag exists. The commit to check
+      out and build from; pass it to release-publish as `target`.
     value: ${{ steps.merge.outputs.base-sha }}
   conflict:
     description: >-
