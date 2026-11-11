@@ -11,8 +11,8 @@
  *  - the `.php` files under `views-path` that `git diff` reports as changed.
  *
  * Each kind becomes one entry, `<changesDir>/analyze-hooks-<added|removed|changed>-<kind>.yaml`, so
- * a second run rewrites the same files. An entry a changelog file already carries, or another
- * pending file holds, is not written again.
+ * a second run rewrites the same files. An entry a changelog file already carries above the last
+ * release's heading, or another pending file holds, is not written again.
  *
  * runAnalyzeHooks reads the inputs and the checkout and runs git through `exec`. The functions it
  * is built from are pure, so a test can call them with text.
@@ -22,6 +22,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const { runOrFail } = require('../../lib/exec.js')
+const { compareVersions } = require('../../lib/versions.js')
 const { readWorkingDirectory, readCheckoutFile } = require('../../lib/workspace.js')
 
 /** What was not done, to close every error message. */
@@ -61,20 +62,11 @@ const DEFAULT_TYPE = 'tweak'
  * @returns {string|undefined} The tag, or undefined when none is a release.
  */
 function lastReleaseTag(tags) {
-  const parts = (tag) => tag.replace(/^v/, '').split('.').map(Number)
+  const version = (tag) => tag.replace(/^v/, '')
 
   return tags
     .filter((tag) => RELEASE_TAG.test(tag))
-    .sort((a, b) => {
-      const [x, y] = [parts(a), parts(b)]
-      for (let i = 0; i < Math.max(x.length, y.length); i++) {
-        if ((x[i] ?? 0) !== (y[i] ?? 0)) {
-          return (x[i] ?? 0) - (y[i] ?? 0)
-        }
-      }
-
-      return 0
-    })
+    .sort((a, b) => compareVersions(version(a), version(b)))
     .pop()
 }
 
@@ -303,17 +295,39 @@ function isKnown(entry, known, labels) {
 }
 
 /**
+ * The part of a changelog file written since the last release: everything above the heading that
+ * names it. An entry of an earlier release is not this release's, so a view changed in both is
+ * still listed.
+ *
+ * @param {string} text    The changelog file.
+ * @param {string} version The last release, without a leading `v`.
+ *
+ * @returns {string} The text above the last release's heading, or all of it when no heading names
+ *          the release.
+ */
+function sinceLastRelease(text, version) {
+  const escaped = version.replace(/\./g, '\\.')
+  // A heading line, `= [6.18.2] 2026-01-01 =` or `## 6.18.2`, holding the version as a whole.
+  const heading = new RegExp(`^[=#].*(?<![\\d.])${escaped}(?![\\d.])`, 'm').exec(text)
+
+  return heading ? text.slice(0, heading.index) : text
+}
+
+/**
  * Reads the entries the plugin already carries.
  *
  * @param {string}   cwd            The checkout.
  * @param {string}   changesDir     The directory of pending change files.
  * @param {string[]} changelogFiles The files the changelog is written to.
+ * @param {string}   version        The last release, without a leading `v`.
  *
  * @returns {{lines: string[], pending: Set<string>}} What isKnown compares with.
  */
-function readKnown(cwd, changesDir, changelogFiles) {
+function readKnown(cwd, changesDir, changelogFiles, version) {
   const lines = changelogFiles.flatMap((file) =>
-    [...(readCheckoutFile(cwd, file) ?? '').matchAll(/^\* (.+)$/gm)].map((match) => squash(match[1]))
+    [...sinceLastRelease(readCheckoutFile(cwd, file) ?? '', version).matchAll(/^\* (.+)$/gm)].map((match) =>
+      squash(match[1])
+    )
   )
 
   const pending = new Set()
@@ -365,11 +379,12 @@ async function runAnalyzeHooks({ core, exec, env, cwd: workspace = process.cwd()
     )
   }
 
+  // One line after each match, for a call whose name is on the line after the parenthesis.
   // git grep exits 1 when nothing matches, which is a tree without hooks, not a failure.
   const calls = async (...tree) => {
     const result = await exec.getExecOutput(
       'git',
-      ['grep', '-I', '-h', '-E', '(apply_filters|do_action)', ...tree, '--', ...paths],
+      ['grep', '-I', '-h', '-A1', '-E', '(apply_filters|do_action)', ...tree, '--', ...paths],
       { cwd, silent: true, ignoreReturnCode: true }
     )
     if (result.exitCode > 1) {
@@ -384,7 +399,7 @@ async function runAnalyzeHooks({ core, exec, env, cwd: workspace = process.cwd()
       ? []
       : (await git(['diff', '--name-only', tag, '--', viewsPath], 'Listing the changed views')).split('\n')
 
-  const known = readKnown(cwd, changesDir, changelogFiles)
+  const known = readKnown(cwd, changesDir, changelogFiles, tag.replace(/^v/, ''))
   const dir = path.join(cwd, changesDir)
   fs.mkdirSync(dir, { recursive: true })
 

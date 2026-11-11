@@ -161,7 +161,7 @@ describe('analyze-hooks', () => {
   })
 
   it('does not write an entry a changelog file or another pending file already has', async (t) => {
-    write('changelog.md', '= [6.18.2] =\n\n* Tweak - Changed views: `v2/list`\n')
+    write('changelog.md', '= [6.18.3] =\n\n* Tweak - Changed views: `v2/list`\n\n= [6.18.2] =\n\n* Fix - A fix.\n')
     write('changelog/by-hand.yaml', 'significance: patch\ntype: tweak\nentry: "Removed actions: `tec_removed_action`"\n')
     await run(t)
 
@@ -169,6 +169,21 @@ describe('analyze-hooks', () => {
     assert.ok(!written.includes('analyze-hooks-changed-views.yaml'))
     assert.ok(!written.includes('analyze-hooks-removed-actions.yaml'))
     assert.ok(written.includes('analyze-hooks-added-actions.yaml'))
+  })
+
+  it('still lists a change an earlier release also made', async (t) => {
+    write('readme.txt', 'Stable tag: 6.18.2\n\n== Changelog ==\n\n= [6.18.2] 2026-01-01 =\n\n* Tweak - Changed views: `v2/list`\n')
+    await run(t)
+
+    assert.ok('analyze-hooks-changed-views.yaml' in entries())
+  })
+
+  it('reads a hook whose name is on the line after the parenthesis', async (t) => {
+    write('src/Tribe/Wrapped.php', "<?php\n$a = apply_filters(\n\t'tec_wrapped',\n\t$a\n);\n")
+    commit('wrapped')
+    await run(t)
+
+    assert.match(entries()['analyze-hooks-added-filters.yaml'], /`tec_wrapped`/)
   })
 
   it('fails when no release tag is reachable', async (t) => {
