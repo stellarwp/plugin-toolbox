@@ -364,7 +364,7 @@ function readKnown(cwd, changesDir, changelogFiles, version) {
  * @param {object} options.env  The environment, holding the inputs as `INPUT_*`.
  * @param {string} options.cwd  The workspace, the process's working directory by default.
  *
- * @throws {Error} When an input is refused, or no release tag is reachable from HEAD.
+ * @throws {Error} When an input is refused, or the checkout is shallow and shows no release tag.
  *
  * @returns {Promise<void>}
  */
@@ -379,10 +379,21 @@ async function runAnalyzeHooks({ core, exec, env, cwd: workspace = process.cwd()
 
   const tag = lastReleaseTag((await git(['tag', '--merged', 'HEAD'], 'Listing the tags')).split('\n'))
   if (!tag) {
-    throw new Error(
-      'No release tag is reachable from HEAD, so there is no last release to compare with. ' +
-        `Check out with fetch-depth: 0. ${WHAT}`
-    )
+    // A shallow checkout hides the tags behind it, which is a mistake in the workflow. A complete
+    // history without a release tag is a plugin before its first release, with nothing to compare.
+    const shallow = (await git(['rev-parse', '--is-shallow-repository'], 'Reading the checkout')).trim() === 'true'
+    if (shallow) {
+      throw new Error(
+        'No release tag is reachable from HEAD, and the checkout is shallow, so the last release cannot ' +
+          `be found. Check out with fetch-depth: 0. ${WHAT}`
+      )
+    }
+
+    core.setOutput('tag', '')
+    core.setOutput('files', '')
+    core.warning(`No release tag is reachable from HEAD: there is no last release to compare with. ${WHAT}`)
+
+    return
   }
 
   // One line after each match, for a call whose name is on the line after the parenthesis.

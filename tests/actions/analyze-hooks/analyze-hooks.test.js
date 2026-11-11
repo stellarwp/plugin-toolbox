@@ -193,10 +193,21 @@ describe('analyze-hooks', () => {
     assert.match(entries()['analyze-hooks-added-filters.yaml'], /`tec_wrapped`/)
   })
 
-  it('fails when no release tag is reachable', async (t) => {
+  it('writes nothing, with a warning, before the first release', async (t) => {
     git('tag', '-d', '6.18.2')
+    const { outputs } = await run(t)
 
-    await assert.rejects(run(t), /No release tag is reachable from HEAD/)
+    assert.deepStrictEqual(entries(), {})
+    assert.strictEqual(outputs.tag, '')
+  })
+
+  it('fails when a shallow checkout shows no release tag', async (t) => {
+    const full = repo
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-analyze-hooks-shallow-'))
+    execFileSync('git', ['clone', '-q', '--depth', '1', '--no-tags', `file://${full}`, repo], { env: GIT_ENV, stdio: 'pipe' })
+    fs.rmSync(full, { recursive: true, force: true })
+
+    await assert.rejects(run(t), /the checkout is shallow/)
   })
 
   it('searches every path it is given and honours an exclusion', async (t) => {
