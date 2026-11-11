@@ -119,7 +119,7 @@ Three drawers in the toolbox. You can use any one without the others.
 
 | Layer | Lives in | What's in it |
 |---|---|---|
-| Composite actions | `.github/actions/` | Small single-purpose steps with no opinions: `setup-slic`, `setup-bun`, `setup-node`, `prepare-matrix`, `check-php-changes`, `smart-checkout`, `process-changelog`, `generate-pot`, `zip-name`, `release-zip` |
+| Composite actions | `.github/actions/` | Small single-purpose steps with no opinions: `setup-slic`, `setup-bun`, `setup-node`, `prepare-matrix`, `check-php-changes`, `smart-checkout`, `analyze-hooks`, `update-wp-version`, `generate-pot`, `push-translations`, `zip-name`, `release-zip` |
 | Reusable workflows | `.github/workflows/` | Full jobs built from the actions (standards, analysis, tests, zip, release prep). Most repos will only touch this layer. |
 | File sync | `templates/` + `.github/sync.yml` | Files that must exist in the target repo, grouped by brand and repo type |
 
@@ -165,7 +165,9 @@ Each phase ends with something people can actually use.
 ### Phase 2: actions
 
 - [ ] Port `setup-slic`, `prepare-matrix`, `setup-bun` from LearnDash.
-- [ ] Port `check-php-changes`, `smart-checkout`, `process-changelog`, `add-changelog`, `generate-pot` from TEC.
+- [ ] Port `check-php-changes` and `smart-checkout` from TEC.
+- [x] Port `update-wp-version`, `generate-pot` and `push-translations` from TEC, with the paths, the GlotPress project, the server folder and the POT headers as inputs. `process-changelog` and `add-changelog` are not ported: `release-prep` writes the changelog, and `stellarwp/changelogger`'s `add` command files an entry under a name.
+- [x] Add the one-run preparation TEC uses: the WordPress version, the hook and view entries, the POT and its language entry, then `release-prep`, in one commit. The caller to copy is `templates/workflows/full-release-prep.yml`; `release-prep.yml` stays the short one.
 - [x] Port `analyze-hooks` from TEC: the actions and filters a release adds or removes and the views it changes, as pending changelog entries. The search paths, the views directory and the changelog types are inputs, and a `v` on the release tag is accepted.
 - [ ] Add `setup-node` for the npm crowd.
 - [x] Add `release-prep`: version bump, TBD replacement and changelog through pup and the changelogger action, committed to the release branch through the GitHub API. A caller to copy is in `templates/workflows/release-prep.yml`.
