@@ -1,0 +1,210 @@
+name: Full Release Prep
+
+# Prepares a release branch in one run and one commit: the WordPress version, the hook and view
+# changelog entries, the POT file and its language entry, then the version bump, the TBDs and the
+# changelog, committed to the branch through the GitHub API. No pull request is opened, so the
+# change is reviewed wherever the release is.
+#
+# release-prep.yml, next to this file, is the short one: the version, the TBDs and the changelog
+# only. Copy this one when the repository wants the rest too. Every extra step is off until it is
+# given something: `tested-up-to` for the WordPress version, POT_PATH for the POT file,
+# GLOTPRESS_PROJECT for the push to GlotPress. Delete the steps the repository will never use.
+#
+# A file to copy into .github/workflows/ of a plugin repository, not a workflow to call. The
+# repository needs a .puprc and a changelogger config first; see the release-prep action's README.
+#
+# Every step before "Prepare the release branch" only writes files: release-prep commits whatever
+# the working tree holds, so the steps above it land in its commit. Running it again finds nothing
+# left to change.
+#
+# Run it locally: you cannot, it commits to a branch. Start it by hand with
+# `gh workflow run full-release-prep.yml -f branch=release/M26.jigglypuff -f version=4.17.0`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Release branch to prepare and commit to, e.g. release/M26.jigglypuff'
+        required: true
+        type: string
+      version:
+        description: 'Version to write, e.g. 4.17.0'
+        required: true
+        type: string
+      # Keep `date` and the inputs after it optional: a release tool sends only `branch` and
+      # `version`, and refuses a workflow that requires more.
+      date:
+        description: 'Changelog date (YYYY-MM-DD). Empty or "today" writes today, in UTC'
+        required: false
+        type: string
+        default: ''
+      tested-up-to:
+        description: 'WordPress version to set as "Tested up to", e.g. 6.8.1. Empty leaves it as it is'
+        required: false
+        type: string
+        default: ''
+      update-min-version:
+        description: 'Also set "Requires at least" two minor versions behind "Tested up to" (e.g. 6.8.1 -> 6.6)?'
+        required: false
+        type: choice
+        options:
+          - 'no'
+          - 'yes'
+        default: 'no'
+
+# What this repository's preparation covers. Edit these; nothing below needs a plugin's name.
+env:
+  # The POT file, relative to the repository. Empty generates none.
+  POT_PATH: 'languages/my-plugin.pot'
+  # The GlotPress project the strings go to, and the folder its POT is copied to on the server,
+  # e.g. `the-events-calendar` and `tec`, or `givewp/give` and `givewp`. An empty project pushes
+  # nothing. The push needs the four TRANSLATIONS_DEPLOY_* secrets.
+  GLOTPRESS_PROJECT: ''
+  GLOTPRESS_FOLDER: ''
+  # The changelog type of the entry the push adds. The changelogger config has to declare it.
+  LANGUAGE_CHANGELOG_TYPE: 'language'
+
+# Two preparations of the same branch would both commit on top of the same checkout, and the second
+# commit would be refused as not a fast-forward. One group per branch makes the second wait for the first.
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.branch }}
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    # pup and WP-CLI run on PHP, which the Ubuntu 24.04 image ships. Pinned so that stays true.
+    # A repository without Blacksmith changes the label to ubuntu-24.04.
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      contents: write # release-prep commits the preparation to the branch
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.branch }}
+          # release-prep commits through the API with the token it is given, so the checkout keeps
+          # no credentials in .git/config for a later step to find.
+          persist-credentials: false
+          # analyze-hooks reads the last release tag and the tree it points at.
+          fetch-depth: 0
+          # A repository whose .puprc lists a submodule's directory under checks.tbd.dirs needs
+          # `submodules: recursive` here: pup fails on a directory that is not there.
+
+      # update-min-version needs tested-up-to. Checked here, before anything is written or pushed.
+      - name: Check the inputs
+        if: inputs.update-min-version == 'yes' && inputs.tested-up-to == ''
+        run: |
+          echo "::error::update-min-version needs tested-up-to: the minimum is derived from it."
+          exit 1
+
+      - name: Update the WordPress version
+        if: inputs.tested-up-to != ''
+        uses: stellarwp/plugin-toolbox/.github/actions/update-wp-version@v1
+        with:
+          tested-up-to: ${{ inputs.tested-up-to }}
+          update-min-version: ${{ inputs.update-min-version }}
+
+      # A step that adds pending changelog entries of the repository's own goes here, before the
+      # changelog is written. A toolchain the changelog writing strategy needs is set up here too.
+
+      # The actions and filters the release adds or removes and the views it changes, from a
+      # comparison with the last release tag. `paths`, `views-path` and `types` are in its README.
+      - name: Add the hook and view changelog entries
+        uses: stellarwp/plugin-toolbox/.github/actions/analyze-hooks@v1
+
+      # A plugin whose strings are read from built JavaScript builds its assets before this step.
+      - name: Generate the POT file
+        id: pot
+        if: env.POT_PATH != ''
+        uses: stellarwp/plugin-toolbox/.github/actions/generate-pot@v1
+        with:
+          pot-path: ${{ env.POT_PATH }}
+
+      # A release only, and only when a string changed: an older hotfix's POT would mark the newer
+      # release's strings obsolete, and a second run would add a second language entry.
+      # The push happens before release-prep checks the version and the branch, because its entry
+      # has to be in the commit. A run release-prep then refuses has already updated GlotPress;
+      # the next run finds the same POT and pushes it again only if a string changed since.
+      - name: Push the POT file to GlotPress
+        id: push-translations
+        if: env.GLOTPRESS_PROJECT != '' && steps.pot.outputs.changed == 'yes' && startsWith(inputs.branch, 'release/')
+        uses: stellarwp/plugin-toolbox/.github/actions/push-translations@v1
+        with:
+          project: ${{ env.GLOTPRESS_PROJECT }}
+          pot-path: ${{ env.POT_PATH }}
+          remote-folder: ${{ env.GLOTPRESS_FOLDER }}
+          host: ${{ secrets.TRANSLATIONS_DEPLOY_HOST }}
+          user: ${{ secrets.TRANSLATIONS_DEPLOY_USER }}
+          ssh-key: ${{ secrets.TRANSLATIONS_DEPLOY_SSH_KEY }}
+          pot-location: ${{ secrets.TRANSLATIONS_DEPLOY_POT_LOCATION }}
+
+      # The three steps below add the language entry, and run only after a push. The changelogger
+      # sorts a write's entries by type, which can put the language entry first. Writing the other
+      # entries now, before it exists, leaves it to release-prep's own write, which appends it to
+      # this version's section: last, after the changes people read.
+      - name: Resolve the changelog date
+        id: changelog-date
+        if: steps.push-translations.outcome == 'success'
+        env:
+          RELEASE_DATE: ${{ inputs.date }}
+        run: |
+          if [ -z "$RELEASE_DATE" ] || [ "$RELEASE_DATE" = "today" ]; then
+            echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+          else
+            echo "date=$RELEASE_DATE" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Write the changelog before the language entry
+        if: steps.push-translations.outcome == 'success'
+        uses: stellarwp/changelogger@v1
+        with:
+          command: write
+          version: ${{ inputs.version }}
+          date: ${{ steps.changelog-date.outputs.date }}
+
+      - name: Add the language changelog entry
+        if: steps.push-translations.outcome == 'success'
+        uses: stellarwp/changelogger@v1
+        with:
+          command: add
+          significance: patch
+          type: ${{ env.LANGUAGE_CHANGELOG_TYPE }}
+          entry: ${{ steps.push-translations.outputs.glotpress-result }}
+          filename: task-i18n-${{ github.run_id }}
+
+      # release-prep prepares a release/…, hotfix/… or bucket/… branch only; a repository that
+      # names them differently passes its own list as `branch-prefixes`, a JSON array in a string.
+      - name: Prepare the release branch
+        id: prep
+        uses: stellarwp/plugin-toolbox/.github/actions/release-prep@v1
+        with:
+          branch: ${{ inputs.branch }}
+          version: ${{ inputs.version }}
+          date: ${{ inputs.date }}
+          # A branch that requires pull requests refuses github.token, and a commit made with it
+          # starts no workflow run on the branch. Pass a bot token with contents: write for either:
+          # token: ${{ secrets.GH_BOT_TOKEN }}
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.prep.outputs.version }}
+          COMMIT: ${{ steps.prep.outputs.commit }}
+          FILES: ${{ steps.prep.outputs.files }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          {
+            echo "## Release prep"
+            echo "* Version: \`$VERSION\`"
+            if [ -n "$COMMIT" ]; then
+              echo "* Commit: https://github.com/$REPOSITORY/commit/$COMMIT"
+              echo "### Files"
+              while IFS= read -r file; do
+                if [ -n "$file" ]; then
+                  echo "* \`$file\`"
+                fi
+              done <<< "$FILES"
+            else
+              echo "* Nothing changed, nothing committed"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
