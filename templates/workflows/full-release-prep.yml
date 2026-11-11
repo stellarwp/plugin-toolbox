@@ -75,6 +75,7 @@ permissions:
 jobs:
   prepare:
     # pup and WP-CLI run on PHP, which the Ubuntu 24.04 image ships. Pinned so that stays true.
+    # A repository without Blacksmith changes the label to ubuntu-24.04.
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: write # release-prep commits the preparation to the branch
@@ -122,6 +123,9 @@ jobs:
 
       # A release only, and only when a string changed: an older hotfix's POT would mark the newer
       # release's strings obsolete, and a second run would add a second language entry.
+      # The push happens before release-prep checks the version and the branch, because its entry
+      # has to be in the commit. A run release-prep then refuses has already updated GlotPress;
+      # the next run finds the same POT and pushes it again only if a string changed since.
       - name: Push the POT file to GlotPress
         id: push-translations
         if: env.GLOTPRESS_PROJECT != '' && steps.pot.outputs.changed == 'yes' && startsWith(inputs.branch, 'release/')
