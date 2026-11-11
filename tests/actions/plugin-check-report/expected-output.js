@@ -118,11 +118,11 @@ const CASES = [
  * Runs one case.
  *
  * @param {object}   spec    A case from CASES.
- * @param {Function} execute `(args, env) => {status, stdout}`. Runs the script under test with the
+ * @param {Function} execute `(args, env) => {status, stdout}`. Runs the compare with the
  *                           arguments and environment given.
  *
  * @returns {{status: number, stdout: string, comment: string, summary: string, baseline: string}}
- *          What the script did. The temporary folder in stdout is written `<tmp>`.
+ *          What the compare did. The temporary folder in stdout is written `<tmp>`.
  */
 function runCase(spec, execute) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-check-expected-'))
@@ -158,7 +158,7 @@ function runCase(spec, execute) {
 }
 
 /**
- * The pinned files of a case, as written by the original script.
+ * The pinned files of a case.
  *
  * @param {string} name A case name.
  *

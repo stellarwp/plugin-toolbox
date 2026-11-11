@@ -133,7 +133,7 @@ function baselineFile(content) {
 
 describe('plugin-check-report compare, pinned output', () => {
   for (const spec of CASES) {
-    it(`prints what the original script printed for ${spec.name}`, () => {
+    it(`prints the pinned output for ${spec.name}`, () => {
       assert.deepStrictEqual(runCase(spec, execute), expectedFor(spec.name))
     })
   }

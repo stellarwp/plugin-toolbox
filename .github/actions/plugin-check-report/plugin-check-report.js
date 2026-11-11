@@ -65,7 +65,7 @@ class CheckFailure extends Error {
 }
 
 /**
- * Orders two strings by Unicode code point, as `jq` sorts them. JavaScript's default order compares
+ * Orders two strings by Unicode code point. JavaScript's default order compares
  * UTF-16 units, which puts an emoji before U+FFFF; UTF-8 bytes sort by code point.
  *
  * @param {string} a First string.
@@ -92,8 +92,8 @@ function cutBytes(text, bytes) {
 }
 
 /**
- * Splits a run of JSON values written one after another, as `jq` reads its input: whitespace
- * between values, any number of them.
+ * Splits a run of JSON values written one after another: whitespace between values, any
+ * number of them.
  *
  * @param {string} text The text.
  *
@@ -117,7 +117,7 @@ function readJsonValues(text) {
     try {
       values.push(JSON.parse(text.slice(position, end)))
     } catch (error) {
-      throw new CheckFailure(`jq: parse error: ${error.message}`, 2)
+      throw new CheckFailure(`parse error: ${error.message}`, 2)
     }
     position = end
   }
@@ -158,12 +158,12 @@ function endOfJsonValue(text, start) {
       }
     }
 
-    throw new CheckFailure('jq: parse error: Unfinished JSON term at EOF', 2)
+    throw new CheckFailure('parse error: Unfinished JSON term at EOF', 2)
   }
 
   const scalar = /^("(?:[^"\\]|\\.)*"|[^\s[\]{}",:]+)/.exec(text.slice(start))
   if (!scalar) {
-    throw new CheckFailure('jq: parse error: Invalid JSON', 2)
+    throw new CheckFailure('parse error: Invalid JSON', 2)
   }
 
   return start + scalar[0].length
@@ -236,7 +236,7 @@ function parseResults(text) {
 /**
  * Counts the ERROR and WARNING results per rule code.
  *
- * A `null` item is skipped, as jq skips it. Any other item that is not an object, and any counted
+ * A `null` item is skipped. Any other item that is not an object, and any counted
  * result whose code is not a string, fails: a rule with no name cannot be compared.
  *
  * @param {object[]} results From parseResults.
@@ -274,7 +274,7 @@ function countPerCode(results) {
 
 /**
  * The text of a baseline file: sorted keys, two-space indent, one final newline, and DEL written as
- * \u007f, exactly as `jq -S` prints it. Built by hand, because an object puts keys such as "10"
+ * \u007f. Built by hand, because an object puts keys such as "10"
  * before "9" whatever order they were added in.
  *
  * @param {{errors: Map<string, number>, warnings: Map<string, number>}} counts From countPerCode.
@@ -358,7 +358,7 @@ function readBaseline(text) {
 
 /**
  * A rule code as it is shown in a message: a backslash, a tab, a newline and a carriage return are
- * written out, as jq's @tsv writes them.
+ * written out.
  *
  * @param {string} code The rule code.
  *
@@ -372,7 +372,7 @@ function displayCode(code) {
  * One row for each rule code found in either set of counts, for errors and then warnings.
  *
  * Rules that went up come first, errors before warnings, the biggest increase first; the rest keep
- * their order by kind and code. The sort is stable, as jq's is, so the order is the same every time.
+ * their order by kind and code. The sort is stable, so the order is the same every time.
  *
  * @param {object} now  This run's counts.
  * @param {object} base The baseline's counts.
@@ -657,7 +657,7 @@ function readBaselineFile(file, name) {
 
     const reason = error.message
       .replace(/^The baseline is not valid: /, '')
-      .replace(/^jq: parse error: /, 'it is not JSON: ')
+      .replace(/^parse error: /, 'it is not JSON: ')
 
     // A parser's message has no full stop of its own, and the sentence after it needs one.
     const stop = /[.!?]$/.test(reason) ? '' : '.'
