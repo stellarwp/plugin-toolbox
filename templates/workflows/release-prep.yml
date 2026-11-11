@@ -42,6 +42,7 @@ permissions:
 jobs:
   prepare:
     # pup runs on PHP, which the Ubuntu 24.04 image ships. Pinned so that stays true.
+    # A repository without Blacksmith changes the label to ubuntu-24.04.
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: write # the action commits the preparation to the branch
