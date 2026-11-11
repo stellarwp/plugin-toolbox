@@ -233,9 +233,46 @@ jobs:
             --data-urlencode "url=$RUN_URL"
 
       # The release dashboard's "RC ZIP" link opens this run's page, where the artifact downloads.
+      # GitHub zips an artifact's contents on download, so the artifact holds the zip unpacked, the
+      # plugin folder: the download is then the plugin zip itself, which the WordPress installer takes
+      # as is. Uploading the zip file would download as a zip inside a zip, which it refuses.
+      - name: Unpack the zip for the artifact
+        if: steps.zip.outcome == 'success'
+        env:
+          ZIP_PATH: ${{ steps.zip.outputs.zip-path }}
+        run: |
+          mkdir artifact
+          unzip -q "$ZIP_PATH" -d artifact
+
       - uses: actions/upload-artifact@v7
         if: steps.zip.outcome == 'success'
         with:
           name: ${{ steps.name.outputs.zip-name }}
-          path: ${{ steps.zip.outputs.zip-path }}
+          path: artifact
           retention-days: 30
+
+      # What this run produced, on its page: the artifact when it built, or the bucket link when a QA
+      # build found the zip there and built nothing, so the page is never empty. The link is the one
+      # the bot posts in Slack.
+      - name: Summarize the zip
+        if: ${{ !cancelled() && (steps.zip.outcome == 'success' || steps.s3_zip_exists.outcome == 'success') }}
+        env:
+          ZIP: ${{ steps.name.outputs.zip-name }}.zip
+          BUILT: ${{ steps.zip.outcome == 'success' }}
+          IN_BUCKET: ${{ steps.s3_zip_exists.outcome == 'success' || (steps.zip.outcome == 'success' && env.S3_CONFIGURED == 'true') }}
+        run: |
+          {
+            if [ "$BUILT" = "true" ]; then
+              echo "## Built \`$ZIP\`"
+              echo
+              echo "Attached to this run as an artifact: the plugin zip, with its folder at the root."
+              if [ "$IN_BUCKET" = "true" ]; then
+                echo
+                echo "Also in the bucket: https://evnt.is/test.zip?file=$ZIP"
+              fi
+            else
+              echo "## \`$ZIP\` was already in the bucket"
+              echo
+              echo "An earlier run of this commit built it, so there was nothing to build again and this run has no artifact. Download it here: https://evnt.is/test.zip?file=$ZIP"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

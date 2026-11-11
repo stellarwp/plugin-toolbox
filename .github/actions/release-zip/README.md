@@ -16,10 +16,13 @@ Builds and packages a version of the plugin with pup, from the root of the check
     production: ${{ inputs.production }}
     pup-version: ${{ steps.name.outputs.pup-release }}
 
+# GitHub zips an artifact's contents on download: upload the zip unpacked, so the
+# download is the plugin zip itself and not a zip inside a zip.
+- run: mkdir artifact && unzip -q "${{ steps.zip.outputs.zip-path }}" -d artifact
 - uses: actions/upload-artifact@v7
   with:
     name: ${{ steps.zip.outputs.zip-name }}
-    path: ${{ steps.zip.outputs.zip-path }}
+    path: artifact
 ```
 
 The version is the one zip-name resolved, pre-release suffix included. Naming and building are two
