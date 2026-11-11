@@ -1,0 +1,12 @@
+::error title=Plugin Check::Test.Rule.Number1 has 1 errors, the baseline has 0. The full list is in the plugin-check-results artifact.
+::error title=Plugin Check::Test.Rule.Number2 has 1 errors, the baseline has 0. The full list is in the plugin-check-results artifact.
+::error title=Plugin Check::Test.Rule.Number3 has 1 errors, the baseline has 0. The full list is in the plugin-check-results artifact.
+::error title=Plugin Check::Test.Rule.Number4 has 1 errors, the baseline has 0. The full list is in the plugin-check-results artifact.
+::error title=Plugin Check::Test.Rule.Number5 has 1 errors, the baseline has 0. The full list is in the plugin-check-results artifact.
+::error title=Plugin Check::Test.Rule.Number6 has 1 errors, the baseline has 0. The full list is in the plugin-check-results artifact.
+::error title=Plugin Check::Test.Rule.Number7 has 1 errors, the baseline has 0. The full list is in the plugin-check-results artifact.
+::notice title=Plugin Check::WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents (errors) went down from 1 to 0.
+::notice title=Plugin Check::WordPress.Security.EscapeOutput.OutputNotEscaped (errors) went down from 2 to 0.
+::notice title=Plugin Check::WordPress.DB.DirectDatabaseQuery.DirectQuery (warnings) went down from 1 to 0.
+::notice title=Plugin Check::Error counts went down. Lower the baseline so they cannot come back: commit the baseline.json from this run's plugin-check-report artifact as baseline.json.
+Plugin Check found more errors than the baseline allows.

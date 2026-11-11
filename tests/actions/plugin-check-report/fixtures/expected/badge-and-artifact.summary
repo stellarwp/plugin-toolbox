@@ -1,0 +1,20 @@
+<!-- plugin-check -->
+❌ Plugin Check failed: 1 rule has more errors than the baseline allows
+
+![Plugin Check finished](https://img.shields.io/badge/Check%20Finished-now-darkgreen)
+
+|          | Now | Baseline | Change |
+|:--|--:|--:|:--|
+| Errors   | 4 | 3 | +1 |
+| Warnings | 1 | 1 | ±0 |
+
+Went up: `WordPress.Security.EscapeOutput.OutputNotEscaped` (+1)
+
+📎 [Full results and new baseline](https://github.com/o/r/actions/runs/1/artifacts/2) · [Run](https://example.test/actions/runs/1)
+
+If the new errors are on purpose, raise their counts in baseline.json in this pull request, so reviewers see it. The file from this run has the new counts:
+
+```bash
+gh run download <run-id> --repo <owner>/<repo> --name plugin-check-report --dir /tmp/plugin-check
+cp /tmp/plugin-check/baseline.json baseline.json
+```
