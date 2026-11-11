@@ -1,0 +1,145 @@
+# Pushes a plugin's POT file to the shared GlotPress site, translations.stellarwp.com: rsync copies
+# the POT to the server, `wp glotpress import-originals` imports it over ssh, and what the import
+# printed comes back as an output.
+#
+# This action handles a deploy key and builds remote shell commands. The first step checks every
+# input against an allow-list, in push-translations.js run by actions/github-script, and fails
+# before anything is sent. The later steps use the values it checked. No input is interpolated into
+# a script: the remote `script:` reads its values from the environment.
+name: Push translations
+description: Pushes a POT file to the GlotPress site and imports its strings into a project
+
+inputs:
+  project:
+    description: >-
+      The GlotPress project the strings are imported into, as its path on the site:
+      `the-events-calendar`, or `givewp/give` for a project under a parent.
+    required: true
+  pot-path:
+    description: >-
+      The POT file, relative to the workspace, e.g. `languages/give.pot`. Its name is the name it
+      has on the server.
+    required: true
+  remote-folder:
+    description: >-
+      The folder under `pot-location` the POT is copied to, one per product line: `tec`, `givewp`.
+    required: true
+  host:
+    description: 'The server to connect to. Pass a secret.'
+    required: true
+  user:
+    description: 'The user to connect as. Pass a secret.'
+    required: true
+  ssh-key:
+    description: 'The private key of `user`. Pass a secret.'
+    required: true
+  pot-location:
+    description: >-
+      The directory on the server that holds the POT folders, as an absolute path, e.g.
+      `/home/user/pots/`. Pass a secret.
+    required: true
+  site-directory:
+    description: >-
+      The directory of the GlotPress site on the server, where `wp` runs: absolute, or relative to
+      the home of `user`.
+    required: false
+    default: 'translations.stellarwp.com/html/'
+  result-url:
+    description: >-
+      The public https URL of the `bot-output/` folder in `site-directory`, where the import output
+      is read back from.
+    required: false
+    default: 'https://translations.stellarwp.com/bot-output/'
+
+outputs:
+  glotpress-result:
+    description: 'What `wp glotpress import-originals` printed.'
+    value: ${{ steps.fetch.outputs.glotpress-result }}
+  project:
+    description: 'The GlotPress project the strings were imported into.'
+    value: ${{ steps.check.outputs.project }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check the inputs and name the build
+      id: check
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so an input is data and
+        # never part of the program.
+        INPUT_PROJECT: ${{ inputs.project }}
+        INPUT_POT_PATH: ${{ inputs.pot-path }}
+        INPUT_REMOTE_FOLDER: ${{ inputs.remote-folder }}
+        INPUT_HOST: ${{ inputs.host }}
+        INPUT_USER: ${{ inputs.user }}
+        INPUT_SSH_KEY: ${{ inputs.ssh-key }}
+        INPUT_POT_LOCATION: ${{ inputs.pot-location }}
+        INPUT_SITE_DIRECTORY: ${{ inputs.site-directory }}
+        INPUT_RESULT_URL: ${{ inputs.result-url }}
+      with:
+        script: |
+          const { runPushTranslations } = require(`${process.env.ACTION_PATH}/push-translations.js`)
+          await runPushTranslations({ core, env: process.env })
+
+    # SHA-pinned: these two actions receive the deploy key. Bump the SHA to pick up a new release.
+    # The rsync action builds a shell command from path, remote_path, remote_host and remote_user,
+    # which is why the first step checks all four.
+    - name: Copy the POT file to the server
+      uses: burnett01/rsync-deployments@796cf0d5e4b535745ce49d7429f77cf39e25ef39 # 7.0.1
+      with:
+        switches: -avz --omit-dir-times --no-perms
+        path: ${{ steps.check.outputs.pot-path }}
+        remote_path: ${{ steps.check.outputs.remote-path }}
+        remote_host: ${{ inputs.host }}
+        remote_user: ${{ inputs.user }}
+        remote_key: ${{ inputs.ssh-key }}
+
+    - name: Import the strings into GlotPress
+      uses: appleboy/ssh-action@25ce8cbbcb08177468c7ff7ec5cbfa236f9341e1 # v1.1.0
+      env:
+        SITE_DIRECTORY: ${{ steps.check.outputs.site-directory }}
+        PROJECT: ${{ steps.check.outputs.project }}
+        REMOTE_POT: ${{ steps.check.outputs.remote-pot }}
+        RESULT_FILE: ${{ steps.check.outputs.result-file }}
+      with:
+        host: ${{ inputs.host }}
+        username: ${{ inputs.user }}
+        key: ${{ inputs.ssh-key }}
+        # The checked values reach the remote shell as variables, not as text of the script.
+        envs: SITE_DIRECTORY,PROJECT,REMOTE_POT,RESULT_FILE
+        script: |
+          set -e
+          cd "$SITE_DIRECTORY"
+          mkdir -p bot-output
+          wp glotpress import-originals "$PROJECT" "$REMOTE_POT" > "bot-output/$RESULT_FILE"
+
+    - name: Read the import output
+      id: fetch
+      uses: actions/github-script@v9
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        RESULT_URL: ${{ steps.check.outputs.result-url }}
+      with:
+        script: |
+          const { runReadResult } = require(`${process.env.ACTION_PATH}/push-translations.js`)
+          await runReadResult({ core, env: process.env })
+
+    # Also when the import or the read failed, so the output file does not stay public.
+    - name: Delete the import output from the server
+      if: ${{ always() && steps.check.outcome == 'success' }}
+      uses: appleboy/ssh-action@25ce8cbbcb08177468c7ff7ec5cbfa236f9341e1 # v1.1.0
+      env:
+        SITE_DIRECTORY: ${{ steps.check.outputs.site-directory }}
+        RESULT_FILE: ${{ steps.check.outputs.result-file }}
+      with:
+        host: ${{ inputs.host }}
+        username: ${{ inputs.user }}
+        key: ${{ inputs.ssh-key }}
+        envs: SITE_DIRECTORY,RESULT_FILE
+        script: |
+          rm -f -- "$SITE_DIRECTORY/bot-output/$RESULT_FILE"
