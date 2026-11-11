@@ -74,8 +74,8 @@ permissions:
 
 jobs:
   prepare:
-    # pup and WP-CLI run on PHP, which ubuntu-24.04 ships. Pinned so that stays true.
-    runs-on: ubuntu-24.04
+    # pup and WP-CLI run on PHP, which the Ubuntu 24.04 image ships. Pinned so that stays true.
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: write # release-prep commits the preparation to the branch
     steps:
