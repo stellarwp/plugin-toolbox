@@ -36,6 +36,38 @@ const PUPRC = {
 /** A package.json with a changelogger config, as a repository using the stellarwp format has. */
 const PACKAGE_JSON = { changelogger: { versioning: 'stellarwp', changesDir: 'changelog' } }
 
+/** A .puprc that also bumps package.json, as a repository that builds with npm has. */
+const PUPRC_WITH_PACKAGE = {
+  ...PUPRC,
+  paths: { versions: [...PUPRC.paths.versions, { file: 'package.json', regex: '("version": ")([^"]+)' }] },
+}
+
+/**
+ * A package.json holding a version. The changelogger's `version` type comes after the package's own
+ * version, as it does in a repository that declares its change types.
+ *
+ * @param {string} version The package's version.
+ *
+ * @returns {string} The file's contents.
+ */
+function packageWith(version) {
+  return `{\n\t"name": "plugin",\n\t"version": "${version}",\n\t"changelogger": {\n\t\t"versioning": "stellarwp",\n\t\t"types": {\n\t\t\t"version": "Version"\n\t\t}\n\t}\n}\n`
+}
+
+/**
+ * A rule under which `pup replace-version` writes the version into package.json, as pup does for a
+ * file under paths.versions.
+ *
+ * @returns {object} A rule for recordingExec, to pass to allSucceed.
+ */
+function pupBumpsPackage() {
+  return {
+    command: 'php',
+    args: /replace-version/,
+    effect: (args, options) => fs.writeFileSync(path.join(options.cwd, 'package.json'), packageWith(args.at(-1))),
+  }
+}
+
 /** Today in UTC, the way the action resolves an empty or `today` date. */
 const TODAY = new Date().toISOString().slice(0, 10)
 
@@ -400,13 +432,17 @@ describe('release-prep', () => {
 
   describe('readPuprc', () => {
     it('returns the TBD directories the file declares', () => {
-      assert.deepEqual(readPuprc(JSON.stringify(PUPRC)), { tbdDirs: ['src'] })
+      assert.deepEqual(readPuprc(JSON.stringify(PUPRC)), { tbdDirs: ['src'], bumpsPackageJson: false })
     })
 
     it('returns no TBD directories when the file declares none', () => {
       const { checks, ...withoutChecks } = PUPRC
 
-      assert.deepEqual(readPuprc(JSON.stringify(withoutChecks)), { tbdDirs: null })
+      assert.deepEqual(readPuprc(JSON.stringify(withoutChecks)), { tbdDirs: null, bumpsPackageJson: false })
+    })
+
+    it('says whether package.json is one of the version files', () => {
+      assert.equal(readPuprc(JSON.stringify(PUPRC_WITH_PACKAGE)).bumpsPackageJson, true)
     })
 
     it('refuses a missing file, which pup would treat as an empty one', () => {
@@ -961,6 +997,66 @@ describe('release-prep', () => {
       }
     })
 
+    it('keeps package.json on three parts for a four-part version, and says so', async (t) => {
+      // npm only takes semver, so a build fails on "version": "5.30.3.1".
+      const { core, logged, summary } = await coreWithOutputs(t)
+      const { exec } = recordingExec(allSucceed([pupBumpsPackage()]))
+      const cwd = checkoutWith({ '.puprc': PUPRC_WITH_PACKAGE, 'package.json': packageWith('5.30.3') })
+
+      await prepareUntagged({ core, exec, env: prepareEnv({ INPUT_VERSION: '5.30.3.1' }), cwd })
+
+      // Only the first "version" key is the package's: the changelogger type is left alone.
+      assert.equal(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'), packageWith('5.30.3'))
+      assert.match(logged(), /package\.json keeps 5\.30\.3: npm does not take the four-part 5\.30\.3\.1/)
+      assert.match(summary(), /package\.json keeps 5\.30\.3: npm does not take the four-part 5\.30\.3\.1/)
+    })
+
+    it('puts back a package.json the branch already holds on four parts', async (t) => {
+      const { core } = await coreWithOutputs(t)
+      const { exec } = recordingExec(allSucceed([pupBumpsPackage()]))
+      const cwd = checkoutWith({ '.puprc': PUPRC_WITH_PACKAGE, 'package.json': packageWith('5.30.3.1') })
+
+      await prepareUntagged({ core, exec, env: prepareEnv({ INPUT_VERSION: '5.30.3.2' }), cwd })
+
+      assert.equal(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'), packageWith('5.30.3'))
+    })
+
+    it('leaves package.json to pup for a three-part version', async (t) => {
+      const { core, logged, summary } = await coreWithOutputs(t)
+      const { exec } = recordingExec(allSucceed([pupBumpsPackage()]))
+      const cwd = checkoutWith({ '.puprc': PUPRC_WITH_PACKAGE, 'package.json': packageWith('5.30.3') })
+
+      await prepareUntagged({ core, exec, env: prepareEnv({ INPUT_VERSION: '5.31.0' }), cwd })
+
+      assert.equal(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'), packageWith('5.31.0'))
+      assert.doesNotMatch(logged(), /package\.json keeps/)
+      assert.doesNotMatch(summary(), /package\.json keeps/)
+    })
+
+    it('leaves a package.json that .puprc does not list alone, whatever it holds', async (t) => {
+      const { core, logged } = await coreWithOutputs(t)
+      const { exec } = recordingExec(allSucceed())
+      const cwd = checkoutWith({ '.puprc': PUPRC, 'package.json': packageWith('5.30.3.1') })
+
+      await prepareUntagged({ core, exec, env: prepareEnv({ INPUT_VERSION: '5.30.3.1' }), cwd })
+
+      assert.equal(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'), packageWith('5.30.3.1'))
+      assert.doesNotMatch(logged(), /package\.json keeps/)
+    })
+
+    it('leaves a package.json alone when its first version key does not hold the version', async (t) => {
+      // A package.json with no version of its own: the first "version" key is the changelogger type.
+      const { core, logged } = await coreWithOutputs(t)
+      const { exec } = recordingExec(allSucceed())
+      const contents = JSON.stringify({ changelogger: { versioning: 'stellarwp', types: { version: 'Version' } } })
+      const cwd = checkoutWith({ '.puprc': PUPRC_WITH_PACKAGE, 'package.json': contents })
+
+      await prepareUntagged({ core, exec, env: prepareEnv({ INPUT_VERSION: '5.30.3.1' }), cwd })
+
+      assert.equal(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'), contents)
+      assert.doesNotMatch(logged(), /package\.json keeps/)
+    })
+
     it('fails with pup output when pup fails, and stops there', async (t) => {
       const { core, outputs } = await coreWithOutputs(t)
       const { exec, calls } = recordingExec(
@@ -1230,6 +1326,37 @@ describe('release-prep', () => {
       assert.match(summary(), /Committed `commit-` "Prepare release\/M26\.jigglypuff \(4\.17\.0\)" to `release\/M26\.jigglypuff`/)
       assert.match(summary(), /^- `bin\/tool\.sh`\n- `changelog\.txt`\n- `changelog\/entry\.yaml`\n- `logo\.png`\n- `plugin\.php`$/m)
       assert.equal(git(work, 'rev-parse', 'HEAD'), head, 'the checkout itself stays where it was')
+    })
+
+    it('commits package.json on three parts and every other version file on four', async (t) => {
+      const { core } = await coreWithOutputs(t)
+      const { github, requests } = await octokitFor(apiAccepts())
+      const work = checkoutOn('release/M26.jigglypuff')
+      fs.writeFileSync(path.join(work, '.puprc'), JSON.stringify(PUPRC_WITH_PACKAGE))
+      fs.writeFileSync(path.join(work, 'package.json'), packageWith('5.30.2'))
+      git(work, 'add', '-A')
+      git(work, 'commit', '--quiet', '-m', 'Add package.json')
+      // pup stands in: it writes the four-part version into both version files.
+      const pup = recordingExec(
+        allSucceed([
+          {
+            ...pupBumpsPackage(),
+            effect: (args, options) => {
+              pupBumpsPackage().effect(args, options)
+              fs.writeFileSync(path.join(options.cwd, 'plugin.php'), `Version: ${args.at(-1)}\n`)
+            },
+          },
+        ])
+      )
+
+      await runPrepare({ github, core, exec: pup.exec, env: prepareEnv({ INPUT_VERSION: '5.30.3.1' }), cwd: work })
+      const { exec } = await recordedRealExec()
+      await runCommit({ github, core, exec, env: commitEnv({ INPUT_VERSION: '5.30.3.1' }), cwd: work })
+
+      const uploaded = requests
+        .filter((request) => request.path === API.blobs)
+        .map((request) => Buffer.from(request.body.content, 'base64').toString())
+      assert.deepEqual(uploaded, [packageWith('5.30.3'), 'Version: 5.30.3.1\n'])
     })
 
     it('uploads the staged content, not the file on disk', async (t) => {
