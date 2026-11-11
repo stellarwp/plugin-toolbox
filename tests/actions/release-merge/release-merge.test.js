@@ -356,6 +356,8 @@ describe('release-merge', () => {
         'base-sha': MERGED.main,
         'develop-branch': 'develop',
         conflict: '',
+        // A first release of the version: the caller's deploy and publish have everything to do.
+        'already-published': 'no',
       })
       assert.match(summary(), /merged `release\/M26\.test` into `main`, merged `main` into `develop`/)
     })
@@ -537,6 +539,17 @@ describe('release-merge', () => {
       }
     })
 
+    it('sets no output when the step fails after the merges, so a caller reading published under continue-on-error skips its writes', async (t) => {
+      // The job summary is the last write before the outputs; a summary that fails fails the step
+      // with every output still empty, so `already-published == 'no'` is false for a caller that kept going.
+      const { github } = await octokitFor(repositoryWith())
+      const { core, outputs } = await coreWithOutputs(t)
+      const failing = { ...core, summary: { addRaw: () => ({ write: async () => { throw new Error('summary write failed') } }) } }
+
+      await assert.rejects(runMerge({ github, core: failing, env: mergeEnv() }), /summary write failed/)
+      assert.deepStrictEqual(outputs(), {})
+    })
+
     it('builds a published retry from the tagged commit, so the base moving on changes nothing', async (t) => {
       // 4.17.0 was published, then 4.18.0: main's tip is 4.18.0's merge commit. The retry is a
       // no-op that rebuilds what was published, the commit the tag points at; deploy and publish
@@ -554,6 +567,9 @@ describe('release-merge', () => {
       await runMerge({ github, core, env: mergeEnv() })
 
       assert.strictEqual(outputs()['base-sha'], TAG_COMMIT)
+      // What a caller reads to skip the writes its deploy would repeat: the site's zip, a version
+      // stored on the site, anything that is not idempotent.
+      assert.strictEqual(outputs()['already-published'], 'yes')
       assert.strictEqual(mergesAsked(requests)[1].head, TAG_COMMIT, 'develop is asked for the published commit')
       assert.match(logged(), /main already has release\/M26\.test.*4\.17\.0 builds at ffffffffffffffffffffffffffffffffffffffff, the commit it was published from/s)
       assert.ok(!requested(requests).includes(`GET ${API.commit(later)}`), 'nothing is read about the tip')

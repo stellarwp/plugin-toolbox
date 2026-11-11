@@ -422,7 +422,8 @@ async function mergeInto({ github, core, owner, repo, into, head, message, label
  * @throws {Error} When an input is wrong, a branch is missing, the tag exists without a release, a
  *                 merge conflicts, or a read or a merge fails.
  *
- * @returns {Promise<void>} Resolves once both merges are made and the outputs are set.
+ * @returns {Promise<void>} Resolves once both merges are made and the outputs are set,
+ *          `already-published` among them: `yes` when the version's release already existed when the step started.
  */
 async function runMerge({ github, core, env }) {
   const branch = validateBranch(env.INPUT_BRANCH, 'branch')
@@ -528,16 +529,24 @@ async function runMerge({ github, core, env }) {
     ).merged
   }
 
+  const did = (merged, from, into) => (merged ? `merged \`${from}\` into \`${into}\`` : `\`${into}\` already had \`${from}\``)
+  const developPart = develop === null ? 'no develop branch to merge back into' : did(mergedDevelop, base, develop)
+  await core.summary.addRaw(`Release ${version}: ${did(mergedBase, branch, base)}, ${developPart}.`, true).write()
+
+  // These outputs are the last thing the step writes: a step that failed, on the summary above or
+  // anywhere before, leaves them empty, so a caller that reads `already-published == 'no'` under
+  // `continue-on-error` skips its writes without checking the step's outcome as well. `conflict`
+  // is the one output a failure sets, in mergeInto, before it throws on a merge conflict.
   core.setOutput('branch', branch)
   core.setOutput('version', version)
   core.setOutput('base-branch', base)
   core.setOutput('base-sha', baseSha)
   core.setOutput('develop-branch', develop ?? '')
   core.setOutput('conflict', '')
-
-  const did = (merged, from, into) => (merged ? `merged \`${from}\` into \`${into}\`` : `\`${into}\` already had \`${from}\``)
-  const developPart = develop === null ? 'no develop branch to merge back into' : did(mergedDevelop, base, develop)
-  await core.summary.addRaw(`Release ${version}: ${did(mergedBase, branch, base)}, ${developPart}.`, true).write()
+  // Whether the version was already published when the step started, so a caller can skip what
+  // its deploy would otherwise repeat on a published retry: release-publish skips the release by
+  // itself, but a zip copied to a site or a version written there is not idempotent.
+  core.setOutput('already-published', tagged ? 'yes' : 'no')
 }
 
 module.exports = {
