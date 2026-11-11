@@ -200,6 +200,7 @@ jobs:
           cp "$ZIP_PATH" zip_files
 
       - name: Upload the zip to the bucket
+        id: s3_upload
         if: env.S3_CONFIGURED == 'true' && steps.zip.outcome == 'success'
         uses: the-events-calendar/action-s3-utility@2323d7371bb7c2675361dbaa2892127135c87cfb # main, 2025-11-11
         with:
@@ -233,9 +234,51 @@ jobs:
             --data-urlencode "url=$RUN_URL"
 
       # The release dashboard's "RC ZIP" link opens this run's page, where the artifact downloads.
+      # Uploaded as the file itself (`archive: false`), so the download is the zip pup made, byte for
+      # byte, hidden files and permissions included; archived, GitHub would zip it again on download
+      # and the WordPress installer would refuse the zip inside the zip. The artifact's name is then
+      # the file's name, as the action documents.
       - uses: actions/upload-artifact@v7
+        id: artifact
         if: steps.zip.outcome == 'success'
         with:
-          name: ${{ steps.name.outputs.zip-name }}
           path: ${{ steps.zip.outputs.zip-path }}
+          archive: false
           retention-days: 30
+
+      # What this run produced, on its page, so the page is never empty: each destination is named
+      # only when its upload succeeded, and a QA build that found the zip in the bucket and built
+      # nothing links the bucket copy. The link is the one the bot posts in Slack, the name encoded
+      # the same way the notice above encodes it.
+      - name: Summarize the zip
+        if: ${{ !cancelled() && (steps.zip.outcome == 'success' || steps.s3_zip_exists.outcome == 'success') }}
+        env:
+          ZIP: ${{ steps.name.outputs.zip-name }}.zip
+          BUILT: ${{ steps.zip.outcome == 'success' }}
+          ATTACHED: ${{ steps.artifact.outcome == 'success' }}
+          IN_BUCKET: ${{ steps.s3_zip_exists.outcome == 'success' || steps.s3_upload.outcome == 'success' }}
+          BUCKET_CONFIGURED: ${{ env.S3_CONFIGURED }}
+        run: |
+          link="https://evnt.is/test.zip?file=$(jq -rn --arg f "$ZIP" '$f | @uri')"
+          {
+            if [ "$BUILT" = "true" ]; then
+              echo "## Built \`$ZIP\`"
+              echo
+              if [ "$ATTACHED" = "true" ]; then
+                echo "Attached to this run as an artifact: the plugin zip, as built."
+              else
+                echo "Not attached to this run: the artifact upload did not succeed."
+              fi
+              if [ "$IN_BUCKET" = "true" ]; then
+                echo
+                echo "Also in the bucket: $link"
+              elif [ "$BUCKET_CONFIGURED" = "true" ]; then
+                echo
+                echo "Not in the bucket: the upload did not succeed."
+              fi
+            else
+              echo "## \`$ZIP\` is already in the bucket"
+              echo
+              echo "The bucket already holds a zip of that name, so nothing was built again and this run has no artifact. Download it here: $link"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
