@@ -294,23 +294,29 @@ function isKnown(entry, known, labels) {
   return [squash(`${label}-${entry.text}`), squash(`${label}${entry.text}`)].some((line) => known.lines.includes(line))
 }
 
+/** A heading of a changelog file that names a version: `= [6.18.2] 2026-01-01 =`, `= 3.9.0 =`, `### [6.18.2]`. */
+const VERSION_HEADING = /^[=#].*?(?<![\d.])(\d+\.\d+\.\d+(?:\.\d+)?)(?![\d.])/gm
+
 /**
- * The part of a changelog file written since the last release: everything above the heading that
- * names it. An entry of an earlier release is not this release's, so a view changed in both is
- * still listed.
+ * The part of a changelog file written since the last release: everything above the first heading
+ * that names the last release or an earlier one. An entry of an earlier release is not this
+ * release's, so a view changed in both is still listed. Comparing, not looking for the last
+ * release's own heading, covers a release the changelog has no section for.
  *
  * @param {string} text    The changelog file.
  * @param {string} version The last release, without a leading `v`.
  *
- * @returns {string} The text above the last release's heading, or all of it when no heading names
- *          the release.
+ * @returns {string} The text above that heading, or all of it when no heading names a release
+ *          that old.
  */
 function sinceLastRelease(text, version) {
-  const escaped = version.replace(/\./g, '\\.')
-  // A heading line, `= [6.18.2] 2026-01-01 =` or `## 6.18.2`, holding the version as a whole.
-  const heading = new RegExp(`^[=#].*(?<![\\d.])${escaped}(?![\\d.])`, 'm').exec(text)
+  for (const heading of text.matchAll(VERSION_HEADING)) {
+    if (compareVersions(heading[1], version) <= 0) {
+      return text.slice(0, heading.index)
+    }
+  }
 
-  return heading ? text.slice(0, heading.index) : text
+  return text
 }
 
 /**

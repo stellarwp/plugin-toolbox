@@ -47,7 +47,8 @@ Each is a `patch` entry of type `tweak`, and a kind with nothing to list writes 
 
 The files are rewritten on every run, so a second run changes nothing and an entry whose change was
 reverted is removed. An entry is not written again when another pending change file holds it, or
-when a changelog file already carries it above the heading of the last release: the lines a run
+when a changelog file already carries it above the heading of the last release, or of the newest
+release before it when the changelog has no section for that one: the lines a run
 after the changelog was written finds. An entry of an earlier release does not count, so a view
 changed in two releases is listed in both.
 
