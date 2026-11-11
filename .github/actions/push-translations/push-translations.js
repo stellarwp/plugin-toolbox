@@ -155,4 +155,40 @@ async function runPushTranslations({ core, env }) {
   await core.summary.addRaw(`## Translations build: \`${outputs['result-file']}\``, true).write()
 }
 
-module.exports = { runPushTranslations, readInputs }
+/**
+ * Reads what the import printed back from the site, and sets it as the `glotpress-result` output.
+ *
+ * The URL was built by the check step from checked values. It is checked again for https here,
+ * since the request is made with whatever this step is handed.
+ *
+ * @param {object}   options
+ * @param {object}   options.core      The @actions/core toolkit, for the output and the summary.
+ * @param {object}   options.env       The environment, holding `RESULT_URL`.
+ * @param {Function} options.fetchImpl The fetch to use, the runtime's by default.
+ *
+ * @throws {Error} When the URL is not https, or the site does not answer 200.
+ *
+ * @returns {Promise<void>}
+ */
+async function runReadResult({ core, env, fetchImpl = globalThis.fetch }) {
+  const url = String(env.RESULT_URL ?? '')
+
+  if (!url.startsWith('https://')) {
+    throw new Error('The import output has no https URL to be read from. The import ran, and its output was not read.')
+  }
+
+  const response = await fetchImpl(url, { redirect: 'error', signal: AbortSignal.timeout(60000) })
+
+  if (!response.ok) {
+    throw new Error(
+      `Reading the import output answered ${response.status}. The import ran, and its output was not read.`
+    )
+  }
+
+  const result = (await response.text()).trim()
+
+  core.setOutput('glotpress-result', result)
+  await core.summary.addHeading('Results from GlotPress', 2).addCodeBlock(result).write()
+}
+
+module.exports = { runPushTranslations, runReadResult, readInputs }

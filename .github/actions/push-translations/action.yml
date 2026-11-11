@@ -5,7 +5,7 @@
 # This action handles a deploy key and builds remote shell commands. The first step checks every
 # input against an allow-list, in push-translations.js run by actions/github-script, and fails
 # before anything is sent. The later steps use the values it checked. No input is interpolated into
-# a script: a `run:` step and the remote `script:` read their values from the environment.
+# a script: the remote `script:` reads its values from the environment.
 name: Push translations
 description: Pushes a POT file to the GlotPress site and imports its strings into a project
 
@@ -120,20 +120,14 @@ runs:
 
     - name: Read the import output
       id: fetch
-      shell: bash
+      uses: actions/github-script@v9
       env:
+        ACTION_PATH: ${{ github.action_path }}
         RESULT_URL: ${{ steps.check.outputs.result-url }}
-      run: |
-        result=$(curl -fsS --proto '=https' --max-time 60 "$RESULT_URL")
-
-        # A heredoc with a random delimiter: a multi-line result cannot add or override outputs.
-        delimiter="glotpress-$RANDOM$RANDOM$RANDOM$RANDOM"
-        if grep -qxF "$delimiter" <<< "$result"; then
-          echo "The import output holds the output delimiter. Run the job again." >&2
-          exit 1
-        fi
-        printf 'glotpress-result<<%s\n%s\n%s\n' "$delimiter" "$result" "$delimiter" >> "$GITHUB_OUTPUT"
-        printf '## Results from GlotPress\n\n```\n%s\n```\n' "$result" >> "$GITHUB_STEP_SUMMARY"
+      with:
+        script: |
+          const { runReadResult } = require(`${process.env.ACTION_PATH}/push-translations.js`)
+          await runReadResult({ core, env: process.env })
 
     # Also when the import or the read failed, so the output file does not stay public.
     - name: Delete the import output from the server
