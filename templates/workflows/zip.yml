@@ -79,6 +79,7 @@ permissions:
 jobs:
   zip:
     # pup runs on the PHP set up below, which also serves the plugin's own build.
+    # A repository without Blacksmith changes the label to ubuntu-24.04.
     runs-on: blacksmith-4vcpu-ubuntu-2404
     env:
       # The secrets context is not available in a step's `if`, so whether the bucket and Slack are
