@@ -43,7 +43,8 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-24.04
+    # A repository without Blacksmith changes the label to ubuntu-24.04.
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     # A release that reaches users should wait for a person: give this environment required reviewers
     # in the repository settings, and let its branch policy accept the release branches the dashboard
     # dispatches on.
