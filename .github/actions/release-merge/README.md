@@ -141,7 +141,7 @@ fails the step without the marker; running the step again is enough.
   merged the branch, the merge commit whose second parent is the branch's tip; a tip that is any
   other commit, bump or not, is refused. Finish this release by hand at the commit that merged the
   branch into the base, or release another version. A version already published is not refused
-  (the `published` output says so, for the caller's own steps):
+  (the `already-published` output says so, for the caller's own steps):
   its retry builds the commit the tag points at, what was published, and deploy and publish skip
   what they find.
 
@@ -178,7 +178,7 @@ this; without `head`, the tip at that moment is what merges.
 | `branch` | The release branch merged. |
 | `base-sha` | The commit on the base branch that holds the release: the merge commit, or the base's tip on a retry that found the merge done. The commit to check out and build from; pass it to release-publish as `target`. |
 | `conflict` | The branch a merge conflicted on, or empty. A conflict fails the step, so read it with `continue-on-error` or in a later `if: failure()` step. |
-| `published` | `yes` when the version's GitHub release already existed when the step started (a retry of a published release), `no` otherwise. release-publish skips a published version by itself; read this to skip the steps of your own that write somewhere a retry of an older version must not touch, such as a zip copied to a site or a version written there: `if: steps.merge.outputs.published == 'no'`, or `if: steps.merge.outcome == 'success' && steps.merge.outputs.published == 'no'` when the merge step runs under `continue-on-error`. Compare with `no`, not with `yes`: `published` is among the outputs written last, so a step that failed before them leaves it empty; the `outcome` check covers a failure after them, in the runner's own wrap-up of the step. `conflict` is the one output a failure sets. It says nothing about whether those steps ran: keep them before release-publish, so the release is published only once they are done, and make each one safe to repeat for the same version (the same zip copied again, the same version written again), since a retry after a failed publish runs them again with `no`. |
+| `already-published` | `yes` when the version's GitHub release already existed when the step started (a retry of a published release), `no` otherwise. release-publish skips a published version by itself; read this to skip the steps of your own that write somewhere a retry of an older version must not touch, such as a zip copied to a site or a version written there: `if: steps.merge.outputs.already-published == 'no'`, or `if: steps.merge.outcome == 'success' && steps.merge.outputs.already-published == 'no'` when the merge step runs under `continue-on-error`. Compare with `no`, not with `yes`: `already-published` is among the outputs written last, so a step that failed before them leaves it empty; the `outcome` check covers a failure after them, in the runner's own wrap-up of the step. `conflict` is the one output a failure sets. It says nothing about whether those steps ran: keep them before release-publish, so the release is published only once they are done, and make each one safe to repeat for the same version (the same zip copied again, the same version written again), since a retry after a failed publish runs them again with `no`. |
 
 ## One deploy at a time
 
