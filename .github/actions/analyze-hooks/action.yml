@@ -40,7 +40,7 @@ inputs:
 
 outputs:
   tag:
-    description: 'The last release tag the checkout was compared with, e.g. `6.18.3` or `v5.3.0`.'
+    description: 'The last release tag the checkout was compared with, e.g. `6.18.3` or `v5.3.0`. Empty before the first release.'
     value: ${{ steps.analyze.outputs.tag }}
   files:
     description: 'The change files written, one per line, relative to the checkout. Empty when nothing changed.'

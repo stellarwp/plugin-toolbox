@@ -54,8 +54,9 @@ changed in two releases is listed in both.
 
 ## What the repository needs
 
-- A checkout with full history and tags: `fetch-depth: 0`. Without a release tag reachable from
-  `HEAD` the action fails.
+- A checkout with full history and tags: `fetch-depth: 0`. A shallow checkout that shows no release
+  tag fails the step. A complete history with no release tag is a plugin before its first release:
+  the action writes nothing and warns.
 - A changelogger. The changes directory (`changesDir`, `changelog` by default), the files the
   changelog is written to and the label of each type are read from the `changelogger` section of
   `package.json`. Without one, the entries go to `changelog/`.
