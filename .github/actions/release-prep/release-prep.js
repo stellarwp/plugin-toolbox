@@ -12,6 +12,8 @@
  */
 
 const { execFileSync } = require('node:child_process')
+const fs = require('node:fs')
+const path = require('node:path')
 
 // The three-or-four-parts pattern lives with the other version rules, shared with release-merge.
 const { compareVersions, STELLARWP_VERSION_PATTERN } = require('../../lib/versions.js')
@@ -42,6 +44,15 @@ const SEMVER_PATTERN =
 
 /** The numeric start of a version, which is what the branch-version comparison reads. */
 const NUMERIC_PREFIX = /^\d+(\.\d+)*/
+
+/** A version with a fourth numeric part, capturing the three parts before it. */
+const FOUR_PART_PATTERN = /^(\d+\.\d+\.\d+)\.\d+$/
+
+/**
+ * The first `"version"` key of a package.json, which is the package's own: the changelogger
+ * section can declare a `version` change type further down.
+ */
+const PACKAGE_VERSION_PATTERN = /("version"\s*:\s*")([^"]*)/
 
 /** A calendar date as the changelog writing strategies expect it. */
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
@@ -246,8 +257,9 @@ function validateBranch(branch, prefixes = []) {
  *
  * @throws {Error} When there is no .puprc, it is not JSON, or it declares no version files.
  *
- * @returns {{tbdDirs: string[]|null}} The directories the TBD check declares, or null when it
- *          declares none and pup falls back to its default.
+ * @returns {{tbdDirs: string[]|null, bumpsPackageJson: boolean}} The directories the TBD check
+ *          declares, or null when it declares none and pup falls back to its default; and whether
+ *          package.json is one of the version files.
  */
 function readPuprc(text) {
   if (text === null) {
@@ -277,7 +289,43 @@ function readPuprc(text) {
 
   const dirs = config?.checks?.tbd?.dirs
 
-  return { tbdDirs: Array.isArray(dirs) ? dirs : null }
+  return {
+    tbdDirs: Array.isArray(dirs) ? dirs : null,
+    bumpsPackageJson: versions.some((entry) => path.normalize(String(entry?.file)) === 'package.json'),
+  }
+}
+
+/**
+ * Puts package.json back on three parts after pup wrote a four-part version into it.
+ *
+ * npm only takes semver, so a build fails on `"version": "5.30.3.1"`. The three parts, not
+ * `5.30.3+1`: `pup check:version-conflict` cuts a four-part version to its first three parts and
+ * needs package.json to equal them. Only the first `"version"` key is rewritten, and only when it
+ * holds the version pup just wrote, so any other package.json is left as it is.
+ *
+ * @param {object} options
+ * @param {object} options.core    The @actions/core toolkit, for the log and the summary.
+ * @param {string} options.cwd     The checkout.
+ * @param {string} options.version The version pup wrote, validated.
+ *
+ * @returns {Promise<void>} Resolves once package.json is rewritten, or found not to need it.
+ */
+async function keepPackageSemver({ core, cwd, version }) {
+  const semver = FOUR_PART_PATTERN.exec(version)?.[1]
+  const text = semver ? readCheckoutFile(cwd, 'package.json') : null
+
+  if (text === null || PACKAGE_VERSION_PATTERN.exec(text)?.[2] !== version) {
+    return
+  }
+
+  fs.writeFileSync(
+    path.join(cwd, 'package.json'),
+    text.replace(PACKAGE_VERSION_PATTERN, (match, key) => `${key}${semver}`)
+  )
+
+  const message = `package.json keeps ${semver}: npm does not take the four-part ${version}.`
+  core.info(message)
+  await core.summary.addRaw(message, true).write()
 }
 
 /**
@@ -495,7 +543,7 @@ async function runPrepare({ github, core, exec, env, cwd = process.cwd(), fetchI
   const { owner, repo } = readRepository(env, 'Nothing was changed.')
   await refuseTaggedVersion({ github, owner, repo, version })
 
-  const { tbdDirs } = readPuprc(readCheckoutFile(cwd, '.puprc'))
+  const { tbdDirs, bumpsPackageJson } = readPuprc(readCheckoutFile(cwd, '.puprc'))
 
   if (!tbdDirs) {
     core.warning(
@@ -530,6 +578,10 @@ async function runPrepare({ github, core, exec, env, cwd = process.cwd(), fetchI
     // Nothing can call the TypeScript line yet; see noPharError. The branch-version check in
     // runPrepareWithPhar is part of the phar path — the TS contract does not define it yet.
     throw noPharError(pupRelease, 'Nothing was changed.')
+  }
+
+  if (bumpsPackageJson) {
+    await keepPackageSemver({ core, cwd, version })
   }
 
   core.setOutput('version', version)

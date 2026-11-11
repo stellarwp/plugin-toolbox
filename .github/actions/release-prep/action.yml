@@ -28,7 +28,8 @@ inputs:
       changelogger configures: three or four numeric parts for `stellarwp`, a semver version for
       `semver` or no configuration, no shape check for a custom strategy. An empty value and a
       version lower than the one the branch already has are refused before anything is changed, and
-      so is a version the repository has already tagged.
+      so is a version the repository has already tagged. A four-part version is written to
+      `package.json` as its first three parts, when `.puprc` lists it as a version file.
     required: true
   date:
     description: >-
