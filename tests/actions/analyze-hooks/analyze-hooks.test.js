@@ -178,6 +178,13 @@ describe('analyze-hooks', () => {
     assert.ok('analyze-hooks-changed-views.yaml' in entries())
   })
 
+  it('still lists it when the changelog has no section for the last release', async (t) => {
+    write('changelog.md', '### [6.18.1] 2026-01-01\n\n* Tweak - Changed views: `v2/list`\n')
+    await run(t)
+
+    assert.ok('analyze-hooks-changed-views.yaml' in entries())
+  })
+
   it('reads a hook whose name is on the line after the parenthesis', async (t) => {
     write('src/Tribe/Wrapped.php', "<?php\n$a = apply_filters(\n\t'tec_wrapped',\n\t$a\n);\n")
     commit('wrapped')
