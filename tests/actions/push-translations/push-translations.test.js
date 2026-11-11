@@ -5,6 +5,7 @@ const assert = require('node:assert')
 
 const {
   runPushTranslations,
+  runReadResult,
   readInputs,
 } = require('../../../.github/actions/push-translations/push-translations.js')
 const { coreWithOutputs } = require('../../support/actions.js')
@@ -152,5 +153,43 @@ describe('push-translations', () => {
     assert.ok(summary().includes(set['result-file']))
     // The key and the host are never outputs: the later steps take them from the inputs.
     assert.ok(!Object.values(set).some((value) => value.includes('PRIVATE KEY') || value.includes('ssh.example.com')))
+  })
+})
+
+describe('runReadResult', () => {
+  /** A fetch that answers once and records the URL it was asked for. */
+  const fetchOf = (status, body) => {
+    const urls = []
+
+    return { urls, fetchImpl: async (url) => (urls.push(url), new Response(body, { status })) }
+  }
+
+  it('sets what the import printed as the output, several lines included', async (t) => {
+    const { core, outputs, summary } = await coreWithOutputs(t)
+    const { urls, fetchImpl } = fetchOf(200, '3 new strings added\n1 string obsoleted\n')
+
+    await runReadResult({ core, env: { RESULT_URL: 'https://example.com/bot-output/give-abc' }, fetchImpl })
+
+    assert.deepStrictEqual(urls, ['https://example.com/bot-output/give-abc'])
+    assert.strictEqual(outputs()['glotpress-result'], '3 new strings added\n1 string obsoleted')
+    assert.match(summary(), /3 new strings added/)
+  })
+
+  it('fails when the site does not answer 200, and sets no output', async (t) => {
+    const { core, outputs } = await coreWithOutputs(t)
+
+    await assert.rejects(
+      runReadResult({ core, env: { RESULT_URL: 'https://example.com/x' }, fetchImpl: fetchOf(404, 'no').fetchImpl }),
+      /answered 404/
+    )
+    assert.deepStrictEqual(outputs(), {})
+  })
+
+  it('refuses a URL that is not https before any request', async (t) => {
+    const { core } = await coreWithOutputs(t)
+    const { urls, fetchImpl } = fetchOf(200, 'x')
+
+    await assert.rejects(runReadResult({ core, env: { RESULT_URL: 'http://example.com/x' }, fetchImpl }), /no https URL/)
+    assert.deepStrictEqual(urls, [])
   })
 })
