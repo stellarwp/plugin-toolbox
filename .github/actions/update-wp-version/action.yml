@@ -1,0 +1,53 @@
+# Sets the WordPress version a plugin is tested up to and, when asked, the minimum it requires, two
+# minor versions behind. It rewrites the headers in readme.txt and the plugin file only: it commits
+# nothing, so the step that commits the release preparation carries the change.
+#
+# The logic lives in update-wp-version.js, run by actions/github-script, so there is no dependency
+# to install and nothing to build.
+name: Update the WordPress version
+description: Sets the 'Tested up to' WordPress version and, optionally, the minimum two minors behind it
+
+inputs:
+  tested-up-to:
+    description: >-
+      The WordPress version to set as `Tested up to`, e.g. `6.8` or `6.8.1`: two or three numeric
+      parts, none zero-padded. Anything else fails before any file is written.
+    required: true
+  update-min-version:
+    description: >-
+      `yes` to also set `Requires at least` two minor versions behind, e.g. `6.8.1` gives `6.6`;
+      `no` to leave it. Anything else fails before any file is written.
+    required: false
+    default: 'no'
+  working-directory:
+    description: >-
+      Where the repository is checked out, relative to the workspace or absolute. Empty is the
+      workspace. A directory that is not there fails before any file is written.
+    required: false
+    default: ''
+
+outputs:
+  min-version:
+    description: 'The minimum version written, e.g. `6.6`. Empty when `update-min-version` is not `yes`.'
+    value: ${{ steps.update.outputs.min-version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Update the WordPress version
+      id: update
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so an input is data and
+        # never part of the program.
+        INPUT_TESTED_UP_TO: ${{ inputs.tested-up-to }}
+        INPUT_UPDATE_MIN_VERSION: ${{ inputs.update-min-version }}
+        INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      with:
+        script: |
+          const { runUpdateWpVersion } = require(`${process.env.ACTION_PATH}/update-wp-version.js`)
+          await runUpdateWpVersion({ core, env: process.env })
