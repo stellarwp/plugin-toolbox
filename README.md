@@ -166,6 +166,7 @@ Each phase ends with something people can actually use.
 
 - [ ] Port `setup-slic`, `prepare-matrix`, `setup-bun` from LearnDash.
 - [ ] Port `check-php-changes`, `smart-checkout`, `process-changelog`, `add-changelog`, `generate-pot` from TEC.
+- [x] Port `analyze-hooks` from TEC: the actions and filters a release adds or removes and the views it changes, as pending changelog entries. The search paths, the views directory and the changelog types are inputs, and a `v` on the release tag is accepted.
 - [ ] Add `setup-node` for the npm crowd.
 - [x] Add `release-prep`: version bump, TBD replacement and changelog through pup and the changelogger action, committed to the release branch through the GitHub API. A caller to copy is in `templates/workflows/release-prep.yml`.
 - [x] Add `release-merge`: the release branch into the base branch, the base back into develop, each step safe to rerun and a conflict reported with a `MERGE_CONFLICT` line.
