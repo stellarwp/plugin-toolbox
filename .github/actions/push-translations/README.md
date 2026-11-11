@@ -108,9 +108,10 @@ A trailing `/` on a folder, a directory or the URL is optional.
 
 ## How it runs
 
-One [actions/github-script](https://github.com/actions/github-script) step runs
-[`push-translations.js`](./push-translations.js), which checks the inputs and sets the values the
-later steps use. Inputs reach it through `process.env`, never by being interpolated into it.
+Two [actions/github-script](https://github.com/actions/github-script) steps run
+[`push-translations.js`](./push-translations.js). The first checks the inputs and sets the values
+the later steps use. The second reads the import output back over https and sets it as the
+`glotpress-result` output. Inputs reach both through `process.env`, never by being interpolated.
 
 The copy and the two ssh steps are third-party actions,
 [burnett01/rsync-deployments](https://github.com/Burnett01/rsync-deployments) and
@@ -119,8 +120,5 @@ they receive the deploy key. The rsync action builds a shell command from the pa
 the user, which is why all of them are checked. The remote script holds no value: the checked
 values reach the remote shell as environment variables, through the ssh action's `envs`.
 
-The output is written to `GITHUB_OUTPUT` as a heredoc with a random delimiter, so a result of
-several lines cannot add or override an output.
-
-`tests/actions/push-translations/push-translations.test.js` covers the check: the two shapes
-above, and the refusals. Run `npm install` once, then `node --test`.
+`tests/actions/push-translations/push-translations.test.js` covers the check, with the two shapes
+above and the refusals, and the read of the import output. Run `npm install` once, then `node --test`.
