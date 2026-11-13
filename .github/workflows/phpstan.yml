@@ -87,7 +87,9 @@ on:
         description: 'Git pathspecs, one per line, whose contents are part of the dependency cache key.'
         required: false
         type: string
-        default: composer.lock
+        default: |
+          composer.json
+          composer.lock
       post-install-command:
         description: >-
           Bash that runs after `composer install` when the dependency cache missed. Empty runs
