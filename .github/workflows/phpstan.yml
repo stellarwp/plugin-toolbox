@@ -222,7 +222,7 @@ jobs:
           place() {
             rm -rf "$tmp/unpacked"
             unzip -q "$tmp/plugin.zip" -d "$tmp/unpacked"
-            mv "$tmp"/unpacked/*/ "$dest/$1"
+            find "$tmp/unpacked" -mindepth 1 -maxdepth 1 -type d -exec mv {} "$dest/$1" \;
           }
 
           for slug in $WORDPRESS_PLUGINS; do
@@ -307,7 +307,7 @@ jobs:
       # Saved when PHPStan reports errors too: it still writes the cache, and the next run reads it.
       # The run id in the key means a save never collides with an older cache.
       - name: Save the PHPStan cache
-        if: ${{ !cancelled() && steps.changes.outputs.run == 'true' }}
+        if: ${{ !cancelled() && steps.phpstan-cache.outcome == 'success' }}
         uses: actions/cache/save@v6
         with:
           path: ${{ inputs.result-cache-path }}
