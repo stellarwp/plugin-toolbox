@@ -5,7 +5,7 @@ name: PHPStan
 # A file to copy into .github/workflows/ of a plugin repository, under any name. The work is in
 # stellarwp/plugin-toolbox/.github/workflows/phpstan.yml, which documents every input. The
 # repository needs a composer.json with a `phpstan` script. PHPStan's `tmpDir` has to be
-# `.cache/phpstan`, the default `result-cache-path`, or the cache is saved and never read.
+# `.cache/phpstan`, or the cache is saved and never read.
 #
 # Run it locally: `composer phpstan`
 

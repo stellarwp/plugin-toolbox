@@ -8,18 +8,20 @@ name: PHPStan
 # The repository runs the analysis with its own Composer script, `composer phpstan` by default, so
 # memory limits and flags stay in composer.json and the local command is the CI command.
 #
-# PHPStan only reads its result cache from `tmpDir` in its config, so `result-cache-path` has to be
-# that same path. The default is `.cache/phpstan`:
+# PHPStan only reads its result cache from `tmpDir` in its config, so the config has to point at
+# the path this workflow caches:
 #
 #   parameters:
 #       tmpDir: .cache/phpstan
 #
-# A pull request that changes none of the `changed-files` globs skips the analysis, and the check
-# still ends green. A push, a manual run and a pull request with no `changed-files` always analyse.
+# A pull request that changes none of the `changed-files` globs, and not the caller workflow file
+# itself, skips the analysis, and the check still ends green. A push, a manual run and a pull
+# request with no `changed-files` always analyse.
 #
 # Plugins PHPStan has to scan that are not in this repository are downloaded next to the checkout
-# (`../<name>`), so `scanDirectories` in the PHPStan config reaches them as `../<name>`. A GitHub
-# repository that has a composer.json gets `composer install` there.
+# (`../<name>`), so `scanDirectories` in the PHPStan config reaches them as `../<name>`. An
+# `owner/name` entry is a GitHub repository, its latest release; a bare slug is a WordPress.org
+# plugin. A GitHub repository that has a composer.json gets `composer install` there.
 #
 # The caller grants the token: `contents: read` to check out, `pull-requests: read` to list the
 # files a pull request changes. A called workflow cannot raise what the caller gave it.
@@ -55,10 +57,6 @@ on:
         required: false
         type: string
         default: ubuntu-latest
-      timeout-minutes:
-        required: false
-        type: number
-        default: 30
       changed-files:
         description: >-
           Globs, one per line. A pull request runs PHPStan only when it changes a file one of them
@@ -85,11 +83,6 @@ on:
         required: false
         type: string
         default: vendor
-      dependency-cache-hash-files:
-        description: 'Git pathspecs, one per line, whose contents are part of the dependency cache key.'
-        required: false
-        type: string
-        default: composer.lock
       post-install-command:
         description: >-
           Bash that runs after `composer install` when the dependency cache missed. Empty runs
@@ -97,27 +90,11 @@ on:
         required: false
         type: string
         default: ''
-      result-cache-path:
-        description: "PHPStan's result cache. It has to be the `tmpDir` in the PHPStan config."
-        required: false
-        type: string
-        default: .cache/phpstan
-      cache-version:
-        description: 'Prefix of both cache keys. Change it to throw the old caches away.'
-        required: false
-        type: string
-        default: v1
-      wordpress-plugins:
+      plugins:
         description: >-
-          WordPress.org plugin slugs, one per line, downloaded to `../<slug>`. Empty downloads
-          nothing.
-        required: false
-        type: string
-        default: ''
-      github-plugins:
-        description: >-
-          GitHub repositories, one `owner/name` per line. The latest release is unpacked to
-          `../<name>`. A private repository needs the `github-token` secret.
+          Plugins PHPStan scans, one per line, downloaded to `../<name>`. `owner/name` is a GitHub
+          repository's latest release (a private one needs the `github-token` secret); a bare slug
+          is a WordPress.org plugin. Empty downloads nothing.
         required: false
         type: string
         default: ''
@@ -134,7 +111,7 @@ jobs:
   phpstan:
     name: PHPStan
     runs-on: ${{ inputs.runs-on }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: read
@@ -148,6 +125,7 @@ jobs:
           DRAFT: ${{ github.event.pull_request.draft }}
           HEAD_REF: ${{ github.head_ref }}
           REPOSITORY: ${{ github.repository }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SKIP_DRAFT_PREFIXES: ${{ inputs.skip-draft-prefixes }}
           CHANGED_FILES: ${{ inputs.changed-files }}
@@ -169,9 +147,17 @@ jobs:
             fi
 
             if [ "$run" = true ] && [ -n "${CHANGED_FILES//[[:space:]]/}" ]; then
+              # In a called workflow this is the caller's file, whatever it is named.
+              caller=${WORKFLOW_REF#"$REPOSITORY"/}
+              caller=${caller%%@*}
               files=$(gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" --jq '.[] | .filename, (.previous_filename // empty)')
               run=false
               while IFS= read -r file; do
+                if [ "$file" = "$caller" ]; then
+                  echo "Matched: $file (the workflow itself)"
+                  run=true
+                  break
+                fi
                 for glob in $CHANGED_FILES; do
                   # shellcheck disable=SC2053 # the glob is meant to be a pattern
                   if [[ $file == $glob ]]; then
@@ -204,11 +190,10 @@ jobs:
           tools: composer:v2
 
       - name: Download the plugins PHPStan scans
-        if: steps.changes.outputs.run == 'true' && (inputs.wordpress-plugins != '' || inputs.github-plugins != '')
+        if: steps.changes.outputs.run == 'true' && (inputs.plugins != '')
         env:
           GH_TOKEN: ${{ secrets.github-token != '' && secrets.github-token || github.token }}
-          WORDPRESS_PLUGINS: ${{ inputs.wordpress-plugins }}
-          GITHUB_PLUGINS: ${{ inputs.github-plugins }}
+          PLUGINS: ${{ inputs.plugins }}
           # Composer reads this itself. Only the steps that run Composer get it, not the actions.
           COMPOSER_AUTH: ${{ secrets.github-token != '' && format('{{"github-oauth":{{"github.com":"{0}"}}}}', secrets.github-token) || '' }}
         run: |
@@ -225,15 +210,14 @@ jobs:
             find "$tmp/unpacked" -mindepth 1 -maxdepth 1 -type d -exec mv {} "$dest/$1" \;
           }
 
-          for slug in $WORDPRESS_PLUGINS; do
-            curl -fsSL -o "$tmp/plugin.zip" "https://downloads.wordpress.org/plugin/${slug}.latest-stable.zip"
-            place "$slug"
-          done
-
-          for repo in $GITHUB_PLUGINS; do
-            name=${repo##*/}
-            tag=$(gh release view --repo "$repo" --json tagName --jq .tagName)
-            gh release download "$tag" --repo "$repo" --archive zip --output "$tmp/plugin.zip" --clobber
+          for plugin in $PLUGINS; do
+            name=${plugin##*/}
+            if [[ $plugin == */* ]]; then
+              tag=$(gh release view --repo "$plugin" --json tagName --jq .tagName)
+              gh release download "$tag" --repo "$plugin" --archive zip --output "$tmp/plugin.zip" --clobber
+            else
+              curl -fsSL -o "$tmp/plugin.zip" "https://downloads.wordpress.org/plugin/${plugin}.latest-stable.zip"
+            fi
             place "$name"
             if [ -f "$dest/$name/composer.json" ]; then
               composer install --no-interaction --no-progress --prefer-dist --working-dir="$dest/$name"
@@ -243,13 +227,9 @@ jobs:
       - name: Hash the dependency files
         id: deps-hash
         if: steps.changes.outputs.run == 'true'
-        env:
-          HASH_FILES: ${{ inputs.dependency-cache-hash-files }}
         run: |
           set -euo pipefail
-          set -f # git expands the pathspecs
-          # shellcheck disable=SC2086 # one pathspec per word
-          hash=$(git ls-files -z -- $HASH_FILES | sort -z | xargs -0 -r sha256sum | sha256sum | cut -d' ' -f1)
+          hash=$(git ls-files -z -- composer.lock | xargs -0 -r sha256sum | sha256sum | cut -d' ' -f1)
           echo "hash=$hash" >> "$GITHUB_OUTPUT"
 
       # The key names the branch and falls back to any branch's cache, so a new pull request starts
@@ -260,10 +240,10 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ inputs.dependency-cache-paths }}
-          key: ${{ inputs.cache-version }}-deps-${{ runner.os }}-php${{ inputs.php-version }}-${{ github.ref_name }}-${{ steps.deps-hash.outputs.hash }}
+          key: v1-deps-${{ runner.os }}-php${{ inputs.php-version }}-${{ github.ref_name }}-${{ steps.deps-hash.outputs.hash }}
           restore-keys: |
-            ${{ inputs.cache-version }}-deps-${{ runner.os }}-php${{ inputs.php-version }}-${{ github.ref_name }}-
-            ${{ inputs.cache-version }}-deps-${{ runner.os }}-php${{ inputs.php-version }}-
+            v1-deps-${{ runner.os }}-php${{ inputs.php-version }}-${{ github.ref_name }}-
+            v1-deps-${{ runner.os }}-php${{ inputs.php-version }}-
 
       # A partial hit restored an older vendor, and `composer install` brings it up to date.
       - name: Install the dependencies
@@ -292,11 +272,11 @@ jobs:
         if: steps.changes.outputs.run == 'true'
         uses: actions/cache/restore@v6
         with:
-          path: ${{ inputs.result-cache-path }}
-          key: ${{ inputs.cache-version }}-phpstan-${{ runner.os }}-php${{ inputs.php-version }}-${{ github.ref_name }}-${{ github.run_id }}
+          path: .cache/phpstan
+          key: v1-phpstan-${{ runner.os }}-php${{ inputs.php-version }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
-            ${{ inputs.cache-version }}-phpstan-${{ runner.os }}-php${{ inputs.php-version }}-${{ github.ref_name }}-
-            ${{ inputs.cache-version }}-phpstan-${{ runner.os }}-php${{ inputs.php-version }}-
+            v1-phpstan-${{ runner.os }}-php${{ inputs.php-version }}-${{ github.ref_name }}-
+            v1-phpstan-${{ runner.os }}-php${{ inputs.php-version }}-
 
       - name: Run PHPStan
         if: steps.changes.outputs.run == 'true'
@@ -310,5 +290,5 @@ jobs:
         if: ${{ !cancelled() && steps.phpstan-cache.outcome == 'success' }}
         uses: actions/cache/save@v6
         with:
-          path: ${{ inputs.result-cache-path }}
+          path: .cache/phpstan
           key: ${{ steps.phpstan-cache.outputs.cache-primary-key }}
