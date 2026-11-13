@@ -119,6 +119,9 @@ jobs:
     name: PHPStan
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 30
+    # Step conditions cannot read secrets, so the job carries whether a token was passed.
+    env:
+      HAS_GITHUB_TOKEN: ${{ secrets.github-token != '' }}
     permissions:
       contents: read
       pull-requests: read
@@ -222,7 +225,7 @@ jobs:
               echo "::error title=PHPStan::The plugin '$1' has the same directory name as this repository."
               exit 1
             fi
-            rm -rf "$dest/$1" "$tmp/unpacked"
+            rm -rf "${dest:?}/${1:?}" "${tmp:?}/unpacked"
             unzip -q "$tmp/plugin.zip" -d "$tmp/unpacked"
             find "$tmp/unpacked" -mindepth 1 -maxdepth 1 -type d -exec mv {} "$dest/$1" \;
           }
@@ -284,7 +287,7 @@ jobs:
       # A public caller with a token installs private packages into vendor, and a fork's pull
       # request can restore the base branch's cache, so that combination does not save one.
       - name: Save the dependency cache
-        if: steps.install.outcome == 'success' && !(secrets.github-token != '' && github.event.repository.private == false)
+        if: steps.install.outcome == 'success' && !(env.HAS_GITHUB_TOKEN == 'true' && github.event.repository.private == false)
         uses: actions/cache/save@v6
         with:
           path: ${{ inputs.dependency-cache-paths }}
