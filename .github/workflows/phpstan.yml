@@ -134,6 +134,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
           SKIP_DRAFT_PREFIXES: ${{ inputs.skip-draft-prefixes }}
           CHANGED_FILES: ${{ inputs.changed-files }}
         run: |
@@ -153,7 +154,10 @@ jobs:
               done
             fi
 
-            if [ "$run" = true ] && [ -n "${CHANGED_FILES//[[:space:]]/}" ]; then
+            # The files API stops at 3,000 files, so a bigger pull request cannot be judged from it.
+            if [ "$run" = true ] && [ "${PR_CHANGED_FILES:-0}" -ge 3000 ]; then
+              echo "::notice title=PHPStan::The pull request changes ${PR_CHANGED_FILES} files, more than the files API lists, so PHPStan runs."
+            elif [ "$run" = true ] && [ -n "${CHANGED_FILES//[[:space:]]/}" ]; then
               # In a called workflow this is the caller's file, whatever it is named.
               caller=${WORKFLOW_REF#"$REPOSITORY"/}
               caller=${caller%%@*}
@@ -212,7 +216,13 @@ jobs:
 
           # Both kinds of archive hold one directory; it becomes ../<name>.
           place() {
-            rm -rf "$tmp/unpacked"
+            # A runner that keeps the workspace parent may still hold the previous copy, and `mv`
+            # would nest the new one inside it. The repository itself is never replaced.
+            if [ "$dest/$1" = "$GITHUB_WORKSPACE" ]; then
+              echo "::error title=PHPStan::The plugin '$1' has the same directory name as this repository."
+              exit 1
+            fi
+            rm -rf "$dest/$1" "$tmp/unpacked"
             unzip -q "$tmp/plugin.zip" -d "$tmp/unpacked"
             find "$tmp/unpacked" -mindepth 1 -maxdepth 1 -type d -exec mv {} "$dest/$1" \;
           }
@@ -271,8 +281,10 @@ jobs:
           fi
 
       # Saved before the analysis, so a run that finds PHPStan errors still leaves the cache.
+      # A public caller with a token installs private packages into vendor, and a fork's pull
+      # request can restore the base branch's cache, so that combination does not save one.
       - name: Save the dependency cache
-        if: steps.install.outcome == 'success'
+        if: steps.install.outcome == 'success' && !(secrets.github-token != '' && github.event.repository.private == false)
         uses: actions/cache/save@v6
         with:
           path: ${{ inputs.dependency-cache-paths }}
