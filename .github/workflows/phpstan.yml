@@ -83,6 +83,11 @@ on:
         required: false
         type: string
         default: vendor
+      dependency-cache-hash-files:
+        description: 'Git pathspecs, one per line, whose contents are part of the dependency cache key.'
+        required: false
+        type: string
+        default: composer.lock
       post-install-command:
         description: >-
           Bash that runs after `composer install` when the dependency cache missed. Empty runs
@@ -227,9 +232,13 @@ jobs:
       - name: Hash the dependency files
         id: deps-hash
         if: steps.changes.outputs.run == 'true'
+        env:
+          HASH_FILES: ${{ inputs.dependency-cache-hash-files }}
         run: |
           set -euo pipefail
-          hash=$(git ls-files -z -- composer.lock | xargs -0 -r sha256sum | sha256sum | cut -d' ' -f1)
+          set -f # git expands the pathspecs
+          # shellcheck disable=SC2086 # one pathspec per word
+          hash=$(git ls-files -z -- $HASH_FILES | sort -z | xargs -0 -r sha256sum | sha256sum | cut -d' ' -f1)
           echo "hash=$hash" >> "$GITHUB_OUTPUT"
 
       # The key names the branch and falls back to any branch's cache, so a new pull request starts
