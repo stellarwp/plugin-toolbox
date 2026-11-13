@@ -178,7 +178,7 @@ Each phase ends with something people can actually use.
 ### Phase 3: reusable workflows
 
 - [ ] `standards.yml`: phpcs, cspell, markdown, style lint. Inputs pick which run.
-- [ ] `analysis.yml`: PHPStan and the PHP compat matrix.
+- [ ] `phpstan.yml`: PHPStan, with its dependency and result caches. The PHP compat matrix is a separate workflow.
 - [ ] `tests.yml`: slic suites via `prepare-matrix`, with LD's cheap/expensive split. Review TEC's paused [#51](https://github.com/the-events-calendar/actions/pull/51) first so that work isn't lost.
 - [ ] `changelog.yml`: the changelogger check.
 - [ ] `zip.yml`: a `workflow_call` wrapper for the `zip-name` and `release-zip` actions, so the copies of `templates/workflows/zip.yml` become one `uses:` line. What LearnDash's version adds on top (the size comparison, the pull request comment) is brand policy and stays in its file.
