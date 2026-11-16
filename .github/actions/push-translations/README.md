@@ -39,6 +39,26 @@ GiveWP, a project under a parent, with a folder of its own on the server:
 A composite action cannot read secrets, so the caller passes them. Generate the POT before this
 step: the action only sends the file.
 
+## One run at a time per project
+
+Every run copies the POT to the same path on the server, `<pot-location>/<remote-folder>/<file>.pot`,
+and imports that path into the same project. Two runs at once can import each other's file, or
+import an older POT after a newer one. A composite action cannot set `concurrency`, so the job that
+uses it does, with a group named after the project:
+
+```yaml
+jobs:
+  translations:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: push-translations-givewp-give
+      cancel-in-progress: false
+```
+
+GitHub runs the jobs of a group one at a time and keeps only the newest waiting one, so the last
+import is from the newest run. A group holds jobs of one repository only, so push a project
+from one repository.
+
 ## What it does
 
 1. Checks every input and names the build: a random id of 32 hex characters.
