@@ -42,6 +42,21 @@ const PLUGIN_TESTED = `<?php
 
 const WORKFLOW = 'jobs:\n  t:\n    steps:\n      - run: wp core update --version=6.8\n'
 
+/** A fetch for a run that must not look anything up. */
+const noFetch = async () => {
+  throw new Error('No lookup was expected.')
+}
+
+/** A fetch answering the WordPress version-check endpoint with the given body and status. */
+const versionCheck = (body, status = 200) => {
+  const calls = []
+  const fetchImpl = async (url) => {
+    calls.push(url)
+    return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status })
+  }
+  return { fetchImpl, calls }
+}
+
 /** A .puprc listing the given version files, the plugin file twice as real ones do. */
 const puprc = (files = ['test-plugin.php', 'test-plugin.php', 'readme.txt', 'src/Main.php']) =>
   JSON.stringify({ paths: { versions: files.map((file) => ({ file, regex: '(Version: )(.+)' })) } })
@@ -67,12 +82,13 @@ describe('update-wp-version', () => {
         .map((file) => [path.relative(dir, file), fs.readFileSync(file, 'utf8')])
     )
 
-  const run = async (t, tested, updateMin, inputs = {}) => {
+  const run = async (t, tested, updateMin, inputs = {}, fetchImpl = noFetch) => {
     const { core, outputs, logged, summary } = await coreWithOutputs(t)
 
     await runUpdateWpVersion({
       core,
       cwd: dir,
+      fetchImpl,
       env: { INPUT_TESTED_UP_TO: tested, INPUT_UPDATE_MIN_VERSION: updateMin, ...inputs },
     })
 
@@ -80,7 +96,7 @@ describe('update-wp-version', () => {
   }
 
   /** Asserts the run is refused with the message, with no file changed and no output set. */
-  const refuses = async (t, tested, updateMin, message) => {
+  const refuses = async (t, tested, updateMin, message, fetchImpl = noFetch) => {
     const before = snapshot()
     const { core, outputs } = await coreWithOutputs(t)
 
@@ -88,6 +104,7 @@ describe('update-wp-version', () => {
       runUpdateWpVersion({
         core,
         cwd: dir,
+        fetchImpl,
         env: { INPUT_TESTED_UP_TO: tested, INPUT_UPDATE_MIN_VERSION: updateMin },
       }),
       (error) => message.test(error.message) && error.message.endsWith('No file was changed.')
@@ -210,7 +227,6 @@ describe('update-wp-version', () => {
     const bad = [
       'banana',
       '6',
-      '',
       '6.8.1.2',
       'v6.8',
       // Zero-padded parts: 6.010 is not 6.10.
@@ -228,6 +244,28 @@ describe('update-wp-version', () => {
       await refuses(t, version, 'yes', /must look like 6\.8 or 6\.8\.1/)
       await refuses(t, version, 'no', /must look like 6\.8 or 6\.8\.1/)
     }
+  })
+
+  it('sets the latest WordPress release when tested-up-to is empty', async (t) => {
+    const { fetchImpl, calls } = versionCheck({ offers: [{ version: '6.8.3' }, { version: '6.7.4' }] })
+    await run(t, ' ', 'no', {}, fetchImpl)
+
+    assert.deepStrictEqual(calls, ['https://api.wordpress.org/core/version-check/1.7/'])
+    assert.match(read('readme.txt'), /^Tested up to: 6\.8\.3$/m)
+  })
+
+  it('refuses when the latest WordPress release cannot be looked up', async (t) => {
+    const failed = /Looking up the latest WordPress release failed/
+    const unusable = /The latest WordPress release has no usable version/
+
+    await refuses(t, '', 'no', failed, versionCheck({}, 500).fetchImpl)
+    await refuses(t, '', 'no', failed, versionCheck('<html>').fetchImpl)
+    await refuses(t, '', 'no', failed, async () => {
+      throw new Error('getaddrinfo ENOTFOUND')
+    })
+    await refuses(t, '', 'no', unusable, versionCheck({}).fetchImpl)
+    await refuses(t, '', 'no', unusable, versionCheck({ offers: [] }).fetchImpl)
+    await refuses(t, '', 'no', unusable, versionCheck({ offers: [{ version: '6.8; rm -rf' }] }).fetchImpl)
   })
 
   it('refuses to derive a minimum across a major version', async (t) => {
