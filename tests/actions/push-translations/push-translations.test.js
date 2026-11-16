@@ -38,6 +38,8 @@ describe('push-translations', () => {
     assert.deepStrictEqual(readInputs(TEC, BUILD_ID), {
       project: 'the-events-calendar',
       'pot-path': 'lang/the-events-calendar.pot',
+      host: 'ssh.example.com',
+      user: 'deploy',
       'remote-path': '/home/deploy/pots/tec/',
       'remote-pot': '/home/deploy/pots/tec/the-events-calendar.pot',
       'site-directory': 'translations.stellarwp.com/html',
@@ -50,6 +52,8 @@ describe('push-translations', () => {
     assert.deepStrictEqual(readInputs(GIVE, BUILD_ID), {
       project: 'givewp/give',
       'pot-path': 'languages/give.pot',
+      host: 'ssh.example.com',
+      user: 'deploy',
       'remote-path': '/home/deploy/pots/givewp/',
       'remote-pot': '/home/deploy/pots/givewp/give.pot',
       'site-directory': 'translations.stellarwp.com/html',
@@ -66,6 +70,19 @@ describe('push-translations', () => {
 
     assert.strictEqual(read['pot-path'], 'give.pot')
     assert.strictEqual(read['site-directory'], '/var/www/site')
+  })
+
+  it('returns host and user without the newlines around them, which the later steps connect with', () => {
+    const read = readInputs({ ...TEC, INPUT_HOST: '\nssh.example.com\n', INPUT_USER: ' deploy\n' }, BUILD_ID)
+
+    assert.strictEqual(read.host, 'ssh.example.com')
+    assert.strictEqual(read.user, 'deploy')
+  })
+
+  it('refuses a newline inside host or user', () => {
+    for (const input of ['INPUT_HOST', 'INPUT_USER']) {
+      assert.throws(() => readInputs({ ...TEC, [input]: 'example\nid' }, BUILD_ID), /Nothing was sent/)
+    }
   })
 
   it('gives each run a build id of its own, 32 hex characters', () => {
@@ -151,8 +168,10 @@ describe('push-translations', () => {
     assert.match(set['result-file'], /^give-[a-f0-9]{32}$/)
     assert.strictEqual(set['result-url'], `https://translations.stellarwp.com/bot-output/${set['result-file']}`)
     assert.ok(summary().includes(set['result-file']))
-    // The key and the host are never outputs: the later steps take them from the inputs.
-    assert.ok(!Object.values(set).some((value) => value.includes('PRIVATE KEY') || value.includes('ssh.example.com')))
+    assert.strictEqual(set.host, 'ssh.example.com')
+    assert.strictEqual(set.user, 'deploy')
+    // The key is never an output: the later steps take it from the input.
+    assert.ok(!Object.values(set).some((value) => value.includes('PRIVATE KEY')))
   })
 })
 
