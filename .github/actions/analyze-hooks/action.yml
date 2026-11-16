@@ -16,10 +16,12 @@ inputs:
       to the checkout. A pathspec can exclude: `:!vendor` after `.` searches everything but vendor.
     required: false
     default: 'src'
-  views-path:
+  views-paths:
     description: >-
-      The directory of the templates a theme can override. Every `.php` file under it that changed
-      since the last release is listed by its path in the checkout, e.g. `src/views/v2/list.php`.
+      Where the templates a theme can override live, one git pathspec per line, relative to the
+      checkout. Every `.php` file they match that changed since the last release is listed by its
+      path in the checkout, e.g. `src/views/v2/list.php`. A `*` matches across directories, so
+      `includes/*/templates/*` is the templates directory of every directory under `includes`.
       Empty lists no view.
     required: false
     default: 'src/views'
@@ -62,7 +64,7 @@ runs:
         # Read from process.env rather than interpolated into the script, so an input is data and
         # never part of the program.
         INPUT_PATHS: ${{ inputs.paths }}
-        INPUT_VIEWS_PATH: ${{ inputs.views-path }}
+        INPUT_VIEWS_PATHS: ${{ inputs.views-paths }}
         INPUT_TYPES: ${{ inputs.types }}
         INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
       with:

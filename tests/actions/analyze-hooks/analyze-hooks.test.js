@@ -79,7 +79,7 @@ describe('analyze-hooks', () => {
       core,
       exec,
       cwd: repo,
-      env: { INPUT_PATHS: 'src', INPUT_VIEWS_PATH: 'src/views', ...inputs },
+      env: { INPUT_PATHS: 'src', INPUT_VIEWS_PATHS: 'src/views', ...inputs },
     })
 
     return { outputs: outputs(), summary: summary() }
@@ -290,7 +290,7 @@ describe('analyze-hooks', () => {
     write('includes/legacy.php', "<?php\ndo_action( 'give_legacy' );\n")
     write('vendor/lib.php', "<?php\ndo_action( 'vendor_hook' );\n")
     commit('more code')
-    await run(t, { INPUT_PATHS: '.\n:!vendor', INPUT_VIEWS_PATH: '' })
+    await run(t, { INPUT_PATHS: '.\n:!vendor', INPUT_VIEWS_PATHS: '' })
 
     const written = entries()
     assert.strictEqual(
@@ -303,7 +303,7 @@ describe('analyze-hooks', () => {
   it('lists the views of another directory', async (t) => {
     write('themes/ld30/templates/course.php', '<?php // course\n')
     commit('a template')
-    await run(t, { INPUT_VIEWS_PATH: 'themes/ld30/templates/' })
+    await run(t, { INPUT_VIEWS_PATHS: 'themes/ld30/templates/' })
 
     assert.strictEqual(
       entries()['analyze-hooks-changed-views.yaml'],
@@ -311,8 +311,20 @@ describe('analyze-hooks', () => {
     )
   })
 
+  it('lists the views of every path it is given, a glob included', async (t) => {
+    write('includes/courses/templates/course.php', '<?php // course\n')
+    write('includes/courses/other.php', '<?php // not a view\n')
+    commit('templates')
+    await run(t, { INPUT_VIEWS_PATHS: 'src/views\n\nincludes/*/templates/*\n' })
+
+    assert.strictEqual(
+      entries()['analyze-hooks-changed-views.yaml'],
+      entry('Changed views: `includes/courses/templates/course.php`, `src/views/v2/list.php`')
+    )
+  })
+
   it('reads a views path that starts with ./', async (t) => {
-    await run(t, { INPUT_VIEWS_PATH: './src/views' })
+    await run(t, { INPUT_VIEWS_PATHS: './src/views' })
 
     assert.strictEqual(entries()['analyze-hooks-changed-views.yaml'], entry('Changed views: `src/views/v2/list.php`'))
   })
@@ -348,6 +360,10 @@ describe('analyze-hooks', () => {
     await run(t)
 
     assert.ok('analyze-hooks-added-actions.yaml' in entries('changelog'))
+  })
+
+  it('refuses an empty paths input', async (t) => {
+    await assert.rejects(run(t, { INPUT_PATHS: '\n \n' }), /paths is empty/)
   })
 
   it('refuses a types input that is not an object of known keys', () => {

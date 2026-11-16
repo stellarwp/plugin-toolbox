@@ -53,7 +53,7 @@ Each is a `patch` entry of type `tweak`, and a kind with nothing to list writes 
   lines now than at the tag: a change to a hook's signature is recorded as one more line, such as
   `@since TBD Added the $type parameter.` The lines of every call's docblock count once each. A
   docblock belongs to a call when no `;`, `{` or `}` comes between them.
-- **Views** are the `.php` files under `views-path` that changed since the tag, named by their path
+- **Views** are the `.php` files matched by `views-paths` that changed since the tag, named by their path
   in the checkout, `.php` included, so a reader with an override of the file finds it by that
   path.
 
@@ -85,7 +85,7 @@ a type of its own holds the names only, since the type's label already says what
       .
       :!vendor
       :!vendor-prefixed
-    views-path: themes/ld30/templates
+    views-paths: themes/ld30/templates
     types: >-
       {"added-filters": "tweak: added filters", "added-actions": "tweak: added actions",
       "changed-views": "tweak: updated templates"}
@@ -98,7 +98,7 @@ An entry left out of `types`, here the removed hooks, stays a `tweak` reading `R
 | Input | Default | |
 |---|---|---|
 | `paths` | `src` | Where to search for hooks, one git pathspec per line. `:!vendor` excludes a directory. |
-| `views-path` | `src/views` | The directory of the templates a theme can override. Empty lists no view. |
+| `views-paths` | `src/views` | Where the templates a theme can override live, one git pathspec per line. A `*` matches across directories: `includes/*/templates/*`. Empty lists no view. |
 | `types` | | The changelog type per entry, as a JSON object in a string. Keys: `added-filters`, `updated-filters`, `deprecated-filters`, `removed-filters`, `added-actions`, `updated-actions`, `deprecated-actions`, `removed-actions`, `changed-views`. |
 | `working-directory` | | Where the repository is checked out. Empty is the workspace. |
 

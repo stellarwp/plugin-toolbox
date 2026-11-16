@@ -11,7 +11,7 @@
  *    a `_deprecated` one, and removed when no call is left, so one that moved, or that still has
  *    another call elsewhere, is not listed. A hook in both trees whose docblocks gained a `@since`
  *    line is updated;
- *  - the `.php` files under `views-path` that `git diff` reports as changed, by their path in the
+ *  - the `.php` files under `views-paths` that `git diff` reports as changed, by their path in the
  *    checkout.
  *
  * Each kind becomes one entry, `<changesDir>/analyze-hooks-<change>-<kind>.yaml`, so
@@ -233,25 +233,17 @@ function analyze(before, after, changedFiles) {
 }
 
 /**
- * Reads the `paths` input: one git pathspec per line.
+ * Reads an input of git pathspecs, one per line.
  *
  * @param {string} input The input value.
  *
- * @throws {Error} When it lists nothing.
- *
- * @returns {string[]} The pathspecs.
+ * @returns {string[]} The pathspecs, without blank lines.
  */
-function readPaths(input) {
-  const paths = String(input ?? '')
+function readPathspecs(input) {
+  return String(input ?? '')
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-
-  if (paths.length === 0) {
-    throw new Error(`paths is empty. Pass the directories to search for hooks, one per line, e.g. src. ${WHAT}`)
-  }
-
-  return paths
 }
 
 /**
@@ -464,8 +456,11 @@ function readKnown(cwd, changesDir, changelogFiles, version) {
  * @returns {Promise<void>}
  */
 async function runAnalyzeHooks({ core, exec, env, cwd: workspace = process.cwd() }) {
-  const paths = readPaths(env.INPUT_PATHS)
-  const viewsPath = String(env.INPUT_VIEWS_PATH ?? '').trim()
+  const paths = readPathspecs(env.INPUT_PATHS)
+  if (paths.length === 0) {
+    throw new Error(`paths is empty. Pass the directories to search for hooks, one per line, e.g. src. ${WHAT}`)
+  }
+  const viewsPaths = readPathspecs(env.INPUT_VIEWS_PATHS)
   const types = readTypes(env.INPUT_TYPES)
   const cwd = readWorkingDirectory(env.INPUT_WORKING_DIRECTORY, { base: workspace, what: WHAT })
   const { changesDir, changelogFiles, labels } = readChangelogger(readCheckoutFile(cwd, 'package.json'))
@@ -535,11 +530,11 @@ async function runAnalyzeHooks({ core, exec, env, cwd: workspace = process.cwd()
   }
 
   const changed =
-    viewsPath === ''
+    viewsPaths.length === 0
       ? []
       : // --relative names a file by its path in the checkout, which git prints the same whatever the
         // form of the pathspec, `./src/views` or `src/views/`.
-        (await git(['diff', '--name-only', '--relative', tag, '--', viewsPath], 'Listing the changed views')).split('\n')
+        (await git(['diff', '--name-only', '--relative', tag, '--', ...viewsPaths], 'Listing the changed views')).split('\n')
 
   const known = readKnown(cwd, changesDir, changelogFiles, tag.replace(/^v/, ''))
   const dir = path.join(cwd, changesDir)
@@ -579,4 +574,4 @@ async function runAnalyzeHooks({ core, exec, env, cwd: workspace = process.cwd()
   await core.summary.addRaw(summary.join('\n'), true).write()
 }
 
-module.exports = { runAnalyzeHooks, lastReleaseTag, hooks, analyze, readPaths, readTypes, readChangelogger, describe, isKnown }
+module.exports = { runAnalyzeHooks, lastReleaseTag, readTypes }
