@@ -19,8 +19,9 @@ inputs:
   min-version:
     description: >-
       The `Requires at least` version. Empty leaves it. `auto` sets it two minor versions behind
-      `tested-up-to`, e.g. `6.8.1` gives `6.6` and `7.0` gives `6.8`. A version such as `6.9` sets
-      exactly that, and may not be above `tested-up-to`. Anything else fails before any file is
+      `tested-up-to`, e.g. `6.8.1` gives `6.6` and `7.0` gives `6.8`, and never lowers a higher
+      minimum a file already has. A version such as `6.9` sets exactly that, lower or not, and may
+      not be above `tested-up-to`. Anything else fails before any file is
       written.
     required: false
     default: ''

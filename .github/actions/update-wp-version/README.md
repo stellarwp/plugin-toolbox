@@ -35,7 +35,9 @@ An empty `tested-up-to` is the latest WordPress release: the first offer
 `min-version` takes a version, which is set as it is, or `auto`. `auto` is the tested version two
 minors back, major and minor only: `6.8` and `6.8.1` both give `6.6`. WordPress runs each major from
 x.0 to x.9 and then moves to the next (6.9 was followed by 7.0), so `auto` counts back across a
-major the same way: `7.0` gives `6.8` and `7.1` gives `6.9`.
+major the same way: `7.0` gives `6.8` and `7.1` gives `6.9`. `auto` never lowers a minimum: a file
+at `6.9` stays at `6.9` when `auto` gives `6.8`, and the run reports it. A version given exactly is
+set as it is, so passing `6.7` is how a plugin lowers its minimum on purpose.
 
 The plugin file is the single root-level `.php` file `.puprc` lists under `paths.versions`. Some
 plugins keep `Tested up to:` there as well as in `readme.txt`, as LearnDash does in `sfwd_lms.php`,
@@ -92,7 +94,7 @@ a single plugin file, only `readme.txt` is updated.
 | Input | Required | Default | What it does |
 |---|---|---|---|
 | `tested-up-to` | no | the latest release | The WordPress version to set as `Tested up to`, e.g. `6.8` or `6.8.1`. Empty looks up the latest WordPress release |
-| `min-version` | no | | The `Requires at least` version: empty leaves it, `auto` sets it two minor versions behind `tested-up-to`, a version such as `6.9` sets exactly that |
+| `min-version` | no | | The `Requires at least` version: empty leaves it, `auto` sets it two minor versions behind `tested-up-to` without lowering a higher one, a version such as `6.9` sets exactly that |
 | `working-directory` | no | the workspace | Where the repository is checked out, relative to the workspace or absolute |
 
 ## Outputs
