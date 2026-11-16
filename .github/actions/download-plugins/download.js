@@ -95,7 +95,11 @@ async function place({ exec, dest, workspace, tmp, name }) {
   const resolvedTarget = path.join(fs.realpathSync(dest), name)
   const checkout = path.relative(fs.existsSync(resolvedTarget) ? fs.realpathSync(resolvedTarget) : resolvedTarget, fs.realpathSync(workspace))
 
-  if (checkout === '' || (!checkout.startsWith('..') && !path.isAbsolute(checkout))) {
+  // `..` only counts as leaving the target when it is a whole path segment: `..checkout` is a
+  // directory inside it.
+  const outside = checkout === '..' || checkout.startsWith(`..${path.sep}`) || path.isAbsolute(checkout)
+
+  if (checkout === '' || !outside) {
     throw new Error(`The plugin '${name}' would replace the checkout or a directory that holds it.`)
   }
 

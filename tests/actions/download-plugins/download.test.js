@@ -203,6 +203,24 @@ describe('download-plugins', () => {
       assert.ok(fs.existsSync(workspace))
     })
 
+    it('refuses a checkout whose directory name starts with two dots', async (t) => {
+      const { root, tmp } = runner()
+      const { core } = await coreWithOutputs(t)
+
+      // The checkout is /<root>/work/akismet/..checkout, inside the target /<root>/work/akismet.
+      const workspace = path.join(root, 'work', 'akismet', '..checkout')
+
+      fs.mkdirSync(workspace, { recursive: true })
+
+      const { exec } = recordingExec(rules(tmp, 'akismet'))
+
+      await assert.rejects(
+        downloadPlugins({ core, exec, plugins: parsePlugins('akismet'), workspace, tmp, dest: path.join(root, 'work') }),
+        /would replace the checkout/
+      )
+      assert.ok(fs.existsSync(workspace))
+    })
+
     it('refuses a symlinked workspace as well', async (t) => {
       const { root, tmp } = runner()
       const { core } = await coreWithOutputs(t)
