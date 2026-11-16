@@ -53,14 +53,14 @@ on:
         type: string
         default: composer phpstan
       runs-on:
-        description: 'Runner label, for example `blacksmith-2vcpu-ubuntu-2404`.'
+        description: 'Runner label, for example `ubuntu-latest`.'
         required: false
         type: string
-        default: ubuntu-latest
+        default: blacksmith-2vcpu-ubuntu-2404
       changed-files:
         description: >-
           Globs, one per line. A pull request runs PHPStan only when it changes a file one of them
-          matches. `*` also matches `/`, so `*.php` is every PHP file. Empty always runs.
+          matches. `*` also matches `/`, so `*.php` is every PHP file. An empty string (`''`) always runs.
         required: false
         type: string
         default: |
@@ -71,7 +71,7 @@ on:
       skip-draft-prefixes:
         description: >-
           Branch prefixes, one per line, whose draft pull requests skip PHPStan. A draft of
-          `release/1.2` skips when a prefix is `release/`. Empty means drafts run.
+          `release/1.2` skips when a prefix is `release/`. An empty string (`''`) means drafts run.
         required: false
         type: string
         default: ''
@@ -92,8 +92,8 @@ on:
           composer.lock
       post-install-command:
         description: >-
-          Bash that runs after `composer install` when the dependency cache missed. Empty runs
-          nothing. LearnDash passes `vendor/bin/codecept build`.
+          Bash that runs after `composer install` when the dependency cache missed. An empty string
+          (`''`) runs nothing. Example: `vendor/bin/codecept build`.
         required: false
         type: string
         default: ''
@@ -101,15 +101,16 @@ on:
         description: >-
           Plugins PHPStan scans, one per line, downloaded to `../<name>`. `owner/name` is a GitHub
           repository's latest release (a private one needs the `github-token` secret); a bare slug
-          is a WordPress.org plugin. Empty downloads nothing.
+          is a WordPress.org plugin. An empty string (`''`) downloads nothing.
         required: false
         type: string
         default: ''
     secrets:
       github-token:
         description: >-
-          Token for private GitHub release downloads and for Composer. Empty uses the workflow
-          token, which cannot read another private repository. Fork pull requests get no secrets.
+          Token for private GitHub release downloads and for Composer. An empty string (`''`) uses
+          the workflow token, which cannot read another private repository. Fork pull requests get
+          no secrets.
         required: false
 
 jobs:
@@ -126,67 +127,16 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      # Without a checkout: the files of a pull request come from the API.
+      # Without a checkout: the files of a pull request come from the API. `$/` is this repository
+      # at the commit that runs this workflow, so the action is always the same revision as the
+      # workflow. It needs a runner of version 2.336.0 or newer, which `runs-on` has to give. Not
+      # ./, which in a called workflow resolves against the caller's repository.
       - name: Decide whether PHPStan has to run
         id: changes
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT_NAME: ${{ github.event_name }}
-          DRAFT: ${{ github.event.pull_request.draft }}
-          HEAD_REF: ${{ github.head_ref }}
-          REPOSITORY: ${{ github.repository }}
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
-          SKIP_DRAFT_PREFIXES: ${{ inputs.skip-draft-prefixes }}
-          CHANGED_FILES: ${{ inputs.changed-files }}
-        run: |
-          set -euo pipefail
-          set -f # the globs and prefixes below are patterns, not paths to expand
-
-          run=true
-          if [ "$EVENT_NAME" = pull_request ]; then
-            if [ "$DRAFT" = true ]; then
-              for prefix in $SKIP_DRAFT_PREFIXES; do
-                case "$HEAD_REF" in
-                  "$prefix"*)
-                    echo "::notice title=PHPStan::Draft pulls from ${prefix}* do not run until they are ready."
-                    run=false
-                    ;;
-                esac
-              done
-            fi
-
-            # The files API stops at 3,000 files, so a bigger pull request cannot be judged from it.
-            if [ "$run" = true ] && [ "${PR_CHANGED_FILES:-0}" -ge 3000 ]; then
-              echo "::notice title=PHPStan::The pull request changes ${PR_CHANGED_FILES} files, more than the files API lists, so PHPStan runs."
-            elif [ "$run" = true ] && [ -n "${CHANGED_FILES//[[:space:]]/}" ]; then
-              # In a called workflow this is the caller's file, whatever it is named.
-              caller=${WORKFLOW_REF#"$REPOSITORY"/}
-              caller=${caller%%@*}
-              files=$(gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" --jq '.[] | .filename, (.previous_filename // empty)')
-              run=false
-              while IFS= read -r file; do
-                if [ "$file" = "$caller" ]; then
-                  echo "Matched: $file (the workflow itself)"
-                  run=true
-                  break
-                fi
-                for glob in $CHANGED_FILES; do
-                  # shellcheck disable=SC2053 # the glob is meant to be a pattern
-                  if [[ $file == $glob ]]; then
-                    echo "Matched: $file"
-                    run=true
-                    break 2
-                  fi
-                done
-              done <<< "$files"
-              if [ "$run" = false ]; then
-                echo "::notice title=PHPStan::No matching files changed, so PHPStan did not run."
-              fi
-            fi
-          fi
-          echo "run=$run" >> "$GITHUB_OUTPUT"
+        uses: $/.github/actions/phpstan-changes
+        with:
+          changed-files: ${{ inputs.changed-files }}
+          skip-draft-prefixes: ${{ inputs.skip-draft-prefixes }}
 
       - name: Check out the repository
         if: steps.changes.outputs.run == 'true'
@@ -205,44 +155,10 @@ jobs:
 
       - name: Download the plugins PHPStan scans
         if: steps.changes.outputs.run == 'true' && (inputs.plugins != '')
-        env:
-          GH_TOKEN: ${{ secrets.github-token != '' && secrets.github-token || github.token }}
-          PLUGINS: ${{ inputs.plugins }}
-          # Composer reads this itself. Only the steps that run Composer get it, not the actions.
-          COMPOSER_AUTH: ${{ secrets.github-token != '' && format('{{"github-oauth":{{"github.com":"{0}"}}}}', secrets.github-token) || '' }}
-        run: |
-          set -euo pipefail
-          set -f
-
-          dest=$(dirname "$GITHUB_WORKSPACE")
-          tmp=$(mktemp -d)
-
-          # Both kinds of archive hold one directory; it becomes ../<name>.
-          place() {
-            # A runner that keeps the workspace parent may still hold the previous copy, and `mv`
-            # would nest the new one inside it. The repository itself is never replaced.
-            if [ "$dest/$1" = "$GITHUB_WORKSPACE" ]; then
-              echo "::error title=PHPStan::The plugin '$1' has the same directory name as this repository."
-              exit 1
-            fi
-            rm -rf "${dest:?}/${1:?}" "${tmp:?}/unpacked"
-            unzip -q "$tmp/plugin.zip" -d "$tmp/unpacked"
-            find "$tmp/unpacked" -mindepth 1 -maxdepth 1 -type d -exec mv {} "$dest/$1" \;
-          }
-
-          for plugin in $PLUGINS; do
-            name=${plugin##*/}
-            if [[ $plugin == */* ]]; then
-              tag=$(gh release view --repo "$plugin" --json tagName --jq .tagName)
-              gh release download "$tag" --repo "$plugin" --archive zip --output "$tmp/plugin.zip" --clobber
-            else
-              curl -fsSL -o "$tmp/plugin.zip" "https://downloads.wordpress.org/plugin/${plugin}.latest-stable.zip"
-            fi
-            place "$name"
-            if [ -f "$dest/$name/composer.json" ]; then
-              composer install --no-interaction --no-progress --prefer-dist --working-dir="$dest/$name"
-            fi
-          done
+        uses: $/.github/actions/download-plugins
+        with:
+          plugins: ${{ inputs.plugins }}
+          token: ${{ secrets.github-token }}
 
       - name: Hash the dependency files
         id: deps-hash
