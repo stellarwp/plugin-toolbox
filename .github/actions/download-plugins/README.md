@@ -56,7 +56,7 @@ Anything else, such as a path or a name with other characters, fails before anyt
 
 - Downloads and unpacks the archive, and places it at `<destination>/<name>`.
 - Replaces a copy a previous job left there, so the new one is never nested inside the old one.
-- Fails when the plugin would land on the checkout or on a directory that holds it, because the old copy is deleted first and the checkout is never replaced.
+- Fails when the plugin would land on the checkout or on a directory that holds it, even through a symlink, because the old copy is deleted first and the checkout is never replaced.
 - Runs `composer install` in a GitHub plugin that has a `composer.json`, with `token` for private packages. A WordPress.org plugin never gets it: its zip ships `vendor/`, and its `composer.json` is code the caller does not control.
 
 ## Permissions

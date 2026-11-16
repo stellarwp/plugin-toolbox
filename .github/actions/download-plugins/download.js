@@ -85,11 +85,17 @@ async function sh(exec, command, args) {
  * @returns {Promise<string>} The directory the plugin is in.
  */
 async function place({ exec, dest, workspace, tmp, name }) {
+  fs.mkdirSync(dest, { recursive: true })
+
   const target = path.join(dest, name)
 
   // Not only the checkout itself: a destination such as `../..` would put the target above it, and
-  // the old copy is removed recursively.
-  if (workspace === target || workspace.startsWith(target + path.sep)) {
+  // the old copy is removed recursively. Both sides are resolved first, so a symlink on either path
+  // cannot name the same directory by a different string.
+  const resolvedTarget = path.join(fs.realpathSync(dest), name)
+  const checkout = path.relative(fs.existsSync(resolvedTarget) ? fs.realpathSync(resolvedTarget) : resolvedTarget, fs.realpathSync(workspace))
+
+  if (checkout === '' || (!checkout.startsWith('..') && !path.isAbsolute(checkout))) {
     throw new Error(`The plugin '${name}' would replace the checkout or a directory that holds it.`)
   }
 

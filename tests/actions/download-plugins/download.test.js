@@ -185,6 +185,40 @@ describe('download-plugins', () => {
       assert.ok(fs.existsSync(workspace))
     })
 
+    it('refuses a target that is the checkout reached through a symlink', async (t) => {
+      const { root, tmp } = runner()
+      const { core } = await coreWithOutputs(t)
+
+      // /<root>/real/repo is the checkout, and /<root>/link is a symlink to /<root>/real.
+      fs.mkdirSync(path.join(root, 'real', 'repo'), { recursive: true })
+      fs.symlinkSync(path.join(root, 'real'), path.join(root, 'link'))
+
+      const workspace = path.join(root, 'real', 'repo')
+      const { exec } = recordingExec(rules(tmp, 'repo'))
+
+      await assert.rejects(
+        downloadPlugins({ core, exec, plugins: parsePlugins('repo'), workspace, tmp, dest: path.join(root, 'link') }),
+        /would replace the checkout/
+      )
+      assert.ok(fs.existsSync(workspace))
+    })
+
+    it('refuses a symlinked workspace as well', async (t) => {
+      const { root, tmp } = runner()
+      const { core } = await coreWithOutputs(t)
+
+      fs.mkdirSync(path.join(root, 'real', 'repo'), { recursive: true })
+      fs.symlinkSync(path.join(root, 'real', 'repo'), path.join(root, 'workspace-link'))
+
+      const { exec } = recordingExec(rules(tmp, 'repo'))
+
+      await assert.rejects(
+        downloadPlugins({ core, exec, plugins: parsePlugins('repo'), workspace: path.join(root, 'workspace-link'), tmp, dest: path.join(root, 'real') }),
+        /would replace the checkout/
+      )
+      assert.ok(fs.existsSync(path.join(root, 'real', 'repo')))
+    })
+
     it('fails when a command fails', async (t) => {
       const { workspace, tmp } = runner()
       const { core } = await coreWithOutputs(t)
