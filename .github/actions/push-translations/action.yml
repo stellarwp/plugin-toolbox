@@ -6,6 +6,9 @@
 # input against an allow-list, in push-translations.js run by actions/github-script, and fails
 # before anything is sent. The later steps use the values it checked. No input is interpolated into
 # a script: the remote `script:` reads its values from the environment.
+#
+# Every run copies the POT to the same path on the server, so the calling job sets a `concurrency`
+# group for the project; the README shows one.
 name: Push translations
 description: Pushes a POT file to the GlotPress site and imports its strings into a project
 
