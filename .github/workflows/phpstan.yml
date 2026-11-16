@@ -131,21 +131,28 @@ jobs:
       # at the commit that runs this workflow, so the action is always the same revision as the
       # workflow. It needs a runner of version 2.336.0 or newer, which `runs-on` has to give. Not
       # ./, which in a called workflow resolves against the caller's repository.
-      - name: Decide whether PHPStan has to run
+      - name: Check whether this is a draft to skip
+        id: draft
+        uses: $/.github/actions/skip-drafts
+        with:
+          prefixes: ${{ inputs.skip-draft-prefixes }}
+
+      # A skipped draft leaves `changed` empty, so every step below that asks for 'true' is skipped.
+      - name: Check the files the pull request changes
         id: changes
-        uses: $/.github/actions/phpstan-changes
+        if: steps.draft.outputs.skip != 'true'
+        uses: $/.github/actions/changed-files
         with:
           changed-files: ${{ inputs.changed-files }}
-          skip-draft-prefixes: ${{ inputs.skip-draft-prefixes }}
 
       - name: Check out the repository
-        if: steps.changes.outputs.run == 'true'
+        if: steps.changes.outputs.changed == 'true'
         uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Set up PHP
-        if: steps.changes.outputs.run == 'true'
+        if: steps.changes.outputs.changed == 'true'
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ inputs.php-version }}
@@ -154,7 +161,7 @@ jobs:
           tools: composer:v2
 
       - name: Download the plugins PHPStan scans
-        if: steps.changes.outputs.run == 'true' && (inputs.plugins != '')
+        if: steps.changes.outputs.changed == 'true' && (inputs.plugins != '')
         uses: $/.github/actions/download-plugins
         with:
           plugins: ${{ inputs.plugins }}
@@ -162,7 +169,7 @@ jobs:
 
       - name: Hash the dependency files
         id: deps-hash
-        if: steps.changes.outputs.run == 'true'
+        if: steps.changes.outputs.changed == 'true'
         env:
           HASH_FILES: ${{ inputs.dependency-cache-hash-files }}
         run: |
@@ -176,7 +183,7 @@ jobs:
       # from main's dependencies instead of from nothing.
       - name: Restore the dependency cache
         id: deps-cache
-        if: steps.changes.outputs.run == 'true'
+        if: steps.changes.outputs.changed == 'true'
         uses: actions/cache/restore@v6
         with:
           path: ${{ inputs.dependency-cache-paths }}
@@ -188,7 +195,7 @@ jobs:
       # A partial hit restored an older vendor, and `composer install` brings it up to date.
       - name: Install the dependencies
         id: install
-        if: steps.changes.outputs.run == 'true' && steps.deps-cache.outputs.cache-hit != 'true'
+        if: steps.changes.outputs.changed == 'true' && steps.deps-cache.outputs.cache-hit != 'true'
         env:
           POST_INSTALL_COMMAND: ${{ inputs.post-install-command }}
           COMPOSER_AUTH: ${{ secrets.github-token != '' && format('{{"github-oauth":{{"github.com":"{0}"}}}}', secrets.github-token) || '' }}
@@ -211,7 +218,7 @@ jobs:
 
       - name: Restore the PHPStan cache
         id: phpstan-cache
-        if: steps.changes.outputs.run == 'true'
+        if: steps.changes.outputs.changed == 'true'
         uses: actions/cache/restore@v6
         with:
           path: .cache/phpstan
@@ -221,7 +228,7 @@ jobs:
             v1-phpstan-${{ runner.os }}-php${{ inputs.php-version }}-
 
       - name: Run PHPStan
-        if: steps.changes.outputs.run == 'true'
+        if: steps.changes.outputs.changed == 'true'
         env:
           ANALYSIS_COMMAND: ${{ inputs.command }}
         run: bash -eo pipefail -c "$ANALYSIS_COMMAND"

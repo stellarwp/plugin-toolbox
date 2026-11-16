@@ -119,7 +119,7 @@ Three drawers in the toolbox. You can use any one without the others.
 
 | Layer | Lives in | What's in it |
 |---|---|---|
-| Composite actions | `.github/actions/` | Small single-purpose steps with no opinions: `setup-slic`, `setup-bun`, `setup-node`, `prepare-matrix`, `check-php-changes`, `smart-checkout`, `process-changelog`, `generate-pot`, `zip-name`, `release-zip`, `phpstan-changes`, `download-plugins` |
+| Composite actions | `.github/actions/` | Small single-purpose steps with no opinions: `setup-slic`, `setup-bun`, `setup-node`, `prepare-matrix`, `check-php-changes`, `smart-checkout`, `process-changelog`, `generate-pot`, `zip-name`, `release-zip`, `changed-files`, `skip-drafts`, `download-plugins` |
 | Reusable workflows | `.github/workflows/` | Full jobs built from the actions (standards, analysis, tests, zip, release prep). Most repos will only touch this layer. |
 | File sync | `templates/` + `.github/sync.yml` | Files that must exist in the target repo, grouped by brand and repo type |
 

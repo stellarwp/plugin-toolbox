@@ -242,7 +242,10 @@ describe('download-plugins', () => {
       const { core } = await coreWithOutputs(t)
       const { exec } = recordingExec([{ command: 'curl', exitCode: 22 }])
 
-      await assert.rejects(downloadPlugins({ core, exec, plugins: parsePlugins('akismet'), workspace, tmp }), /curl/)
+      await assert.rejects(
+        downloadPlugins({ core, exec, plugins: parsePlugins('akismet'), workspace, tmp }),
+        /Downloading akismet from WordPress.org failed \(exit code 22\)/
+      )
     })
   })
 

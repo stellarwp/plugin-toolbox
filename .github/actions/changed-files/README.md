@@ -1,52 +1,49 @@
-# phpstan-changes
+# changed-files
 
-Says whether PHPStan has to run. A pull request that changes none of the files you list skips the
-analysis, and a push or a manual run always runs it. It needs no checkout: the files of a pull
+Says whether a pull request changes files you care about, so a workflow can skip work the change
+cannot affect. A pull request that changes none of the files you list is not `changed`, and a push or
+a manual run always is, so the work it guards still runs. It needs no checkout: the files of a pull
 request come from the API.
 
-[`phpstan.yml`](../../workflows/phpstan.yml) uses it, and any workflow that wants the same decision
-can too:
+[`phpstan.yml`](../../workflows/phpstan.yml) uses it with the globs of the files PHPStan reads, and
+any other workflow can pass its own:
 
 ```yaml
-- name: Decide whether PHPStan has to run
+- name: Check for changes that matter
   id: changes
-  uses: stellarwp/plugin-toolbox/.github/actions/phpstan-changes@v1
+  uses: stellarwp/plugin-toolbox/.github/actions/changed-files@v1
   with:
     changed-files: |
       *.php
       *composer.lock
-    skip-draft-prefixes: |
-      release/
 
 - name: Run PHPStan
-  if: steps.changes.outputs.run == 'true'
+  if: steps.changes.outputs.changed == 'true'
   run: composer phpstan
 ```
 
-Inside this repository, call it as `uses: $/.github/actions/phpstan-changes`.
+Inside this repository, call it as `uses: $/.github/actions/changed-files`.
 
 ## Inputs
 
 | Input | Required | Default | What it does |
 |---|---|---|---|
-| `changed-files` | no | empty | Globs, one per line. A pull request runs only when it changes a file one of them matches. An empty string (`''`) always runs. See [The globs](#the-globs) |
-| `skip-draft-prefixes` | no | empty | Branch prefixes, one per line, whose draft pull requests skip the analysis. A draft of `release/1.2` skips when a prefix is `release/`. An empty string (`''`) means drafts run |
+| `changed-files` | no | empty | Globs, one per line. A pull request is `changed` only when it changes a file one of them matches. An empty string (`''`) is always `changed`. See [The globs](#the-globs) |
 | `token` | no | `github.token` | Lists the files of the pull request. See [Permissions](#permissions) |
 
 ## Outputs
 
 | Output | Example | What it is |
 |---|---|---|
-| `run` | `true` | `true` when PHPStan has to run, `false` when it can be skipped |
+| `changed` | `true` | `true` when the pull request changes a matching file, and for anything that is not a pull request. `false` when the work can be skipped |
 
 ## The rules
 
 The first row that fits decides:
 
-| Situation | `run` |
+| Situation | `changed` |
 |---|---|
 | Anything but a pull request, such as a push or a manual run | `true` |
-| A draft whose branch starts with a `skip-draft-prefixes` entry | `false` |
 | `changed-files` is an empty string (`''`) | `true` |
 | The pull request changes 3,000 files or more, more than the files API lists | `true` |
 | The pull request changes a file a glob matches, or the caller workflow file | `true` |
@@ -57,7 +54,7 @@ to the workflow itself always gets checked.
 
 ## The globs
 
-A glob is matched against the whole path, and `*` also matches `/`, so `*.php` is every PHP file, in
+The matching is `globToRegExp` in [`.github/lib/glob.js`](../../lib/glob.js). A glob is matched against the whole path, and `*` also matches `/`, so `*.php` is every PHP file, in
 any directory. `?` is one character and `[...]` a set of characters, as in bash: `[abc]`, `[a-z]` or `[!abc]`. POSIX classes such as `[[:digit:]]` are not supported. A renamed file counts under its old
 name too, so moving a file out of a matched path still runs the analysis.
 
@@ -90,6 +87,6 @@ comes from `${{ github.action_path }}`.
 Inputs reach the script through `process.env`, never by being interpolated into it, so a glob or a
 branch name is data and cannot become part of the program.
 
-`tests/actions/phpstan-changes/changes.test.js` covers the rules above. It drives the real Octokit
+`tests/actions/changed-files/changes.test.js` covers the rules above. It drives the real Octokit
 with the network replaced, so the assertions are the requests this action would send. Run
 `npm install` once, then `node --test`.

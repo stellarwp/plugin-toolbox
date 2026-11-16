@@ -32,4 +32,17 @@ function readYesNo(value, input, what) {
   return trimmed === 'yes'
 }
 
-module.exports = { readYesNo }
+/**
+ * Splits a multi-line input into its entries.
+ *
+ * @param {string} value Entries separated by whitespace.
+ *
+ * @returns {string[]} The entries, in the order given.
+ */
+function words(value) {
+  return String(value ?? '')
+    .split(/\s+/)
+    .filter(Boolean)
+}
+
+module.exports = { readYesNo, words }

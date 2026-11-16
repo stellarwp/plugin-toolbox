@@ -1,23 +1,18 @@
-# Decides whether a pull request has to run PHPStan. Used by .github/workflows/phpstan.yml, which
-# has no checkout at this point: the files of a pull request come from the API.
+# Says whether a pull request changes files a workflow cares about, so the workflow can skip work
+# the change cannot affect. Used by .github/workflows/phpstan.yml, and meant for any other
+# workflow. It needs no checkout: the files of a pull request come from the API.
 #
 # The work lives in changes.js. actions/github-script runs it with a pre-authenticated Octokit, so
 # there is no dependency to install and nothing to build.
-name: PHPStan changes
-description: Says whether PHPStan has to run, from the event, the draft state and the files a pull request changes
+name: Changed files
+description: Says whether a pull request changes files that match the given globs, with an answer for events that are not pull requests
 
 inputs:
   changed-files:
     description: >-
-      Globs, one per line. A pull request runs PHPStan only when it changes a file one of them
+      Globs, one per line. A pull request counts as changed only when it changes a file one of them
       matches. `*` also matches `/`, so `*.php` is every PHP file. An empty string (`''`) always
-      runs.
-    required: false
-    default: ''
-  skip-draft-prefixes:
-    description: >-
-      Branch prefixes, one per line, whose draft pull requests skip PHPStan. A draft of
-      `release/1.2` skips when a prefix is `release/`. An empty string (`''`) means drafts run.
+      counts as changed.
     required: false
     default: ''
   token:
@@ -26,14 +21,16 @@ inputs:
     default: ${{ github.token }}
 
 outputs:
-  run:
-    description: '`true` when PHPStan has to run, `false` when it can be skipped.'
-    value: ${{ steps.decide.outputs.run }}
+  changed:
+    description: >-
+      `true` when the pull request changes a matching file, and also for anything that is not a
+      pull request, so the work it guards still runs. `false` when the work can be skipped.
+    value: ${{ steps.decide.outputs.changed }}
 
 runs:
   using: 'composite'
   steps:
-    - name: Decide whether PHPStan has to run
+    - name: Check the files the pull request changes
       id: decide
       uses: actions/github-script@v9
       env:
@@ -44,13 +41,10 @@ runs:
         # Read from process.env rather than interpolated into the script, so an input is data and
         # never part of the program.
         EVENT_NAME: ${{ github.event_name }}
-        DRAFT: ${{ github.event.pull_request.draft }}
-        HEAD_REF: ${{ github.head_ref }}
         REPOSITORY: ${{ github.repository }}
         WORKFLOW_REF: ${{ github.workflow_ref }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
-        INPUT_SKIP_DRAFT_PREFIXES: ${{ inputs.skip-draft-prefixes }}
         INPUT_CHANGED_FILES: ${{ inputs.changed-files }}
       with:
         github-token: ${{ inputs.token }}

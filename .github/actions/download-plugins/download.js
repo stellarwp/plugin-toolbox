@@ -11,6 +11,8 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 
+const { runOrFail } = require('../../lib/exec.js')
+
 /** A GitHub repository, `owner/name`. */
 const GITHUB_REPOSITORY = /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+$/
 
@@ -53,21 +55,6 @@ function parsePlugins(plugins) {
 }
 
 /**
- * Runs a command and fails with its name when it exits non-zero.
- *
- * @param {object}   exec    The @actions/exec toolkit.
- * @param {string}   command The program.
- * @param {string[]} args    Its arguments.
- *
- * @returns {Promise<string>} What the command printed to stdout.
- */
-async function sh(exec, command, args) {
-  const { stdout } = await exec.getExecOutput(command, args)
-
-  return stdout.trim()
-}
-
-/**
  * Puts the extracted archive at `<dest>/<name>`.
  *
  * A runner that keeps the workspace parent may still hold the previous copy, and `mv` would nest the
@@ -107,7 +94,7 @@ async function place({ exec, dest, workspace, tmp, name }) {
 
   fs.rmSync(target, { recursive: true, force: true })
   fs.rmSync(unpacked, { recursive: true, force: true })
-  await sh(exec, 'unzip', ['-q', path.join(tmp, 'plugin.zip'), '-d', unpacked])
+  await runOrFail(exec, 'unzip', ['-q', path.join(tmp, 'plugin.zip'), '-d', unpacked], {}, `Unpacking '${name}'`)
 
   // Both kinds of archive hold one directory.
   const [directory] = fs
@@ -118,7 +105,7 @@ async function place({ exec, dest, workspace, tmp, name }) {
     throw new Error(`The archive of '${name}' holds no directory.`)
   }
 
-  await sh(exec, 'mv', [path.join(unpacked, directory.name), target])
+  await runOrFail(exec, 'mv', [path.join(unpacked, directory.name), target], {}, `Moving '${name}' into place`)
 
   return target
 }
@@ -145,12 +132,12 @@ async function downloadPlugins({ core, exec, plugins, workspace, tmp, dest = pat
 
   for (const { spec, name, github } of plugins) {
     if (github) {
-      const tag = await sh(exec, 'gh', ['release', 'view', '--repo', spec, '--json', 'tagName', '--jq', '.tagName'])
+      const tag = (await runOrFail(exec, 'gh', ['release', 'view', '--repo', spec, '--json', 'tagName', '--jq', '.tagName'], {}, `Finding the latest release of ${spec}`)).trim()
 
       core.info(`${spec}: ${tag}`)
-      await sh(exec, 'gh', ['release', 'download', tag, '--repo', spec, '--archive', 'zip', '--output', zip, '--clobber'])
+      await runOrFail(exec, 'gh', ['release', 'download', tag, '--repo', spec, '--archive', 'zip', '--output', zip, '--clobber'], {}, `Downloading ${spec} ${tag}`)
     } else {
-      await sh(exec, 'curl', ['-fsSL', '-o', zip, `https://downloads.wordpress.org/plugin/${spec}.latest-stable.zip`])
+      await runOrFail(exec, 'curl', ['-fsSL', '-o', zip, `https://downloads.wordpress.org/plugin/${spec}.latest-stable.zip`], {}, `Downloading ${spec} from WordPress.org`)
     }
 
     const target = await place({ exec, dest, workspace, tmp, name })
@@ -160,7 +147,7 @@ async function downloadPlugins({ core, exec, plugins, workspace, tmp, dest = pat
     // caller does not control: Composer would run its scripts and let its `config` choose where
     // files are written.
     if (github && fs.existsSync(path.join(target, 'composer.json'))) {
-      await sh(exec, 'composer', ['install', '--no-interaction', '--no-progress', '--prefer-dist', `--working-dir=${target}`])
+      await runOrFail(exec, 'composer', ['install', '--no-interaction', '--no-progress', '--prefer-dist', `--working-dir=${target}`], {}, `Installing the dependencies of '${name}'`)
     }
 
     placed.push(target)
