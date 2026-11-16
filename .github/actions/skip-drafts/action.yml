@@ -1,0 +1,45 @@
+# Says whether the run is a draft pull request whose branch starts with one of the given prefixes, so
+# a workflow can leave the work for when the pull request is ready. Used by
+# .github/workflows/phpstan.yml, and meant for any other workflow.
+#
+# The work lives in skip.js. actions/github-script runs it, so there is nothing to install and
+# nothing to build.
+name: Skip drafts
+description: Says whether the run is a draft pull request from a branch whose name starts with a given prefix
+
+inputs:
+  prefixes:
+    description: >-
+      Branch prefixes, one per line. A draft pull request whose branch starts with one of them is
+      skipped: `release/` skips a draft of `release/1.2`. An empty string (`''`) skips no draft.
+    required: false
+    default: ''
+
+outputs:
+  skip:
+    description: >-
+      `true` for a draft pull request from a branch that starts with a prefix. `false` for any other
+      pull request, and for anything that is not a pull request.
+    value: ${{ steps.decide.outputs.skip }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check whether this is a draft to skip
+      id: decide
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so an input is data and
+        # never part of the program.
+        EVENT_NAME: ${{ github.event_name }}
+        DRAFT: ${{ github.event.pull_request.draft }}
+        HEAD_REF: ${{ github.head_ref }}
+        INPUT_PREFIXES: ${{ inputs.prefixes }}
+      with:
+        script: |
+          const { run } = require(`${process.env.ACTION_PATH}/skip.js`)
+          run({ core, env: process.env })

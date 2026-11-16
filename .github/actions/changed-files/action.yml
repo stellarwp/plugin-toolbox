@@ -1,0 +1,53 @@
+# Says whether a pull request changes files a workflow cares about, so the workflow can skip work
+# the change cannot affect. Used by .github/workflows/phpstan.yml, and meant for any other
+# workflow. It needs no checkout: the files of a pull request come from the API.
+#
+# The work lives in changes.js. actions/github-script runs it with a pre-authenticated Octokit, so
+# there is no dependency to install and nothing to build.
+name: Changed files
+description: Says whether a pull request changes files that match the given globs, with an answer for events that are not pull requests
+
+inputs:
+  changed-files:
+    description: >-
+      Globs, one per line. A pull request counts as changed only when it changes a file one of them
+      matches. `*` also matches `/`, so `*.php` is every PHP file. An empty string (`''`) always
+      counts as changed.
+    required: false
+    default: ''
+  token:
+    description: 'Token that lists the files of the pull request. It needs `pull-requests: read`.'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  changed:
+    description: >-
+      `true` when the pull request changes a matching file, and also for anything that is not a
+      pull request, so the work it guards still runs. `false` when the work can be skipped.
+    value: ${{ steps.decide.outputs.changed }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check the files the pull request changes
+      id: decide
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so an input is data and
+        # never part of the program.
+        EVENT_NAME: ${{ github.event_name }}
+        REPOSITORY: ${{ github.repository }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        INPUT_CHANGED_FILES: ${{ inputs.changed-files }}
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const { run } = require(`${process.env.ACTION_PATH}/changes.js`)
+          await run({ github, core, env: process.env })

@@ -1,0 +1,45 @@
+name: PHPStan
+
+# Runs PHPStan through the shared PHPStan workflow.
+#
+# A file to copy into .github/workflows/ of a plugin repository, under any name. The work is in
+# stellarwp/plugin-toolbox/.github/workflows/phpstan.yml, which documents every input. The
+# repository needs a composer.json with a `phpstan` script. PHPStan's `tmpDir` has to be
+# `.cache/phpstan`, or the cache is saved and never read.
+#
+# Run it locally: `composer phpstan`
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    types:
+      - opened
+      - ready_for_review
+      - reopened
+      - synchronize
+
+# A new push to a pull request cancels the run still going. Pushes and manual runs use the run id,
+# so they are not cancelled.
+concurrency:
+  group: phpstan-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  phpstan:
+    # The most the shared workflow asks for. A called workflow cannot go above this.
+    permissions:
+      contents: read
+      pull-requests: read # lists the files a pull request changes
+    uses: stellarwp/plugin-toolbox/.github/workflows/phpstan.yml@main
+    with:
+      # The oldest PHP the plugin supports, so Composer resolves packages that still run there.
+      php-version: '7.4'
+    # Private Composer packages and private GitHub plugins. A repository with neither can delete
+    # this block.
+    secrets:
+      github-token: ${{ secrets.GH_BOT_TOKEN }}

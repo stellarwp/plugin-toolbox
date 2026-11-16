@@ -32,4 +32,34 @@ function readYesNo(value, input, what) {
   return trimmed === 'yes'
 }
 
-module.exports = { readYesNo }
+/**
+ * Splits a multi-line input into its entries.
+ *
+ * @param {string} value Entries separated by whitespace.
+ *
+ * @returns {string[]} The entries, in the order given.
+ */
+function words(value) {
+  return String(value ?? '')
+    .split(/\s+/)
+    .filter(Boolean)
+}
+
+/**
+ * Splits a multi-line input into its lines, keeping spaces inside a line.
+ *
+ * For inputs whose entries may hold spaces, such as globs for paths like `src/my plugin/*.php`.
+ * Use `words` when an entry never does.
+ *
+ * @param {string} value Entries separated by newlines.
+ *
+ * @returns {string[]} The trimmed, non-empty lines, in the order given.
+ */
+function lines(value) {
+  return String(value ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+module.exports = { readYesNo, words, lines }

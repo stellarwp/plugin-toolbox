@@ -1,0 +1,62 @@
+# Downloads WordPress plugins from GitHub releases or WordPress.org into a directory on the runner.
+# Use it when a workflow needs plugins that are not part of the repository it checked out, such as
+# a plugin a test suite depends on or code a static analysis has to read.
+#
+# By default each plugin is placed next to the checkout, as `../<name>`; `destination` picks another
+# directory. phpstan.yml uses it that way, and any other workflow can call it.
+#
+# The work lives in download.js, run by actions/github-script, so there is nothing to install and
+# the logic is unit tested. The downloads themselves are the `gh`, `curl`, `unzip` and `composer`
+# commands the runner already has.
+name: Download plugins
+description: Downloads plugins from GitHub releases or WordPress.org, next to the checkout or into a directory you choose
+
+inputs:
+  plugins:
+    description: >-
+      Plugins to download, one per line. `owner/name` is a GitHub repository's latest release; a bare
+      slug is a WordPress.org plugin. An empty string (`''`) downloads nothing. The directory name of
+      each plugin is the part after the last `/`.
+    required: false
+    default: ''
+  token:
+    description: >-
+      Token for `gh release` and for Composer. A private repository needs one that can read it. Empty
+      uses the workflow token, which cannot read another private repository.
+    required: false
+    default: ''
+  destination:
+    description: >-
+      Directory the plugins are placed in, as `<destination>/<name>`, relative to the workspace or
+      absolute. An empty string (`''`) is the directory that holds the checkout, so a plugin is
+      `../<name>`. It is created when missing.
+    required: false
+    default: ''
+
+outputs:
+  paths:
+    description: 'The absolute directory of each plugin placed, one per line.'
+    value: ${{ steps.download.outputs.paths }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Download the plugins
+      id: download
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so a plugin name is data
+        # and never part of the program.
+        INPUT_PLUGINS: ${{ inputs.plugins }}
+        INPUT_DESTINATION: ${{ inputs.destination }}
+        GH_TOKEN: ${{ inputs.token != '' && inputs.token || github.token }}
+        # Composer reads this itself.
+        COMPOSER_AUTH: ${{ inputs.token != '' && format('{{"github-oauth":{{"github.com":"{0}"}}}}', inputs.token) || '' }}
+      with:
+        script: |
+          const { run } = require(`${process.env.ACTION_PATH}/download.js`)
+          await run({ core, exec, env: process.env })

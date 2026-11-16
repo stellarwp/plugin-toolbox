@@ -119,7 +119,7 @@ Three drawers in the toolbox. You can use any one without the others.
 
 | Layer | Lives in | What's in it |
 |---|---|---|
-| Composite actions | `.github/actions/` | Small single-purpose steps with no opinions: `setup-slic`, `setup-bun`, `setup-node`, `prepare-matrix`, `check-php-changes`, `smart-checkout`, `process-changelog`, `generate-pot`, `zip-name`, `release-zip` |
+| Composite actions | `.github/actions/` | Small single-purpose steps with no opinions: `setup-slic`, `setup-bun`, `setup-node`, `prepare-matrix`, `check-php-changes`, `smart-checkout`, `process-changelog`, `generate-pot`, `zip-name`, `release-zip`, `changed-files`, `skip-drafts`, `download-plugins` |
 | Reusable workflows | `.github/workflows/` | Full jobs built from the actions (standards, analysis, tests, zip, release prep). Most repos will only touch this layer. |
 | File sync | `templates/` + `.github/sync.yml` | Files that must exist in the target repo, grouped by brand and repo type |
 
@@ -178,7 +178,8 @@ Each phase ends with something people can actually use.
 ### Phase 3: reusable workflows
 
 - [ ] `standards.yml`: phpcs, cspell, markdown, style lint. Inputs pick which run.
-- [ ] `analysis.yml`: PHPStan and the PHP compat matrix.
+- [x] `phpstan.yml`: PHPStan, with its dependency and result caches.
+- [ ] `php-compatibility.yml`: the PHP compatibility matrix.
 - [ ] `tests.yml`: slic suites via `prepare-matrix`, with LD's cheap/expensive split. Review TEC's paused [#51](https://github.com/the-events-calendar/actions/pull/51) first so that work isn't lost.
 - [ ] `changelog.yml`: the changelogger check.
 - [ ] `zip.yml`: a `workflow_call` wrapper for the `zip-name` and `release-zip` actions, so the copies of `templates/workflows/zip.yml` become one `uses:` line. What LearnDash's version adds on top (the size comparison, the pull request comment) is brand policy and stays in its file.
