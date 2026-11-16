@@ -74,6 +74,12 @@ describe('download-plugins', () => {
       assert.deepEqual(parsePlugins(undefined), [])
     })
 
+    it('refuses two plugins that would share a directory', () => {
+      assert.throws(() => parsePlugins('acme/calendar\ncommunity/calendar'), /'acme\/calendar' already goes to the directory 'calendar'/)
+      assert.throws(() => parsePlugins('calendar\nacme/calendar'), /already goes to/)
+      assert.doesNotThrow(() => parsePlugins('acme/calendar\ncommunity/events'))
+    })
+
     it('refuses an entry that could reshape a command or a path', () => {
       for (const bad of ['../evil', 'a/b/c', '--flag/x', 'Bad_Slug', 'owner/..', 'owner/name.']) {
         assert.throws(() => parsePlugins(bad), /Refusing to download/, bad)

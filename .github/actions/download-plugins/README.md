@@ -50,7 +50,7 @@ the PHPStan config reaches the plugins as `../<name>`.
 | `owner/name` | The latest release of that GitHub repository, downloaded with `gh` | `name` |
 | `woocommerce` | The latest stable release of that WordPress.org plugin | `woocommerce` |
 
-Anything else, such as a path or a name with other characters, fails before anything is downloaded.
+Anything else, such as a path or a name with other characters, fails before anything is downloaded. So do two lines whose directory name is the same, such as `acme/calendar` and `community/calendar`, because the second would replace the first.
 
 ## What it does for each plugin
 

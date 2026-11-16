@@ -22,12 +22,12 @@ const WPORG_SLUG = /^[a-z0-9][a-z0-9-]*$/
  *
  * @param {string} plugins One plugin per line.
  *
- * @throws {Error} When an entry is neither `owner/name` nor a slug.
+ * @throws {Error} When an entry is neither `owner/name` nor a slug, or two entries share a name.
  *
  * @returns {{spec: string, name: string, github: boolean}[]} The plugins, in the order given.
  */
 function parsePlugins(plugins) {
-  return String(plugins ?? '')
+  const parsed = String(plugins ?? '')
     .split(/\s+/)
     .filter(Boolean)
     .map((spec) => {
@@ -39,6 +39,17 @@ function parsePlugins(plugins) {
 
       return { spec, name: spec.split('/').pop(), github }
     })
+
+  // Two plugins with one directory name would place the second over the first.
+  for (const [index, { spec, name }] of parsed.entries()) {
+    const clash = parsed.slice(0, index).find((earlier) => earlier.name === name)
+
+    if (clash) {
+      throw new Error(`Refusing to download '${spec}': '${clash.spec}' already goes to the directory '${name}'.`)
+    }
+  }
+
+  return parsed
 }
 
 /**

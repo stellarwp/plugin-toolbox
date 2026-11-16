@@ -58,7 +58,7 @@ to the workflow itself always gets checked.
 ## The globs
 
 A glob is matched against the whole path, and `*` also matches `/`, so `*.php` is every PHP file, in
-any directory. `?` is one character and `[...]` a set, as in bash. A renamed file counts under its old
+any directory. `?` is one character and `[...]` a set of characters, as in bash: `[abc]`, `[a-z]` or `[!abc]`. POSIX classes such as `[[:digit:]]` are not supported. A renamed file counts under its old
 name too, so moving a file out of a matched path still runs the analysis.
 
 ## Permissions
