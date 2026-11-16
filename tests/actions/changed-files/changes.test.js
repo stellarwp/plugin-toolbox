@@ -107,6 +107,14 @@ describe('changed-files', () => {
       assert.equal(outputs().changed, 'true')
     })
 
+    it('keeps a space inside a glob', async (t) => {
+      const { github, core, outputs } = await actionsFor(t, [files(['src/my plugin/A.php'])])
+
+      await run({ github, core, env: { ...env, INPUT_CHANGED_FILES: 'src/my plugin/*.php' } })
+
+      assert.equal(outputs().changed, 'true')
+    })
+
     it('sets changed=false when nothing matches', async (t) => {
       const { github, core, outputs } = await actionsFor(t, [files(['README.md'])])
 

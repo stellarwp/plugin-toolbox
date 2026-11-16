@@ -9,7 +9,7 @@
  */
 
 const { globToRegExp } = require('../../lib/glob.js')
-const { words } = require('../../lib/inputs.js')
+const { lines } = require('../../lib/inputs.js')
 
 /** The API stops listing a pull request's files at this many. */
 const FILES_API_LIMIT = 3000
@@ -76,7 +76,7 @@ async function run({ github, core, env }) {
 
   const { changed, reason } = await decide({
     eventName: env.EVENT_NAME,
-    globs: words(env.INPUT_CHANGED_FILES),
+    globs: lines(env.INPUT_CHANGED_FILES),
     changedCount: Number(env.PR_CHANGED_FILES || 0),
     caller,
     listFiles: async () => {
