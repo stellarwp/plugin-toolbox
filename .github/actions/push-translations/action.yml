@@ -95,8 +95,8 @@ runs:
         switches: -avz --omit-dir-times --no-perms
         path: ${{ steps.check.outputs.pot-path }}
         remote_path: ${{ steps.check.outputs.remote-path }}
-        remote_host: ${{ inputs.host }}
-        remote_user: ${{ inputs.user }}
+        remote_host: ${{ steps.check.outputs.host }}
+        remote_user: ${{ steps.check.outputs.user }}
         remote_key: ${{ inputs.ssh-key }}
 
     - name: Import the strings into GlotPress
@@ -107,8 +107,8 @@ runs:
         REMOTE_POT: ${{ steps.check.outputs.remote-pot }}
         RESULT_FILE: ${{ steps.check.outputs.result-file }}
       with:
-        host: ${{ inputs.host }}
-        username: ${{ inputs.user }}
+        host: ${{ steps.check.outputs.host }}
+        username: ${{ steps.check.outputs.user }}
         key: ${{ inputs.ssh-key }}
         # The checked values reach the remote shell as variables, not as text of the script.
         envs: SITE_DIRECTORY,PROJECT,REMOTE_POT,RESULT_FILE
@@ -137,8 +137,8 @@ runs:
         SITE_DIRECTORY: ${{ steps.check.outputs.site-directory }}
         RESULT_FILE: ${{ steps.check.outputs.result-file }}
       with:
-        host: ${{ inputs.host }}
-        username: ${{ inputs.user }}
+        host: ${{ steps.check.outputs.host }}
+        username: ${{ steps.check.outputs.user }}
         key: ${{ inputs.ssh-key }}
         envs: SITE_DIRECTORY,RESULT_FILE
         script: |

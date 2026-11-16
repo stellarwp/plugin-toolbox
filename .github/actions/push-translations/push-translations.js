@@ -7,7 +7,7 @@
  * The later steps of action.yml copy the POT with rsync and run `wp glotpress import-originals`
  * over ssh. The rsync action builds a shell command from its inputs, and the import is a remote
  * shell command, so every value that reaches either one has to match an allow-list first. Those
- * steps use the outputs set here, never the raw inputs.
+ * steps use the outputs set here, never the raw inputs, except ssh-key, which is only ever a key.
  *
  * readInputs is pure, so a test can call it with an environment.
  */
@@ -122,10 +122,13 @@ function readInputs(env, buildId = crypto.randomBytes(16).toString('hex')) {
   const remotePath = `${read['pot-location']}/${read['remote-folder']}/`
   const resultFile = `${potFile.slice(0, -'.pot'.length)}-${buildId}`
 
-  // host, user and ssh-key are checked but not returned: the later steps take them from the inputs.
+  // The later steps connect with host and user as checked here, trimmed. ssh-key is not returned:
+  // it is handed to those steps as a key, never placed in a command.
   return {
     project: read.project,
     'pot-path': read['pot-path'],
+    host: read.host,
+    user: read.user,
     'remote-path': remotePath,
     'remote-pot': `${remotePath}${potFile}`,
     'site-directory': read['site-directory'],
