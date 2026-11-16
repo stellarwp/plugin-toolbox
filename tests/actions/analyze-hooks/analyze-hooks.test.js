@@ -140,6 +140,23 @@ describe('analyze-hooks', () => {
     assert.ok(!Object.values(entries()).join('').includes('tec_twin'))
   })
 
+  it('lists a hook that became deprecated as deprecated, and one deleted after it was deprecated as removed', async (t) => {
+    write(
+      'src/Tribe/Deprecated.php',
+      "<?php\n$a = apply_filters( 'tec_to_deprecate', $a );\ndo_action_deprecated( 'tec_was_deprecated', [], '6.0.0' );\n"
+    )
+    commit('deprecated hooks')
+    git('tag', '6.18.3')
+    write('src/Tribe/Deprecated.php', "<?php\n$a = apply_filters_deprecated( 'tec_to_deprecate', [ $a ], '6.19.0' );\n")
+    commit('deprecate one, delete the other')
+    await run(t)
+
+    const written = entries()
+    assert.deepStrictEqual(Object.keys(written), ['analyze-hooks-deprecated-filters.yaml', 'analyze-hooks-removed-actions.yaml'])
+    assert.strictEqual(written['analyze-hooks-deprecated-filters.yaml'], entry('Deprecated filters: `tec_to_deprecate`'))
+    assert.strictEqual(written['analyze-hooks-removed-actions.yaml'], entry('Removed actions: `tec_was_deprecated`'))
+  })
+
   it('removes an entry from an earlier run when its change is reverted, and is stable when run twice', async (t) => {
     await run(t)
     const first = entries()
@@ -303,6 +320,9 @@ describe('analyze-hooks', () => {
     assert.throws(() => readTypes('{nope'), /not valid JSON/)
     assert.throws(() => readTypes('{"added-hooks": "tweak"}'), /unknown key 'added-hooks'/)
     assert.throws(() => readTypes('{"added-filters": ""}'), /not a changelog type/)
+    assert.deepStrictEqual(readTypes('{"deprecated-actions": "deprecated: deprecated actions"}'), {
+      'deprecated-actions': 'deprecated: deprecated actions',
+    })
   })
 
   it('orders release tags by their numeric parts', () => {

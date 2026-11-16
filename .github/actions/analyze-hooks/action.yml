@@ -1,4 +1,4 @@
-# Files the actions and filters a release adds or removes, and the views it changes, as pending
+# Files the actions and filters a release adds, deprecates or removes, and the views it changes, as pending
 # changelog entries, so the release notes name them. It compares the checkout with the last release
 # tag and writes change files only: it commits nothing, so the step that commits the release
 # preparation carries them.
@@ -6,12 +6,13 @@
 # The logic lives in analyze-hooks.js, run by actions/github-script, so there is no dependency to
 # install and nothing to build.
 name: Analyze hooks
-description: Files the hooks a release adds or removes and the views it changes as pending changelog entries
+description: Files the hooks a release adds, deprecates or removes and the views it changes as pending changelog entries
 
 inputs:
   paths:
     description: >-
-      Where to search for `apply_filters` and `do_action` calls, one git pathspec per line, relative
+      Where to search for `apply_filters`, `do_action` and their `_ref_array` and `_deprecated`
+      calls, one git pathspec per line, relative
       to the checkout. A pathspec can exclude: `:!vendor` after `.` searches everything but vendor.
     required: false
     default: 'src'
@@ -26,7 +27,8 @@ inputs:
     description: >-
       The changelog type of each entry, as a JSON object in a string, for a changelogger that has a
       type per kind of change, e.g. `'{"added-filters": "tweak: added filters"}'`. The keys are
-      `added-filters`, `removed-filters`, `added-actions`, `removed-actions` and `changed-views`.
+      `added-filters`, `deprecated-filters`, `removed-filters`, `added-actions`, `deprecated-actions`,
+      `removed-actions` and `changed-views`.
       An entry with a type here holds the names only, since the type's label says what they are.
       An entry without one is a `tweak` reading `Added filters: …`.
     required: false

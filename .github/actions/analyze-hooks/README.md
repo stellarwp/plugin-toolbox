@@ -1,6 +1,6 @@
 # analyze-hooks
 
-Files the actions and filters a release adds or removes, and the views it changes, as pending
+Files the actions and filters a release adds, deprecates or removes, and the views it changes, as pending
 changelog entries, so the release notes name them.
 
 ```yaml
@@ -29,20 +29,24 @@ or four numeric parts, with or without a leading `v` (`6.18.3`, `v5.3.0`, `4.19.
 | File in the changes directory | Entry |
 |---|---|
 | `analyze-hooks-added-filters.yaml` | ``Added filters: `a`, `b` `` |
+| `analyze-hooks-deprecated-filters.yaml` | ``Deprecated filters: `a` `` |
 | `analyze-hooks-removed-filters.yaml` | ``Removed filters: `a` `` |
 | `analyze-hooks-added-actions.yaml` | ``Added actions: `a` `` |
+| `analyze-hooks-deprecated-actions.yaml` | ``Deprecated actions: `a` `` |
 | `analyze-hooks-removed-actions.yaml` | ``Removed actions: `a` `` |
 | `analyze-hooks-changed-views.yaml` | ``Changed views: `v2/list` `` |
 
 Each is a `patch` entry of type `tweak`, and a kind with nothing to list writes no file.
 
-- **Hooks** are the `apply_filters`, `apply_filters_ref_array`, `do_action` and
-  `do_action_ref_array` calls under `paths` whose name is a complete string literal. A name built
+- **Hooks** are the `apply_filters`, `apply_filters_ref_array`, `apply_filters_deprecated`,
+  `do_action`, `do_action_ref_array` and `do_action_deprecated` calls under `paths` whose name is a
+  complete string literal. A name built
   from a variable, interpolation or concatenation is not listed, and neither is a call inside a
   comment or in the HTML of a template outside `<?php ... ?>`. The name can be on any line after
-  the parenthesis. A hook is added when the current
-  tree has it and the tag's tree does not, and removed the other way round, so a hook that moved,
-  or that still has another call elsewhere, is not listed.
+  the parenthesis. A hook is live while one of its calls is not a `_deprecated` one, deprecated when
+  every call is, and gone when it has none. A hook is added when it is live now and was not at the
+  tag, deprecated when it is deprecated now and was not, and removed when it is gone now and was
+  live or deprecated. A hook that moved, or that still has another call elsewhere, is not listed.
 - **Views** are the `.php` files under `views-path` that changed since the tag, named by their path
   under that directory without `.php`.
 
@@ -88,7 +92,7 @@ An entry left out of `types`, here the removed hooks, stays a `tweak` reading `R
 |---|---|---|
 | `paths` | `src` | Where to search for hooks, one git pathspec per line. `:!vendor` excludes a directory. |
 | `views-path` | `src/views` | The directory of the templates a theme can override. Empty lists no view. |
-| `types` | | The changelog type per entry, as a JSON object in a string. Keys: `added-filters`, `removed-filters`, `added-actions`, `removed-actions`, `changed-views`. |
+| `types` | | The changelog type per entry, as a JSON object in a string. Keys: `added-filters`, `deprecated-filters`, `removed-filters`, `added-actions`, `deprecated-actions`, `removed-actions`, `changed-views`. |
 | `working-directory` | | Where the repository is checked out. Empty is the workspace. |
 
 ## Outputs

@@ -7,11 +7,12 @@
  * Compared with the last release tag:
  *  - the `apply_filters` / `do_action` calls under `paths` whose name is a complete string literal,
  *    outside comments and outside the HTML of a template.
- *    A hook is added when the current tree has it and the tag's tree does not, removed the other
- *    way round, so one that moved, or that still has another call elsewhere, is not listed;
+ *    A hook is added when it is live now and was not at the tag, deprecated when every call became
+ *    a `_deprecated` one, and removed when no call is left, so one that moved, or that still has
+ *    another call elsewhere, is not listed;
  *  - the `.php` files under `views-path` that `git diff` reports as changed.
  *
- * Each kind becomes one entry, `<changesDir>/analyze-hooks-<added|removed|changed>-<kind>.yaml`, so
+ * Each kind becomes one entry, `<changesDir>/analyze-hooks-<change>-<kind>.yaml`, so
  * a second run rewrites the same files. An entry a changelog file already carries above the last
  * release's heading, or another pending file holds, is not written again.
  *
@@ -36,22 +37,22 @@ const FILE_PREFIX = 'analyze-hooks-'
 /** A release tag: three or four numeric parts, with or without a leading `v`. Not `6.18.3-rc1`, not `ft-002`. */
 const RELEASE_TAG = /^v?\d+\.\d+\.\d+(\.\d+)?$/
 
-/** The kind each WordPress function files its hook under. */
-const FUNCTIONS = {
-  apply_filters: 'filters',
-  apply_filters_ref_array: 'filters',
-  do_action: 'actions',
-  do_action_ref_array: 'actions',
-}
-
 /**
  * A hook call whose name is a plain string literal, closed by `,` or `)`. A name built from a
  * variable, interpolation or concatenation (`'tec_' . $name`) is not a name.
  */
-const HOOK_CALL = /\b(apply_filters(?:_ref_array)?|do_action(?:_ref_array)?)\s*\(\s*(?:'([^'$]+)'|"([^"$]+)")\s*[,)]/g
+const HOOK_CALL = /\b(apply_filters|do_action)(_ref_array|_deprecated)?\s*\(\s*(?:'([^'$]+)'|"([^"$]+)")\s*[,)]/g
 
 /** Every entry the action can write, as `<change>-<kind>`: the keys the `types` input takes. */
-const ENTRY_KEYS = ['added-filters', 'removed-filters', 'added-actions', 'removed-actions', 'changed-views']
+const ENTRY_KEYS = [
+  'added-filters',
+  'deprecated-filters',
+  'removed-filters',
+  'added-actions',
+  'deprecated-actions',
+  'removed-actions',
+  'changed-views',
+]
 
 /** The type an entry has when `types` does not name one. */
 const DEFAULT_TYPE = 'tweak'
@@ -123,22 +124,46 @@ function code(source) {
 }
 
 /**
- * The hook names a set of PHP files calls.
+ * The hooks a set of PHP files calls. A hook is live while one of its calls is not a `_deprecated`
+ * one, and deprecated when every call is.
  *
  * @param {string[]} sources The files.
  *
- * @returns {{filters: Set<string>, actions: Set<string>}} The names, per kind.
+ * @returns {{filters: Map<string, {live: boolean}>, actions: Map<string, {live: boolean}>}} The
+ *          hooks by name, per kind.
  */
 function hooks(sources) {
-  const found = { filters: new Set(), actions: new Set() }
+  const found = { filters: new Map(), actions: new Map() }
 
   for (const source of sources) {
     for (const match of code(source).matchAll(HOOK_CALL)) {
-      found[FUNCTIONS[match[1]]].add(match[2] ?? match[3])
+      const kind = found[match[1] === 'apply_filters' ? 'filters' : 'actions']
+      const name = match[3] ?? match[4]
+      const hook = kind.get(name) ?? { live: false }
+
+      hook.live ||= match[2] !== '_deprecated'
+      kind.set(name, hook)
     }
   }
 
   return found
+}
+
+/**
+ * The state of a hook in a tree.
+ *
+ * @param {Map<string, {live: boolean}>} kind The tree's hooks of one kind.
+ * @param {string}                       name The hook.
+ *
+ * @returns {'live'|'deprecated'|'gone'} Whether it has a call that is not deprecated, only
+ *          deprecated calls, or none.
+ */
+function state(kind, name) {
+  if (!kind.has(name)) {
+    return 'gone'
+  }
+
+  return kind.get(name).live ? 'live' : 'deprecated'
 }
 
 /**
@@ -155,15 +180,23 @@ function analyze(before, after, changedFiles, viewsPath) {
   const [old, now] = [hooks(before), hooks(after)]
   const entries = []
 
+  // A hook that became live is added, one whose calls all became deprecated is deprecated, and one
+  // with no call left, live or deprecated before, is removed.
   for (const kind of ['filters', 'actions']) {
-    const came = [...now[kind]].filter((name) => !old[kind].has(name))
-    const gone = [...old[kind]].filter((name) => !now[kind].has(name))
+    const names = { Added: [], Deprecated: [], Removed: [] }
 
-    if (came.length) {
-      entries.push({ change: 'Added', kind, names: came.sort() })
+    for (const name of new Set([...old[kind].keys(), ...now[kind].keys()])) {
+      const [was, is] = [state(old[kind], name), state(now[kind], name)]
+
+      if (is !== was) {
+        names[{ live: 'Added', deprecated: 'Deprecated', gone: 'Removed' }[is]].push(name)
+      }
     }
-    if (gone.length) {
-      entries.push({ change: 'Removed', kind, names: gone.sort() })
+
+    for (const [change, list] of Object.entries(names)) {
+      if (list.length) {
+        entries.push({ change, kind, names: list.sort() })
+      }
     }
   }
 
