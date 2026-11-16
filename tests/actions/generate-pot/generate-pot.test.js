@@ -223,6 +223,15 @@ describe('generate-pot', () => {
       assert.strictEqual(php.args.at(-1), '--exclude=/tests,node_modules,common,libs/x,*.js.map,src/**/*.js')
     })
 
+    it('makes the .distignore and submodule paths relative to source-path, and drops the ones outside it', async (t) => {
+      write('.distignore', '/tests\nnode_modules\nsrc/internal.php\n/src/admin/\nassets/js\n')
+      write('.gitmodules', '[submodule "lib"]\n\tpath = src/vendor/lib\n[submodule "common"]\n\tpath = common\n')
+
+      const { php } = await run(t, { generated: pot(), inputs: { INPUT_SOURCE_PATH: './src/', INPUT_EXCLUDE: 'src/*.map' } })
+
+      assert.strictEqual(php.args.at(-1), '--exclude=node_modules,internal.php,admin,vendor/lib,src/*.map')
+    })
+
     it('reads .distignore in the working directory', async (t) => {
       const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'generate-pot-workspace-'))
       t.after(() => fs.rmSync(workspace, { recursive: true, force: true }))

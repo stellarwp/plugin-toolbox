@@ -33,9 +33,10 @@ inputs:
     default: ''
   exclude:
     description: >-
-      Extra files and directories to leave out, one per line, as `--exclude` takes them, e.g.
-      `*.js.map`. They are added to the lines of `.distignore` and the git submodule paths, which
-      are always left out.
+      Extra files and directories to leave out, one per line, as `--exclude` takes them: relative to
+      `source-path`, e.g. `*.js.map`. They are added to the lines of `.distignore` and the git
+      submodule paths, which are always left out once made relative to `source-path`; the ones
+      outside it are dropped.
     required: false
     default: ''
   working-directory:

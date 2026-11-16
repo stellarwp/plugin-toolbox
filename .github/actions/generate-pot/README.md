@@ -44,7 +44,12 @@ Three lists are joined into `--exclude`, each entry once:
   Empty lines and `#` comments are skipped.
 - The path of each git submodule, read from `.gitmodules`. A submodule has its own text domain and
   its own POT, and its strings do not belong in this one.
-- The lines of the `exclude` input.
+- The lines of the `exclude` input, passed as given.
+
+make-pot matches an exclusion against paths relative to `source-path`, so the `.distignore` and
+submodule paths are made relative to it first: with `source-path: src`, `src/admin` becomes
+`admin`, and a path outside `src`, such as `/tests`, is dropped. A `.distignore` line with no `/`
+in it, such as `node_modules`, is a name that matches at any depth, and is kept as it is.
 
 With none of them, make-pot uses its own defaults.
 
@@ -82,7 +87,7 @@ A second run therefore leaves nothing to commit. The check needs a git checkout,
 | `source-path` | `.` | The directory scanned for strings, relative to the checkout. |
 | `domain` | | The text domain, passed as `--domain`. Empty leaves it to make-pot. |
 | `headers` | | POT headers to set, as a JSON object of strings in a string. Empty sets none. |
-| `exclude` | | Extra exclusions, one per line, added to `.distignore` and the submodule paths. |
+| `exclude` | | Extra exclusions, one per line, relative to `source-path`, added to `.distignore` and the submodule paths. |
 | `working-directory` | | Where the repository is checked out. Empty is the workspace. |
 
 ## Outputs
