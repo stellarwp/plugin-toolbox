@@ -57,7 +57,7 @@ Anything else, such as a path or a name with other characters, fails before anyt
 - Downloads and unpacks the archive, and places it at `<destination>/<name>`.
 - Replaces a copy a previous job left there, so the new one is never nested inside the old one.
 - Fails when the plugin would land on the checkout or on a directory that holds it, because the old copy is deleted first and the checkout is never replaced.
-- Runs `composer install` in it when it has a `composer.json`. A GitHub plugin gets `token` for its private packages. A WordPress.org plugin runs Composer with `--no-scripts --no-plugins` and with no credential in its environment, because Composer would run the plugin's own code and the caller does not control it.
+- Runs `composer install` in a GitHub plugin that has a `composer.json`, with `token` for private packages. A WordPress.org plugin never gets it: its zip ships `vendor/`, and its `composer.json` is code the caller does not control.
 
 ## Permissions
 

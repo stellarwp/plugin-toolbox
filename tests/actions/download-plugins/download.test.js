@@ -139,37 +139,19 @@ describe('download-plugins', () => {
       assert.ok(dest)
     })
 
-    it('gives Composer the tokens for a GitHub plugin, and no credential for a WordPress.org one', async (t) => {
-      const secrets = {
-        COMPOSER_AUTH: '{"github-oauth":{"github.com":"secret"}}',
-        GH_TOKEN: 'secret',
-        'INPUT_GITHUB-TOKEN': 'secret',
-        ACTIONS_RUNTIME_TOKEN: 'secret',
-      }
-
-      Object.assign(process.env, secrets)
-      t.after(() => Object.keys(secrets).forEach((name) => delete process.env[name]))
-
-      const composerCall = async (spec) => {
+    it('runs Composer for a GitHub plugin but never for a WordPress.org one', async (t) => {
+      const composerCalls = async (spec) => {
         const { workspace, tmp } = runner()
         const { core } = await coreWithOutputs(t)
         const { exec, calls } = recordingExec(rules(tmp, 'plugin', { 'composer.json': '{}' }))
 
         await downloadPlugins({ core, exec, plugins: parsePlugins(spec), workspace, tmp })
 
-        return calls.find((call) => call.command === 'composer')
+        return calls.filter((call) => call.command === 'composer')
       }
 
-      const github = await composerCall('stellarwp/plugin')
-
-      assert.equal(github.options.env, undefined)
-      assert.ok(!github.args.includes('--no-scripts'))
-
-      const wporg = await composerCall('plugin')
-
-      assert.ok(wporg.options.env.PATH)
-      assert.deepEqual(Object.keys(wporg.options.env).filter((name) => name in secrets), [])
-      assert.ok(wporg.args.includes('--no-scripts') && wporg.args.includes('--no-plugins'))
+      assert.equal((await composerCalls('stellarwp/plugin')).length, 1)
+      assert.equal((await composerCalls('plugin')).length, 0)
     })
 
     it('places the plugins in a destination of the caller\'s choice', async (t) => {

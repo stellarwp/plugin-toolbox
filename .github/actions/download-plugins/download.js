@@ -41,36 +41,17 @@ function parsePlugins(plugins) {
     })
 }
 
-/** The variables a Composer run needs. Everything else, tokens and runner credentials included, is left out. */
-const COMPOSER_ENV = ['PATH', 'HOME', 'COMPOSER_HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'PHP_INI_SCAN_DIR', 'PHPRC']
-
-/**
- * The environment of a Composer run that is not allowed to see any credential.
- *
- * An allowlist rather than a list of what to remove: the runner puts several tokens in the
- * environment of a github-script step (`INPUT_GITHUB-TOKEN`, `ACTIONS_RUNTIME_TOKEN`, ...), and a
- * new one would otherwise leak.
- *
- * @param {object} env The environment to copy from.
- *
- * @returns {object} Only the variables Composer needs.
- */
-function composerEnvWithoutCredentials(env) {
-  return Object.fromEntries(COMPOSER_ENV.filter((name) => env[name] !== undefined).map((name) => [name, env[name]]))
-}
-
 /**
  * Runs a command and fails with its name when it exits non-zero.
  *
  * @param {object}   exec    The @actions/exec toolkit.
  * @param {string}   command The program.
  * @param {string[]} args    Its arguments.
- * @param {object}   options Passed to @actions/exec.
  *
  * @returns {Promise<string>} What the command printed to stdout.
  */
-async function sh(exec, command, args, options = {}) {
-  const { stdout } = await exec.getExecOutput(command, args, options)
+async function sh(exec, command, args) {
+  const { stdout } = await exec.getExecOutput(command, args)
 
   return stdout.trim()
 }
@@ -122,7 +103,7 @@ async function place({ exec, dest, workspace, tmp, name }) {
 }
 
 /**
- * Downloads each plugin and installs its Composer dependencies.
+ * Downloads each plugin and, for a GitHub repository, installs its Composer dependencies.
  *
  * @param {object}   options
  * @param {object}   options.core      The @actions/core toolkit, for the log.
@@ -153,19 +134,12 @@ async function downloadPlugins({ core, exec, plugins, workspace, tmp, dest = pat
 
     const target = await place({ exec, dest, workspace, tmp, name })
 
-    if (fs.existsSync(path.join(target, 'composer.json'))) {
-      const args = ['install', '--no-interaction', '--no-progress', '--prefer-dist', `--working-dir=${target}`]
-
-      if (github) {
-        // A repository the caller named: it is trusted like the caller's own, and gets the tokens.
-        await sh(exec, 'composer', args)
-      } else {
-        // A WordPress.org plugin is code the caller does not control, and Composer would run its
-        // scripts and plugins. So it gets no credentials, and neither runs.
-        await sh(exec, 'composer', [...args, '--no-scripts', '--no-plugins'], {
-          env: composerEnvWithoutCredentials(process.env),
-        })
-      }
+    // Only a GitHub repository the caller named: it is trusted like the caller's own code, and gets
+    // the tokens. A WordPress.org zip ships its vendor directory, and its composer.json is code the
+    // caller does not control: Composer would run its scripts and let its `config` choose where
+    // files are written.
+    if (github && fs.existsSync(path.join(target, 'composer.json'))) {
+      await sh(exec, 'composer', ['install', '--no-interaction', '--no-progress', '--prefer-dist', `--working-dir=${target}`])
     }
 
     placed.push(target)
