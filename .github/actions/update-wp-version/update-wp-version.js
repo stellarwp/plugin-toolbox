@@ -146,8 +146,9 @@ function setHeaders(cwd, file, headers) {
   let found = false
 
   for (const [name, version] of Object.entries(headers)) {
-    // The line shape WordPress reads a header from: comment characters, the name, a colon.
-    const header = new RegExp(`^([ \\t/*#@]*${name}:[ \\t]*)[0-9.]*`, 'im')
+    // The line shape WordPress reads a header from: comment characters, the name, a colon. The
+    // whole value up to the next space is replaced, so `6.8-RC1` becomes `6.8`, not `6.8-RC1`.
+    const header = new RegExp(`^([ \\t/*#@]*${name}:[ \\t]*)\\S*`, 'im')
 
     if (header.test(after)) {
       found = true
