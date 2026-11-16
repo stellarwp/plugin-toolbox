@@ -63,6 +63,8 @@ With none of them, make-pot uses its own defaults.
 
 make-pot stamps the time (`POT-Creation-Date`), the plugin version (`Project-Id-Version`) and its
 own version (`X-Generator`) on every run, so the file differs each time even with the same strings.
+The check leaves out these three lines of the header entry only: a translation entry that holds one
+of the names is compared like any other.
 
 | The POT | `changed` | The file |
 |---|---|---|
