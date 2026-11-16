@@ -13,11 +13,11 @@
  * means a change in the actions that call it.
  */
 
-const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 
 const { runOrFail } = require('./exec.js')
+const { pharExists, downloadPhar: downloadToolPhar } = require('./phar.js')
 
 /** A pup release number, which goes into the download URL. */
 const PUP_VERSION_PATTERN = /^\d+\.\d+\.\d+$/
@@ -234,22 +234,6 @@ function pharPath(env, release) {
 }
 
 /**
- * Whether a phar an earlier step downloaded is there to reuse. An empty file is not: it is what a
- * download that was cut off leaves.
- *
- * @param {string} phar The path.
- *
- * @returns {boolean} True for a file with content.
- */
-function pharExists(phar) {
-  try {
-    return fs.statSync(phar).size > 0
-  } catch {
-    return false
-  }
-}
-
-/**
  * Downloads the phar of a pup release into the runner's temp directory, unless an earlier step of
  * the job already did. A download that fails leaves no file behind, so the next step does not
  * reuse half a phar.
@@ -264,24 +248,8 @@ function pharExists(phar) {
  *
  * @returns {Promise<string>} The path of the phar.
  */
-async function downloadPhar({ exec, env, release, core }) {
-  const phar = pharPath(env, release)
-
-  if (pharExists(phar)) {
-    core?.info(`Reusing pup ${release}, downloaded by an earlier step of this job.`)
-
-    return phar
-  }
-
-  try {
-    await runOrFail(exec, 'curl', ['-fsSL', '--retry', '3', '-o', phar, pupDownloadUrl(release)], {}, `Downloading pup ${release}`)
-  } catch (error) {
-    fs.rmSync(phar, { force: true })
-
-    throw error
-  }
-
-  return phar
+function downloadPhar({ exec, env, release, core }) {
+  return downloadToolPhar({ exec, phar: pharPath(env, release), url: pupDownloadUrl(release), label: `pup ${release}`, core })
 }
 
 /**
@@ -368,7 +336,6 @@ module.exports = {
   resolvePupDistribution,
   noPharError,
   pharPath,
-  pharExists,
   downloadPhar,
   pupRunner,
   setupPup,
