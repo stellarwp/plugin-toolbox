@@ -193,6 +193,39 @@ describe('analyze-hooks', () => {
     assert.match(entries()['analyze-hooks-added-filters.yaml'], /`tec_wrapped`/)
   })
 
+  it('reads a hook whose name is two lines below the parenthesis', async (t) => {
+    write('src/Tribe/Three.php', "<?php\ndo_action(\n\t'tec_three'\n);\n")
+    commit('three lines')
+    await run(t)
+
+    assert.match(entries()['analyze-hooks-added-actions.yaml'], /`tec_three`/)
+  })
+
+  it('ignores a call in a comment or in the HTML of a template, and keeps one after a string', async (t) => {
+    write('src/Tribe/Main.php', AFTER.replace("do_action( \"tec_added_action\", $x );", "// do_action( 'tec_removed_action' );"))
+    write(
+      'src/Tribe/Comments.php',
+      [
+        '<?php',
+        "# do_action( 'tec_hash' );",
+        "/* apply_filters( 'tec_block', $a ); */",
+        "$s = '// not a comment'; do_action( 'tec_after_string' );",
+        "?><p>Don't do_action( 'tec_html' );</p><?php do_action( 'tec_in_template' ); ?>",
+        '',
+      ].join('\n')
+    )
+    commit('comments')
+    await run(t)
+
+    const written = entries()
+    assert.strictEqual(
+      written['analyze-hooks-added-actions.yaml'],
+      entry('Added actions: `tec_added_ref`, `tec_after_string`, `tec_in_template`')
+    )
+    assert.strictEqual(written['analyze-hooks-removed-actions.yaml'], entry('Removed actions: `tec_removed_action`'))
+    assert.ok(!written['analyze-hooks-added-filters.yaml'].includes('tec_block'))
+  })
+
   it('writes nothing, with a warning, before the first release', async (t) => {
     git('tag', '-d', '6.18.2')
     const { outputs } = await run(t)

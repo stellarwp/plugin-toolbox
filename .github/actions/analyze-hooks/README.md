@@ -38,8 +38,9 @@ Each is a `patch` entry of type `tweak`, and a kind with nothing to list writes 
 
 - **Hooks** are the `apply_filters`, `apply_filters_ref_array`, `do_action` and
   `do_action_ref_array` calls under `paths` whose name is a complete string literal. A name built
-  from a variable, interpolation or concatenation is not listed. The name has to be on the line
-  of the call or on the next one. A hook is added when the current
+  from a variable, interpolation or concatenation is not listed, and neither is a call inside a
+  comment or in the HTML of a template outside `<?php ... ?>`. The name can be on any line after
+  the parenthesis. A hook is added when the current
   tree has it and the tag's tree does not, and removed the other way round, so a hook that moved,
   or that still has another call elsewhere, is not listed.
 - **Views** are the `.php` files under `views-path` that changed since the tag, named by their path

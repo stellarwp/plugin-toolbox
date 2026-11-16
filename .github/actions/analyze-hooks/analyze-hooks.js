@@ -5,7 +5,8 @@
  * name them. Run before the changelog is written, on a checkout with full history and tags.
  *
  * Compared with the last release tag:
- *  - the `apply_filters` / `do_action` calls under `paths` whose name is a complete string literal.
+ *  - the `apply_filters` / `do_action` calls under `paths` whose name is a complete string literal,
+ *    outside comments and outside the HTML of a template.
  *    A hook is added when the current tree has it and the tag's tree does not, removed the other
  *    way round, so one that moved, or that still has another call elsewhere, is not listed;
  *  - the `.php` files under `views-path` that `git diff` reports as changed.
@@ -47,7 +48,7 @@ const FUNCTIONS = {
  * A hook call whose name is a plain string literal, closed by `,` or `)`. A name built from a
  * variable, interpolation or concatenation (`'tec_' . $name`) is not a name.
  */
-const HOOK_CALL = /\b(apply_filters(?:_ref_array)?|do_action(?:_ref_array)?)\(\s*(?:'([^'$]+)'|"([^"$]+)")\s*[,)]/g
+const HOOK_CALL = /\b(apply_filters(?:_ref_array)?|do_action(?:_ref_array)?)\s*\(\s*(?:'([^'$]+)'|"([^"$]+)")\s*[,)]/g
 
 /** Every entry the action can write, as `<change>-<kind>`: the keys the `types` input takes. */
 const ENTRY_KEYS = ['added-filters', 'removed-filters', 'added-actions', 'removed-actions', 'changed-views']
@@ -72,17 +73,69 @@ function lastReleaseTag(tags) {
 }
 
 /**
- * The hook names a source text calls.
+ * What `code` steps over in PHP: the closing tag, a block comment, a line comment (`#[` opens an
+ * attribute, not a comment), a quoted string and a heredoc or nowdoc.
+ */
+const TOKEN =
+  /\?>|\/\*[\s\S]*?\*\/|(?:\/\/|#(?!\[)).*?(?=\?>|$)|'(?:[^'\\]|\\[\s\S])*'|"(?:[^"\\]|\\[\s\S])*"|<<<[ \t]*(['"]?)(\w+)\1\r?\n[\s\S]*?^[ \t]*\2\b/gm
+
+/**
+ * The PHP code of a file, with its comments and the HTML outside `<?php ... ?>` turned to spaces and
+ * its strings kept, so a call in a comment or in a template's markup is not read as a call.
  *
- * @param {string} source PHP source, or the matching lines of it.
+ * @param {string} source A PHP file.
+ *
+ * @returns {string} The code, as long as the source.
+ */
+function code(source) {
+  const pieces = []
+  let at = 0
+  const blankTo = (end) => {
+    pieces.push(source.slice(at, end).replace(/[^\n]/g, ' '))
+    at = end
+  }
+  // Up to and including the next `<?php` or `<?=`, or to the end of the file.
+  const toPhp = (from) => {
+    const open = source.indexOf('<?', from)
+    blankTo(open === -1 ? source.length : open + 2)
+  }
+
+  toPhp(0)
+  const token = new RegExp(TOKEN.source, TOKEN.flags)
+  token.lastIndex = at
+
+  for (let match; (match = token.exec(source)) !== null; token.lastIndex = at) {
+    pieces.push(source.slice(at, match.index))
+    at = match.index
+
+    if (match[0] === '?>') {
+      toPhp(at + 2)
+    } else if (/^(\/[/*]|#)/.test(match[0])) {
+      blankTo(at + match[0].length)
+    } else {
+      pieces.push(match[0])
+      at += match[0].length
+    }
+  }
+  pieces.push(source.slice(at))
+
+  return pieces.join('')
+}
+
+/**
+ * The hook names a set of PHP files calls.
+ *
+ * @param {string[]} sources The files.
  *
  * @returns {{filters: Set<string>, actions: Set<string>}} The names, per kind.
  */
-function hooks(source) {
+function hooks(sources) {
   const found = { filters: new Set(), actions: new Set() }
 
-  for (const match of source.matchAll(HOOK_CALL)) {
-    found[FUNCTIONS[match[1]]].add(match[2] ?? match[3])
+  for (const source of sources) {
+    for (const match of code(source).matchAll(HOOK_CALL)) {
+      found[FUNCTIONS[match[1]]].add(match[2] ?? match[3])
+    }
   }
 
   return found
@@ -91,8 +144,8 @@ function hooks(source) {
 /**
  * The entries between the tag's source and the current one.
  *
- * @param {string}   before       The hook calls at the last release.
- * @param {string}   after        The hook calls now.
+ * @param {string[]} before       The files with a hook call at the last release.
+ * @param {string[]} after        The files with a hook call now.
  * @param {string[]} changedFiles The files changed since the last release.
  * @param {string}   viewsPath    The directory views live in. Empty lists no view.
  *
@@ -389,19 +442,47 @@ async function runAnalyzeHooks({ core, exec, env, cwd: workspace = process.cwd()
     return
   }
 
-  // One line after each match, for a call whose name is on the line after the parenthesis.
   // git grep exits 1 when nothing matches, which is a tree without hooks, not a failure.
-  const calls = async (...tree) => {
-    const result = await exec.getExecOutput(
-      'git',
-      ['grep', '-I', '-h', '-A1', '-E', '(apply_filters|do_action)', ...tree, '--', ...paths],
-      { cwd, silent: true, ignoreReturnCode: true }
-    )
+  const grep = async (args) => {
+    const result = await exec.getExecOutput('git', ['grep', '-I', '-z', '--full-name', ...args], {
+      cwd,
+      silent: true,
+      ignoreReturnCode: true,
+    })
     if (result.exitCode > 1) {
       throw new Error(`Searching for hooks failed (exit code ${result.exitCode}):\n${result.stderr.trim()}`)
     }
 
     return result.stdout
+  }
+
+  // Every file under `paths` with a hook call, whole, so a name on any line after the parenthesis
+  // and a call inside a comment are read right. `-e ''` matches every line, each printed after its
+  // file's name and a NUL.
+  // ponytail: the file names are passed as arguments, which holds for a few thousand files.
+  const sources = async (...tree) => {
+    const prefix = tree.length ? `${tree[0]}:` : ''
+    const files = (await grep(['-l', '-E', '(apply_filters|do_action)', ...tree, '--', ...paths]))
+      .split('\0')
+      .filter(Boolean)
+      .map((file) => `:(top,literal)${file.slice(prefix.length)}`)
+    if (files.length === 0) {
+      return []
+    }
+
+    const lines = new Map()
+    for (const line of (await grep(['-e', '', ...tree, '--', ...files])).split('\n')) {
+      const nul = line.indexOf('\0')
+      if (nul !== -1) {
+        const file = line.slice(0, nul)
+        if (!lines.has(file)) {
+          lines.set(file, [])
+        }
+        lines.get(file).push(line.slice(nul + 1))
+      }
+    }
+
+    return [...lines.values()].map((file) => file.join('\n'))
   }
 
   const changed =
@@ -423,7 +504,7 @@ async function runAnalyzeHooks({ core, exec, env, cwd: workspace = process.cwd()
   const summary = [`## Hook and view changes since ${tag}`]
   const files = []
 
-  for (const found of analyze(await calls(tag), await calls(), changed, viewsPath)) {
+  for (const found of analyze(await sources(tag), await sources(), changed, viewsPath)) {
     const entry = describe(found, types)
 
     if (isKnown(entry, known, labels)) {
