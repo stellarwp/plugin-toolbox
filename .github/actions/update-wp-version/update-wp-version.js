@@ -2,7 +2,7 @@
 
 /**
  * Sets the WordPress version a plugin is tested up to and, when asked, the minimum it requires:
- * two minor versions behind the tested one.
+ * a version given, or two minor versions behind the tested one.
  *
  * `Tested up to:` is set in readme.txt, and in the plugin file when it carries that header.
  * `Requires at least:` is set in readme.txt and in the plugin file. The plugin file is the single
@@ -17,8 +17,8 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
-const { readYesNo } = require('../../lib/inputs.js')
 const { readVersionFiles } = require('../../lib/puprc.js')
+const { compareVersions } = require('../../lib/versions.js')
 const { readWorkingDirectory, readCheckoutFile } = require('../../lib/workspace.js')
 
 /** What was not done, to close every error message. */
@@ -100,25 +100,63 @@ async function readTestedUpTo(value, fetchImpl) {
 /**
  * The minimum version for a tested one: two minors behind, major and minor only.
  *
- * WordPress publishes no mapping from x.0 back into the previous major, so 7.0 and 7.1 have no
- * derived minimum.
+ * WordPress runs each major from x.0 to x.9 and then moves to the next (2.9, 3.0, ... 6.9, 7.0),
+ * so two minors behind 7.0 is 6.8 and two behind 7.1 is 6.9.
  *
  * @param {string} tested The tested version.
  *
- * @throws {Error} When the minor would go below zero.
+ * @throws {Error} When the minimum would fall below 1.0.
  *
  * @returns {string} The minimum, e.g. 6.6 for 6.8.1.
  */
 function minimumFor(tested) {
   const [major, minor] = tested.split('.').map(Number)
 
-  if (minor - MINORS_BEHIND < 0) {
+  if (minor >= MINORS_BEHIND) {
+    return `${major}.${minor - MINORS_BEHIND}`
+  }
+
+  if (major === 0) {
     throw new Error(
-      `Cannot derive a minimum version two minors behind ${tested}; set it by hand. ${WHAT}`
+      `Cannot derive a minimum version two minors behind ${tested}; pass min-version as a version. ${WHAT}`
     )
   }
 
-  return `${major}.${minor - MINORS_BEHIND}`
+  return `${major - 1}.${minor - MINORS_BEHIND + 10}`
+}
+
+/**
+ * Reads the `min-version` input.
+ *
+ * @param {string} value  The input value: empty, `auto`, or a version.
+ * @param {string} tested The tested version, which `auto` counts back from and a version may not exceed.
+ *
+ * @throws {Error} When it is none of those, is a version above the tested one, or `auto` derives none.
+ *
+ * @returns {string} The minimum to set, or an empty string to leave it.
+ */
+function readMinVersion(value, tested) {
+  const min = String(value ?? '').trim()
+
+  if (min === '') {
+    return ''
+  }
+
+  if (min.toLowerCase() === 'auto') {
+    return minimumFor(tested)
+  }
+
+  if (!VERSION_PATTERN.test(min)) {
+    throw new Error(
+      `min-version must be empty, auto, or a version like 6.9 or 6.9.1 with no zero-padded part, got '${min}'. ${WHAT}`
+    )
+  }
+
+  if (compareVersions(min, tested) > 0) {
+    throw new Error(`min-version ${min} is above the tested version ${tested}. ${WHAT}`)
+  }
+
+  return min
 }
 
 /**
@@ -216,20 +254,19 @@ function setHeaders(cwd, file, headers) {
  * @param {string}   options.cwd       The workspace, the process's working directory by default.
  * @param {Function} options.fetchImpl What `fetch` to use for the latest release; a test passes a stand-in.
  *
- * @throws {Error} When an input is refused, the latest release cannot be looked up, no minimum can
- *                 be derived, or the minimum is asked for and .puprc does not name the plugin file.
+ * @throws {Error} When an input is refused, the latest release cannot be looked up, `auto` derives
+ *                 no minimum, or a minimum is asked for and .puprc does not name the plugin file.
  *
  * @returns {Promise<void>} Resolves once the files, the output and the summary are written.
  */
 async function runUpdateWpVersion({ core, env, cwd: workspace = process.cwd(), fetchImpl = globalThis.fetch }) {
   const tested = await readTestedUpTo(env.INPUT_TESTED_UP_TO, fetchImpl)
-  const updateMin = readYesNo(env.INPUT_UPDATE_MIN_VERSION, 'update-min-version', WHAT)
+  const minimum = readMinVersion(env.INPUT_MIN_VERSION, tested)
   const cwd = readWorkingDirectory(env.INPUT_WORKING_DIRECTORY, { base: workspace, what: WHAT })
-  const minimum = updateMin ? minimumFor(tested) : ''
-  const pluginFile = readPluginFile(cwd, updateMin)
+  const pluginFile = readPluginFile(cwd, minimum !== '')
 
   // Everything is checked by now; the writes start here.
-  const headers = { 'Tested up to': tested, ...(updateMin ? { 'Requires at least': minimum } : {}) }
+  const headers = { 'Tested up to': tested, ...(minimum ? { 'Requires at least': minimum } : {}) }
   const updated = ['readme.txt', pluginFile].filter((file) => file !== null && setHeaders(cwd, file, headers))
 
   if (updated.length === 0) {
@@ -237,13 +274,13 @@ async function runUpdateWpVersion({ core, env, cwd: workspace = process.cwd(), f
   }
 
   core.setOutput('min-version', minimum)
-  core.info(`Tested up to ${tested}, minimum ${updateMin ? minimum : 'unchanged'}.`)
+  core.info(`Tested up to ${tested}, minimum ${minimum || 'unchanged'}.`)
   await core.summary
     .addRaw(
       [
         '## Version Updates',
         `* Tested Up To: \`${tested}\``,
-        `* Minimum Required Version: ${updateMin ? `\`${minimum}\`` : 'Unchanged'}`,
+        `* Minimum Required Version: ${minimum ? `\`${minimum}\`` : 'Unchanged'}`,
         ...updated.map((file) => `* Updated \`${file}\``),
       ].join('\n'),
       true

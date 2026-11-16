@@ -1,11 +1,11 @@
-# Sets the WordPress version a plugin is tested up to and, when asked, the minimum it requires, two
-# minor versions behind. It rewrites the headers in readme.txt and the plugin file only: it commits
+# Sets the WordPress version a plugin is tested up to and, when asked, the minimum it requires: a
+# version given, or two minor versions behind. It rewrites the headers in readme.txt and the plugin file only: it commits
 # nothing, so the step that commits the release preparation carries the change.
 #
 # The logic lives in update-wp-version.js, run by actions/github-script, so there is no dependency
 # to install and nothing to build.
 name: Update the WordPress version
-description: Sets the 'Tested up to' WordPress version and, optionally, the minimum two minors behind it
+description: Sets the 'Tested up to' WordPress version and, optionally, the 'Requires at least' minimum
 
 inputs:
   tested-up-to:
@@ -16,12 +16,14 @@ inputs:
       written.
     required: false
     default: ''
-  update-min-version:
+  min-version:
     description: >-
-      `yes` to also set `Requires at least` two minor versions behind, e.g. `6.8.1` gives `6.6`;
-      `no` to leave it. Anything else fails before any file is written.
+      The `Requires at least` version. Empty leaves it. `auto` sets it two minor versions behind
+      `tested-up-to`, e.g. `6.8.1` gives `6.6` and `7.0` gives `6.8`. A version such as `6.9` sets
+      exactly that, and may not be above `tested-up-to`. Anything else fails before any file is
+      written.
     required: false
-    default: 'no'
+    default: ''
   working-directory:
     description: >-
       Where the repository is checked out, relative to the workspace or absolute. Empty is the
@@ -31,7 +33,7 @@ inputs:
 
 outputs:
   min-version:
-    description: 'The minimum version written, e.g. `6.6`. Empty when `update-min-version` is not `yes`.'
+    description: 'The minimum version set, e.g. `6.6`. Empty when `min-version` is empty.'
     value: ${{ steps.update.outputs.min-version }}
 
 runs:
@@ -48,7 +50,7 @@ runs:
         # Read from process.env rather than interpolated into the script, so an input is data and
         # never part of the program.
         INPUT_TESTED_UP_TO: ${{ inputs.tested-up-to }}
-        INPUT_UPDATE_MIN_VERSION: ${{ inputs.update-min-version }}
+        INPUT_MIN_VERSION: ${{ inputs.min-version }}
         INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
       with:
         script: |

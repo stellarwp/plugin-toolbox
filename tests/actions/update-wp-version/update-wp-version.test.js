@@ -82,21 +82,21 @@ describe('update-wp-version', () => {
         .map((file) => [path.relative(dir, file), fs.readFileSync(file, 'utf8')])
     )
 
-  const run = async (t, tested, updateMin, inputs = {}, fetchImpl = noFetch) => {
+  const run = async (t, tested, min, inputs = {}, fetchImpl = noFetch) => {
     const { core, outputs, logged, summary } = await coreWithOutputs(t)
 
     await runUpdateWpVersion({
       core,
       cwd: dir,
       fetchImpl,
-      env: { INPUT_TESTED_UP_TO: tested, INPUT_UPDATE_MIN_VERSION: updateMin, ...inputs },
+      env: { INPUT_TESTED_UP_TO: tested, INPUT_MIN_VERSION: min, ...inputs },
     })
 
     return { outputs: outputs(), logged: logged(), summary: summary() }
   }
 
   /** Asserts the run is refused with the message, with no file changed and no output set. */
-  const refuses = async (t, tested, updateMin, message, fetchImpl = noFetch) => {
+  const refuses = async (t, tested, min, message, fetchImpl = noFetch) => {
     const before = snapshot()
     const { core, outputs } = await coreWithOutputs(t)
 
@@ -105,7 +105,7 @@ describe('update-wp-version', () => {
         core,
         cwd: dir,
         fetchImpl,
-        env: { INPUT_TESTED_UP_TO: tested, INPUT_UPDATE_MIN_VERSION: updateMin },
+        env: { INPUT_TESTED_UP_TO: tested, INPUT_MIN_VERSION: min },
       }),
       (error) => message.test(error.message) && error.message.endsWith('No file was changed.')
     )
@@ -126,7 +126,7 @@ describe('update-wp-version', () => {
   })
 
   it('sets the tested version and the minimum two minors behind it', async (t) => {
-    const { outputs, summary } = await run(t, '6.8.1', 'yes')
+    const { outputs, summary } = await run(t, '6.8.1', 'auto')
 
     assert.strictEqual(outputs['min-version'], '6.6')
     assert.match(read('readme.txt'), /^Tested up to: 6\.8\.1$/m)
@@ -144,7 +144,7 @@ describe('update-wp-version', () => {
   })
 
   it('takes a version of two parts', async (t) => {
-    const { outputs } = await run(t, '6.8', 'yes')
+    const { outputs } = await run(t, '6.8', 'auto')
 
     assert.strictEqual(outputs['min-version'], '6.6')
     assert.match(read('readme.txt'), /^Tested up to: 6\.8$/m)
@@ -152,7 +152,7 @@ describe('update-wp-version', () => {
 
   it('leaves the minimum alone unless asked, and needs no .puprc for it', async (t) => {
     fs.rmSync(path.join(dir, '.puprc'))
-    const { outputs, summary } = await run(t, '7.0', 'no')
+    const { outputs, summary } = await run(t, '7.0', '')
 
     assert.strictEqual(outputs['min-version'], '')
     assert.strictEqual(read('readme.txt'), README.replace('up to: 6.4', 'up to: 7.0'))
@@ -161,46 +161,46 @@ describe('update-wp-version', () => {
   })
 
   it('changes the header only, not a version quoted further down', async (t) => {
-    await run(t, '6.8', 'no')
+    await run(t, '6.8', '')
 
     assert.match(read('readme.txt'), /^Tested up to: 6\.2 was the previous target\.$/m)
   })
 
   it('replaces the whole previous version, a pre-release suffix included', async (t) => {
     write('readme.txt', README.replace('up to: 6.4', 'up to: 6.8-RC1'))
-    await run(t, '6.8', 'no')
+    await run(t, '6.8', '')
 
     assert.match(read('readme.txt'), /^Tested up to: 6\.8$/m)
   })
 
   it('updates a Tested up to header the plugin file carries, and adds none', async (t) => {
     write('test-plugin.php', PLUGIN_TESTED)
-    const { summary } = await run(t, '6.8', 'no')
+    const { summary } = await run(t, '6.8', '')
 
     assert.strictEqual(read('test-plugin.php'), PLUGIN_TESTED.replace('up to: 6.4', 'up to: 6.8'))
     assert.match(summary, /\* Updated `test-plugin.php`\n$/)
 
-    await run(t, '6.9', 'yes')
+    await run(t, '6.9', 'auto')
     assert.strictEqual(
       read('test-plugin.php'),
       PLUGIN_TESTED.replace('up to: 6.4', 'up to: 6.9').replace('least: 6.0', 'least: 6.7')
     )
 
     write('test-plugin.php', PLUGIN)
-    await run(t, '6.9', 'no')
+    await run(t, '6.9', '')
     assert.strictEqual(read('test-plugin.php'), PLUGIN)
   })
 
   it('passes without a readme.txt, or with one that has no header, and warns when nothing was written', async (t) => {
     fs.rmSync(path.join(dir, 'readme.txt'))
-    const { outputs, summary } = await run(t, '6.8', 'yes')
+    const { outputs, summary } = await run(t, '6.8', 'auto')
 
     assert.strictEqual(outputs['min-version'], '6.6')
     assert.match(read('test-plugin.php'), /Requires at least: 6\.6/)
     assert.ok(!summary.includes('readme.txt'))
 
     write('readme.txt', '== Changelog ==\n\n* Fix - Something.\n')
-    const { logged } = await run(t, '6.8', 'no')
+    const { logged } = await run(t, '6.8', '')
 
     assert.strictEqual(read('readme.txt'), '== Changelog ==\n\n* Fix - Something.\n')
     assert.match(logged, /::warning::No file carries a header to set/)
@@ -216,7 +216,7 @@ describe('update-wp-version', () => {
     await runUpdateWpVersion({
       core,
       cwd: workspace,
-      env: { INPUT_TESTED_UP_TO: '6.8', INPUT_UPDATE_MIN_VERSION: 'no', INPUT_WORKING_DIRECTORY: 'source' },
+      env: { INPUT_TESTED_UP_TO: '6.8', INPUT_MIN_VERSION: '', INPUT_WORKING_DIRECTORY: 'source' },
     })
 
     assert.match(read('source/readme.txt'), /^Tested up to: 6\.8$/m)
@@ -241,14 +241,14 @@ describe('update-wp-version', () => {
     ]
 
     for (const version of bad) {
-      await refuses(t, version, 'yes', /must look like 6\.8 or 6\.8\.1/)
-      await refuses(t, version, 'no', /must look like 6\.8 or 6\.8\.1/)
+      await refuses(t, version, 'auto', /must look like 6\.8 or 6\.8\.1/)
+      await refuses(t, version, '', /must look like 6\.8 or 6\.8\.1/)
     }
   })
 
   it('sets the latest WordPress release when tested-up-to is empty', async (t) => {
     const { fetchImpl, calls } = versionCheck({ offers: [{ version: '6.8.3' }, { version: '6.7.4' }] })
-    await run(t, ' ', 'no', {}, fetchImpl)
+    await run(t, ' ', '', {}, fetchImpl)
 
     assert.deepStrictEqual(calls, ['https://api.wordpress.org/core/version-check/1.7/'])
     assert.match(read('readme.txt'), /^Tested up to: 6\.8\.3$/m)
@@ -258,24 +258,47 @@ describe('update-wp-version', () => {
     const failed = /Looking up the latest WordPress release failed/
     const unusable = /The latest WordPress release has no usable version/
 
-    await refuses(t, '', 'no', failed, versionCheck({}, 500).fetchImpl)
-    await refuses(t, '', 'no', failed, versionCheck('<html>').fetchImpl)
-    await refuses(t, '', 'no', failed, async () => {
+    await refuses(t, '', '', failed, versionCheck({}, 500).fetchImpl)
+    await refuses(t, '', '', failed, versionCheck('<html>').fetchImpl)
+    await refuses(t, '', '', failed, async () => {
       throw new Error('getaddrinfo ENOTFOUND')
     })
-    await refuses(t, '', 'no', unusable, versionCheck({}).fetchImpl)
-    await refuses(t, '', 'no', unusable, versionCheck({ offers: [] }).fetchImpl)
-    await refuses(t, '', 'no', unusable, versionCheck({ offers: [{ version: '6.8; rm -rf' }] }).fetchImpl)
+    await refuses(t, '', '', unusable, versionCheck({}).fetchImpl)
+    await refuses(t, '', '', unusable, versionCheck({ offers: [] }).fetchImpl)
+    await refuses(t, '', '', unusable, versionCheck({ offers: [{ version: '6.8; rm -rf' }] }).fetchImpl)
   })
 
-  it('refuses to derive a minimum across a major version', async (t) => {
-    for (const version of ['7.0', '6.1.0', '7.1']) {
-      await refuses(t, version, 'yes', /Cannot derive a minimum version two minors behind/)
+  it('takes the minimum two minors back across a major version, as WordPress went from 6.9 to 7.0', async (t) => {
+    const expected = { '7.0': '6.8', '7.1': '6.9', '6.1.0': '5.9', '7.2.1': '7.0' }
+
+    for (const [tested, minimum] of Object.entries(expected)) {
+      const { outputs } = await run(t, tested, 'auto')
+
+      assert.strictEqual(outputs['min-version'], minimum, tested)
+      assert.match(read('readme.txt'), new RegExp(`^Requires at least: ${minimum.replace('.', '\\.')}$`, 'm'))
     }
   })
 
-  it('refuses an update-min-version that is not yes or no', async (t) => {
-    await refuses(t, '6.8', 'true', /update-min-version 'true' is not yes or no/)
+  it('refuses to derive a minimum below 1.0', async (t) => {
+    await refuses(t, '0.1', 'auto', /Cannot derive a minimum version two minors behind 0\.1/)
+  })
+
+  it('sets a minimum given as a version exactly', async (t) => {
+    const { outputs } = await run(t, '7.0', ' 6.9 ')
+
+    assert.strictEqual(outputs['min-version'], '6.9')
+    assert.match(read('readme.txt'), /^Requires at least: 6\.9$/m)
+    assert.strictEqual(read('test-plugin.php'), PLUGIN.replace('least: 6.0', 'least: 6.9'))
+  })
+
+  it('refuses a min-version that is not empty, auto or a version', async (t) => {
+    for (const min of ['yes', 'no', 'true', '6', 'v6.9', '6.09', '6.9-RC1']) {
+      await refuses(t, '6.8', min, /min-version must be empty, auto, or a version like 6\.9/)
+    }
+  })
+
+  it('refuses a min-version above the tested version', async (t) => {
+    await refuses(t, '6.8', '6.9', /min-version 6\.9 is above the tested version 6\.8/)
   })
 
   it('refuses a working-directory that is not there', async (t) => {
@@ -285,7 +308,7 @@ describe('update-wp-version', () => {
       runUpdateWpVersion({
         core,
         cwd: dir,
-        env: { INPUT_TESTED_UP_TO: '6.8', INPUT_UPDATE_MIN_VERSION: 'no', INPUT_WORKING_DIRECTORY: 'nowhere' },
+        env: { INPUT_TESTED_UP_TO: '6.8', INPUT_MIN_VERSION: '', INPUT_WORKING_DIRECTORY: 'nowhere' },
       }),
       /working-directory 'nowhere' is not a directory/
     )
@@ -296,24 +319,24 @@ describe('update-wp-version', () => {
 
     write('other.php', PLUGIN)
     write('.puprc', puprc(['test-plugin.php', 'other.php']))
-    await refuses(t, '6.8', 'yes', /exactly one root PHP file under paths\.versions, got 'test-plugin\.php', 'other\.php'/)
+    await refuses(t, '6.8', 'auto', /exactly one root PHP file under paths\.versions, got 'test-plugin\.php', 'other\.php'/)
 
     write('.puprc', puprc(['src/Main.php', 'readme.txt']))
-    await refuses(t, '6.8', 'yes', exactlyOne)
+    await refuses(t, '6.8', 'auto', exactlyOne)
 
     write('.puprc', puprc(['missing.php']))
-    await refuses(t, '6.8', 'yes', /got 'missing\.php', which is not a file/)
+    await refuses(t, '6.8', 'auto', /got 'missing\.php', which is not a file/)
 
     write('.puprc', '{nope')
-    await refuses(t, '6.8', 'yes', /\.puprc is not valid JSON/)
+    await refuses(t, '6.8', 'auto', /\.puprc is not valid JSON/)
 
     fs.rmSync(path.join(dir, '.puprc'))
-    await refuses(t, '6.8', 'yes', /No \.puprc/)
+    await refuses(t, '6.8', 'auto', /No \.puprc/)
   })
 
   it('takes a plugin file .puprc lists with a leading ./', async (t) => {
     write('.puprc', puprc(['./test-plugin.php', './test-plugin.php', 'readme.txt']))
-    await run(t, '6.8', 'yes')
+    await run(t, '6.8', 'auto')
 
     assert.strictEqual(read('test-plugin.php'), PLUGIN.replace('least: 6.0', 'least: 6.6'))
   })
@@ -321,7 +344,7 @@ describe('update-wp-version', () => {
   it('still sets the tested version in readme.txt when .puprc names no single plugin file', async (t) => {
     write('other.php', PLUGIN_TESTED)
     write('.puprc', puprc(['test-plugin.php', 'other.php']))
-    await run(t, '6.8', 'no')
+    await run(t, '6.8', '')
 
     assert.match(read('readme.txt'), /^Tested up to: 6\.8$/m)
     assert.strictEqual(read('other.php'), PLUGIN_TESTED)
