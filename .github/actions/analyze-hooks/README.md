@@ -1,7 +1,7 @@
 # analyze-hooks
 
-Files the actions and filters a release adds, updates, deprecates or removes, and the views it changes, as pending
-changelog entries, so the release notes name them.
+Files the actions and filters a release adds, updates, deprecates or removes, and the views it
+adds, changes or removes, as pending changelog entries, so the release notes name them.
 
 ```yaml
 - uses: actions/checkout@v6
@@ -36,7 +36,9 @@ or four numeric parts, with or without a leading `v` (`6.18.3`, `v5.3.0`, `4.19.
 | `analyze-hooks-updated-actions.yaml` | ``Updated actions: `a` `` |
 | `analyze-hooks-deprecated-actions.yaml` | ``Deprecated actions: `a` `` |
 | `analyze-hooks-removed-actions.yaml` | ``Removed actions: `a` `` |
+| `analyze-hooks-added-views.yaml` | ``Added views: `src/views/v2/month.php` `` |
 | `analyze-hooks-changed-views.yaml` | ``Changed views: `src/views/v2/list.php` `` |
+| `analyze-hooks-removed-views.yaml` | ``Removed views: `src/views/v2/day.php` `` |
 
 Each is a `patch` entry of type `tweak`, and a kind with nothing to list writes no file.
 
@@ -53,9 +55,9 @@ Each is a `patch` entry of type `tweak`, and a kind with nothing to list writes 
   lines now than at the tag: a change to a hook's signature is recorded as one more line, such as
   `@since TBD Added the $type parameter.` The lines of every call's docblock count once each. A
   docblock belongs to a call when no `;`, `{` or `}` comes between them.
-- **Views** are the `.php` files matched by `views-paths` that changed since the tag, named by their path
-  in the checkout, `.php` included, so a reader with an override of the file finds it by that
-  path.
+- **Views** are the `.php` files matched by `views-paths` that were added, changed or removed since
+  the tag. A renamed view is changed, under its new path. Each is named by its path in the
+  checkout, `.php` included, so a reader with an override of the file finds it by that path.
 
 The files are rewritten on every run, so a second run changes nothing and an entry whose change was
 reverted is removed. An entry is not written again when another pending change file holds it, or
@@ -99,7 +101,7 @@ An entry left out of `types`, here the removed hooks, stays a `tweak` reading `R
 |---|---|---|
 | `paths` | `src` | Where to search for hooks, one git pathspec per line. `:!vendor` excludes a directory. |
 | `views-paths` | `src/views` | Where the templates a theme can override live, one git pathspec per line. A `*` matches across directories: `includes/*/templates/*`. Empty lists no view. |
-| `types` | | The changelog type per entry, as a JSON object in a string. Keys: `added-filters`, `updated-filters`, `deprecated-filters`, `removed-filters`, `added-actions`, `updated-actions`, `deprecated-actions`, `removed-actions`, `changed-views`. |
+| `types` | | The changelog type per entry, as a JSON object in a string. Keys: `added-filters`, `updated-filters`, `deprecated-filters`, `removed-filters`, `added-actions`, `updated-actions`, `deprecated-actions`, `removed-actions`, `added-views`, `changed-views`, `removed-views`. |
 | `working-directory` | | Where the repository is checked out. Empty is the workspace. |
 
 ## Outputs

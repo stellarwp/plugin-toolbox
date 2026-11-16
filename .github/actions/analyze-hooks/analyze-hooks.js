@@ -11,8 +11,8 @@
  *    a `_deprecated` one, and removed when no call is left, so one that moved, or that still has
  *    another call elsewhere, is not listed. A hook in both trees whose docblocks gained a `@since`
  *    line is updated;
- *  - the `.php` files under `views-paths` that `git diff` reports as changed, by their path in the
- *    checkout.
+ *  - the `.php` files under `views-paths` that `git diff` reports as added, changed or renamed, or
+ *    removed, by their path in the checkout.
  *
  * Each kind becomes one entry, `<changesDir>/analyze-hooks-<change>-<kind>.yaml`, so
  * a second run rewrites the same files. An entry a changelog file already carries above the last
@@ -55,7 +55,9 @@ const ENTRY_KEYS = [
   'updated-actions',
   'deprecated-actions',
   'removed-actions',
+  'added-views',
   'changed-views',
+  'removed-views',
 ]
 
 /** The type an entry has when `types` does not name one. */
@@ -192,12 +194,12 @@ function state(kind, name) {
  *
  * @param {string[]} before       The files with a hook call at the last release.
  * @param {string[]} after        The files with a hook call now.
- * @param {string[]} changedFiles The views changed since the last release, by their path in the
- *                                repository.
+ * @param {string}   viewsDiff    The views changed since the last release, as `git diff
+ *                                --name-status -z` prints them.
  *
  * @returns {{change: string, kind: string, names: string[]}[]} One entry per change and kind.
  */
-function analyze(before, after, changedFiles) {
+function analyze(before, after, viewsDiff) {
   const [old, now] = [hooks(before), hooks(after)]
   const entries = []
 
@@ -224,9 +226,22 @@ function analyze(before, after, changedFiles) {
     }
   }
 
-  const views = changedFiles.filter((file) => file.endsWith('.php'))
-  if (views.length) {
-    entries.push({ change: 'Changed', kind: 'views', names: [...new Set(views)].sort() })
+  // A status and a path, or for a rename the status and the old and the new path. A renamed view
+  // is changed, under its new path.
+  const views = { Added: [], Changed: [], Removed: [] }
+  const fields = viewsDiff.split('\0')
+  for (let at = 0; at < fields.length - 1; at += fields[at].startsWith('R') ? 3 : 2) {
+    const file = fields[at + (fields[at].startsWith('R') ? 2 : 1)]
+
+    if (file.endsWith('.php')) {
+      views[{ A: 'Added', M: 'Changed', R: 'Changed', D: 'Removed' }[fields[at][0]]].push(file)
+    }
+  }
+
+  for (const [change, list] of Object.entries(views)) {
+    if (list.length) {
+      entries.push({ change, kind: 'views', names: list.sort() })
+    }
   }
 
   return entries
@@ -529,12 +544,15 @@ async function runAnalyzeHooks({ core, exec, env, cwd: workspace = process.cwd()
     return [...lines.values()].map((file) => file.join('\n'))
   }
 
-  const changed =
+  // --relative names a file by its path in the checkout, which git prints the same whatever the
+  // form of the pathspec, `./src/views` or `src/views/`.
+  const viewsDiff =
     viewsPaths.length === 0
-      ? []
-      : // --relative names a file by its path in the checkout, which git prints the same whatever the
-        // form of the pathspec, `./src/views` or `src/views/`.
-        (await git(['diff', '--name-only', '--relative', tag, '--', ...viewsPaths], 'Listing the changed views')).split('\n')
+      ? ''
+      : await git(
+          ['diff', '--name-status', '-z', '-M', '--relative', '--diff-filter=ADMR', tag, '--', ...viewsPaths],
+          'Listing the changed views'
+        )
 
   const known = readKnown(cwd, changesDir, changelogFiles, tag.replace(/^v/, ''))
   const dir = path.join(cwd, changesDir)
@@ -550,7 +568,7 @@ async function runAnalyzeHooks({ core, exec, env, cwd: workspace = process.cwd()
   const summary = [`## Hook and view changes since ${tag}`]
   const files = []
 
-  for (const found of analyze(await sources(tag), await sources(), changed)) {
+  for (const found of analyze(await sources(tag), await sources(), viewsDiff)) {
     const entry = describe(found, types)
 
     if (isKnown(entry, known, labels)) {

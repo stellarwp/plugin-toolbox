@@ -305,10 +305,25 @@ describe('analyze-hooks', () => {
     commit('a template')
     await run(t, { INPUT_VIEWS_PATHS: 'themes/ld30/templates/' })
 
-    assert.strictEqual(
-      entries()['analyze-hooks-changed-views.yaml'],
-      entry('Changed views: `themes/ld30/templates/course.php`')
-    )
+    assert.deepStrictEqual(entries()['analyze-hooks-added-views.yaml'], entry('Added views: `themes/ld30/templates/course.php`'))
+  })
+
+  it('lists added, changed and removed views apart, a renamed view as changed', async (t) => {
+    write('src/views/v2/week.php', '<?php\n// The week view, long enough for git to see the rename.\n')
+    commit('week')
+    git('tag', '6.18.3')
+    git('mv', 'src/views/v2/week.php', 'src/views/v2/weekly.php')
+    git('rm', '-q', 'src/views/v2/day.php')
+    write('src/views/v2/month.php', '<?php // month\n')
+    write('src/views/v2/list.php', '<?php // list, changed again\n')
+    commit('views')
+    await run(t)
+
+    assert.deepStrictEqual(entries(), {
+      'analyze-hooks-added-views.yaml': entry('Added views: `src/views/v2/month.php`'),
+      'analyze-hooks-changed-views.yaml': entry('Changed views: `src/views/v2/list.php`, `src/views/v2/weekly.php`'),
+      'analyze-hooks-removed-views.yaml': entry('Removed views: `src/views/v2/day.php`'),
+    })
   })
 
   it('lists the views of every path it is given, a glob included', async (t) => {
@@ -317,10 +332,9 @@ describe('analyze-hooks', () => {
     commit('templates')
     await run(t, { INPUT_VIEWS_PATHS: 'src/views\n\nincludes/*/templates/*\n' })
 
-    assert.strictEqual(
-      entries()['analyze-hooks-changed-views.yaml'],
-      entry('Changed views: `includes/courses/templates/course.php`, `src/views/v2/list.php`')
-    )
+    const written = entries()
+    assert.strictEqual(written['analyze-hooks-added-views.yaml'], entry('Added views: `includes/courses/templates/course.php`'))
+    assert.strictEqual(written['analyze-hooks-changed-views.yaml'], entry('Changed views: `src/views/v2/list.php`'))
   })
 
   it('reads a views path that starts with ./', async (t) => {
@@ -371,8 +385,9 @@ describe('analyze-hooks', () => {
     assert.throws(() => readTypes('{nope'), /not valid JSON/)
     assert.throws(() => readTypes('{"added-hooks": "tweak"}'), /unknown key 'added-hooks'/)
     assert.throws(() => readTypes('{"added-filters": ""}'), /not a changelog type/)
-    assert.deepStrictEqual(readTypes('{"deprecated-actions": "deprecated: deprecated actions"}'), {
+    assert.deepStrictEqual(readTypes('{"deprecated-actions": "deprecated: deprecated actions", "removed-views": "deprecated: deprecated templates"}'), {
       'deprecated-actions': 'deprecated: deprecated actions',
+      'removed-views': 'deprecated: deprecated templates',
     })
   })
 
