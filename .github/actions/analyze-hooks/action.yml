@@ -13,7 +13,8 @@ inputs:
     description: >-
       Where to search for `apply_filters`, `do_action` and their `_ref_array` and `_deprecated`
       calls, one git pathspec per line, relative
-      to the checkout. A pathspec can exclude: `:!vendor` after `.` searches everything but vendor.
+      to the checkout. A pathspec can be a glob or an exclusion: `*.php` then `:!vendor` searches every PHP file outside
+      vendor.
     required: false
     default: 'src'
   views-paths:

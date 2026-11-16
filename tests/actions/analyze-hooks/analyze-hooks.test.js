@@ -286,11 +286,12 @@ describe('analyze-hooks', () => {
     await assert.rejects(run(t), /the checkout is shallow/)
   })
 
-  it('searches every path it is given and honours an exclusion', async (t) => {
+  it('searches every path it is given, a glob included, and honours an exclusion', async (t) => {
     write('includes/legacy.php', "<?php\ndo_action( 'give_legacy' );\n")
     write('vendor/lib.php', "<?php\ndo_action( 'vendor_hook' );\n")
+    write('docs/hooks.md', "Call `do_action( 'docs_hook' );`.\n")
     commit('more code')
-    await run(t, { INPUT_PATHS: '.\n:!vendor', INPUT_VIEWS_PATHS: '' })
+    await run(t, { INPUT_PATHS: '*.php\n:!vendor', INPUT_VIEWS_PATHS: '' })
 
     const written = entries()
     assert.strictEqual(

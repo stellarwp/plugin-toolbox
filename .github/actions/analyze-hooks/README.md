@@ -83,23 +83,34 @@ a type of its own holds the names only, since the type's label already says what
 ```yaml
 - uses: stellarwp/plugin-toolbox/.github/actions/analyze-hooks@v1
   with:
+    # PHP files only: a markdown file can quote a hook call.
     paths: |
-      .
+      *.php
       :!vendor
       :!vendor-prefixed
-    views-paths: themes/ld30/templates
+    views-paths: |
+      themes/ld30/templates
+      themes/legacy/templates
+      src/views
+      includes/*/templates/*
     types: >-
-      {"added-filters": "tweak: added filters", "added-actions": "tweak: added actions",
-      "changed-views": "tweak: updated templates"}
+      {"added-filters": "tweak: added filters", "updated-filters": "tweak: updated filters",
+      "deprecated-filters": "deprecated: deprecated filters",
+      "added-actions": "tweak: added actions", "updated-actions": "tweak: updated actions",
+      "deprecated-actions": "deprecated: deprecated actions",
+      "added-views": "tweak: added templates", "changed-views": "tweak: updated templates",
+      "removed-views": "deprecated: deprecated templates"}
 ```
 
-An entry left out of `types`, here the removed hooks, stays a `tweak` reading `Removed filters: …`.
+With these types a changed template is written as
+``Tweak - Updated templates: `themes/ld30/templates/course.php` ``. An entry left out of `types`, here
+the removed hooks, stays a `tweak` reading `Removed filters: …`.
 
 ## Inputs
 
 | Input | Default | |
 |---|---|---|
-| `paths` | `src` | Where to search for hooks, one git pathspec per line. `:!vendor` excludes a directory. |
+| `paths` | `src` | Where to search for hooks, one git pathspec per line. `*.php` matches every PHP file, `:!vendor` excludes a directory. |
 | `views-paths` | `src/views` | Where the templates a theme can override live, one git pathspec per line. A `*` matches across directories: `includes/*/templates/*`. Empty lists no view. |
 | `types` | | The changelog type per entry, as a JSON object in a string. Keys: `added-filters`, `updated-filters`, `deprecated-filters`, `removed-filters`, `added-actions`, `updated-actions`, `deprecated-actions`, `removed-actions`, `added-views`, `changed-views`, `removed-views`. |
 | `working-directory` | | Where the repository is checked out. Empty is the workspace. |
