@@ -9,13 +9,12 @@
  * calls.
  */
 
-const crypto = require('node:crypto')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 
 const { runOrFail } = require('../../lib/exec.js')
-const { pharExists } = require('../../lib/pup.js')
+const { downloadPhar } = require('../../lib/phar.js')
 const { readWorkingDirectory, readCheckoutFile } = require('../../lib/workspace.js')
 
 /** What was not done, to close every error message. */
@@ -142,6 +141,7 @@ function readExcludes(cwd, extra) {
  * A failed download or a wrong checksum leaves no file behind.
  *
  * @param {object} options
+ * @param {object} options.core  The @actions/core toolkit, to say when the phar is reused.
  * @param {object} options.exec  The @actions/exec toolkit.
  * @param {object} options.env   The step environment, for RUNNER_TEMP.
  * @param {object} options.wpCli The release and its checksum.
@@ -150,28 +150,18 @@ function readExcludes(cwd, extra) {
  *
  * @returns {Promise<string>} The path of the phar.
  */
-async function setupWpCli({ exec, env, wpCli }) {
+function setupWpCli({ core, exec, env, wpCli }) {
   const { version, sha512 } = wpCli
-  const phar = path.join(env.RUNNER_TEMP || os.tmpdir(), `wp-cli-${version}.phar`)
 
-  try {
-    if (!pharExists(phar)) {
-      const url = `https://github.com/wp-cli/wp-cli/releases/download/v${version}/wp-cli-${version}.phar`
-
-      await runOrFail(exec, 'curl', ['-fsSL', '--retry', '3', '-o', phar, url], {}, `Downloading wp-cli ${version}`)
-    }
-
-    const actual = crypto.createHash('sha512').update(fs.readFileSync(phar)).digest('hex')
-    if (actual !== sha512) {
-      throw new Error(`The wp-cli ${version} phar does not match its sha512: expected ${sha512}, got ${actual}. ${WHAT}`)
-    }
-  } catch (error) {
-    fs.rmSync(phar, { force: true })
-
-    throw error
-  }
-
-  return phar
+  return downloadPhar({
+    exec,
+    phar: path.join(env.RUNNER_TEMP || os.tmpdir(), `wp-cli-${version}.phar`),
+    url: `https://github.com/wp-cli/wp-cli/releases/download/v${version}/wp-cli-${version}.phar`,
+    label: `wp-cli ${version}`,
+    sha512,
+    what: WHAT,
+    core,
+  })
 }
 
 /**
@@ -239,7 +229,7 @@ async function runGeneratePot({ core, exec, env, cwd: workspace = process.cwd(),
   const headers = readHeaders(env.INPUT_HEADERS)
   const excludes = readExcludes(cwd, env.INPUT_EXCLUDE)
 
-  const phar = await setupWpCli({ exec, env, wpCli })
+  const phar = await setupWpCli({ core, exec, env, wpCli })
 
   const args = ['i18n', 'make-pot', sourcePath, potPath, '--skip-audit']
   if (domain !== '') {
