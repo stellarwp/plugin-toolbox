@@ -36,7 +36,8 @@ so the action sets it in both.
 
 Only an existing header is rewritten. A file without the header is left as it is, and a missing
 `readme.txt` is skipped. Only the first line carrying a header changes, so a version quoted further
-down the file stays. When no file carries a header to set, the action writes a warning and passes.
+down the file stays. The whole value is
+replaced, so `Tested up to: 6.8-RC1` becomes `Tested up to: 6.8`. When no file carries a header to set, the action writes a warning and passes.
 
 The job summary lists the versions and the files updated.
 

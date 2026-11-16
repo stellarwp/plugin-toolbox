@@ -149,6 +149,13 @@ describe('update-wp-version', () => {
     assert.match(read('readme.txt'), /^Tested up to: 6\.2 was the previous target\.$/m)
   })
 
+  it('replaces the whole previous version, a pre-release suffix included', async (t) => {
+    write('readme.txt', README.replace('up to: 6.4', 'up to: 6.8-RC1'))
+    await run(t, '6.8', 'no')
+
+    assert.match(read('readme.txt'), /^Tested up to: 6\.8$/m)
+  })
+
   it('updates a Tested up to header the plugin file carries, and adds none', async (t) => {
     write('test-plugin.php', PLUGIN_TESTED)
     const { summary } = await run(t, '6.8', 'no')
