@@ -200,6 +200,19 @@ describe('update-wp-version', () => {
     assert.strictEqual(again.outputs.changed, 'false')
   })
 
+  it('never lowers Requires at least with auto, but sets a lower version given exactly', async (t) => {
+    write('test-plugin.php', PLUGIN.replace('least: 6.0', 'least: 6.9'))
+    const { outputs, summary } = await run(t, '7.0', 'auto')
+
+    assert.strictEqual(outputs['min-version'], '6.8')
+    assert.strictEqual(read('test-plugin.php'), PLUGIN.replace('least: 6.0', 'least: 6.9'))
+    assert.match(summary, /\* `readme.txt`: Requires at least changed from 6\.0 to 6\.8\n/)
+    assert.match(summary, /\* `test-plugin.php`: Requires at least left at 6\.9, which is above 6\.8\n$/)
+
+    await run(t, '7.0', '6.7')
+    assert.strictEqual(read('test-plugin.php'), PLUGIN.replace('least: 6.0', 'least: 6.7'))
+  })
+
   it('updates a Tested up to header the plugin file carries, and adds none', async (t) => {
     write('test-plugin.php', PLUGIN_TESTED)
     const { summary } = await run(t, '6.8', '')
@@ -300,6 +313,7 @@ describe('update-wp-version', () => {
     const expected = { '7.0': '6.8', '7.1': '6.9', '6.1.0': '5.9', '7.2.1': '7.0' }
 
     for (const [tested, minimum] of Object.entries(expected)) {
+      write('readme.txt', README.replace('least: 6.0', 'least: 1.0'))
       const { outputs } = await run(t, tested, 'auto')
 
       assert.strictEqual(outputs['min-version'], minimum, tested)

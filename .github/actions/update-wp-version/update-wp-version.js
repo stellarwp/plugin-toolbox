@@ -9,8 +9,9 @@
  * root-level PHP file .puprc lists under `paths.versions`.
  *
  * Only an existing header is rewritten: a file without one is left as it is. `Tested up to` is
- * never lowered: a file at 7.1.4 stays there when 7.1 is asked for. The action writes files and
- * commits nothing.
+ * never lowered: a file at 7.1.4 stays there when 7.1 is asked for. Neither is `Requires at least`
+ * when `min-version` is `auto`; a version given exactly is set as it is, lower or not. The action
+ * writes files and commits nothing.
  *
  * runUpdateWpVersion checks every input and the .puprc before it writes any file.
  */
@@ -36,6 +37,9 @@ const VERSION_CHECK_URL = 'https://api.wordpress.org/core/version-check/1.7/'
 
 /** The header that is never lowered. */
 const TESTED = 'Tested up to'
+
+/** The header `min-version` sets, never lowered when it is `auto`. */
+const REQUIRES = 'Requires at least'
 
 /** How many minor versions the minimum trails the tested version by. */
 const MINORS_BEHIND = 2
@@ -137,17 +141,18 @@ function minimumFor(tested) {
  *
  * @throws {Error} When it is none of those, is a version above the tested one, or `auto` derives none.
  *
- * @returns {string} The minimum to set, or an empty string to leave it.
+ * @returns {{minimum: string, auto: boolean}} The minimum to set, empty to leave it, and whether
+ *                                             `auto` derived it.
  */
 function readMinVersion(value, tested) {
   const min = String(value ?? '').trim()
 
   if (min === '') {
-    return ''
+    return { minimum: '', auto: false }
   }
 
   if (min.toLowerCase() === 'auto') {
-    return minimumFor(tested)
+    return { minimum: minimumFor(tested), auto: true }
   }
 
   if (!VERSION_PATTERN.test(min)) {
@@ -160,7 +165,7 @@ function readMinVersion(value, tested) {
     throw new Error(`min-version ${min} is above the tested version ${tested}. ${WHAT}`)
   }
 
-  return min
+  return { minimum: min, auto: false }
 }
 
 /**
@@ -232,16 +237,17 @@ function isAbove(current, version) {
 /**
  * Sets headers in a file of the checkout. Only the first line carrying each header changes, so a
  * version quoted further down is left alone. A header the file does not carry is not added, and
- * `Tested up to` is never lowered.
+ * a header in `keep` is never lowered.
  *
  * @param {string}                 cwd     The checkout.
  * @param {string}                 file    The file, relative to it.
  * @param {Object<string, string>} headers The version per header name.
+ * @param {Set<string>}            keep    The header names never to lower.
  *
  * @returns {{lines: string[], changed: boolean}} What happened to each header the file carries, and
  *                                                whether the file was written.
  */
-function setHeaders(cwd, file, headers) {
+function setHeaders(cwd, file, headers, keep) {
   const before = readCheckoutFile(cwd, file)
   if (before === null) {
     return { lines: [], changed: false }
@@ -262,7 +268,7 @@ function setHeaders(cwd, file, headers) {
 
     if (current === version) {
       lines.push(`${name} already at ${version}`)
-    } else if (name === TESTED && isAbove(current, version)) {
+    } else if (keep.has(name) && isAbove(current, version)) {
       lines.push(`${name} left at ${current}, which is above ${version}`)
     } else {
       after = after.replace(header, (match, lead) => `${lead}${version}`)
@@ -293,15 +299,16 @@ function setHeaders(cwd, file, headers) {
  */
 async function runUpdateWpVersion({ core, env, cwd: workspace = process.cwd(), fetchImpl = globalThis.fetch }) {
   const tested = await readTestedUpTo(env.INPUT_TESTED_UP_TO, fetchImpl)
-  const minimum = readMinVersion(env.INPUT_MIN_VERSION, tested)
+  const { minimum, auto } = readMinVersion(env.INPUT_MIN_VERSION, tested)
   const cwd = readWorkingDirectory(env.INPUT_WORKING_DIRECTORY, { base: workspace, what: WHAT })
   const pluginFile = readPluginFile(cwd, minimum !== '')
 
   // Everything is checked by now; the writes start here.
-  const headers = { [TESTED]: tested, ...(minimum ? { 'Requires at least': minimum } : {}) }
+  const headers = { [TESTED]: tested, ...(minimum ? { [REQUIRES]: minimum } : {}) }
+  const keep = new Set(auto ? [TESTED, REQUIRES] : [TESTED])
   const results = ['readme.txt', pluginFile]
     .filter((file) => file !== null)
-    .map((file) => ({ file, ...setHeaders(cwd, file, headers) }))
+    .map((file) => ({ file, ...setHeaders(cwd, file, headers, keep) }))
   const lines = results.flatMap(({ file, lines }) => lines.map((line) => `\`${file}\`: ${line}`))
 
   if (lines.length === 0) {
