@@ -116,23 +116,48 @@ function readHeaders(value) {
 }
 
 /**
+ * Makes a checkout path relative to the scanned directory: make-pot matches `--exclude` against
+ * paths relative to `source-path`. A line without a `/` other than a trailing one is a name that
+ * matches at any depth, and is kept as it is. A line with one is a path from the checkout root.
+ *
+ * @param {string}  line     The `.distignore` line or submodule path.
+ * @param {string}  base     The scanned directory, relative to the checkout; empty for the checkout.
+ * @param {boolean} anchored True for a submodule path, which is always from the checkout root.
+ *
+ * @returns {string|null} The exclusion, or null for a path outside the scanned directory.
+ */
+function rebaseExclude(line, base, anchored) {
+  const trimmed = line.replace(/^\/+|\/+$/g, '')
+
+  if (base === '' || (!anchored && !trimmed.includes('/') && !line.startsWith('/'))) {
+    return line
+  }
+
+  return trimmed.startsWith(`${base}/`) ? trimmed.slice(base.length + 1) : null
+}
+
+/**
  * What make-pot leaves out: the `.distignore` lines, the git submodule paths and the `exclude`
- * input, in that order, each once.
+ * input, in that order, each once. The first two are paths from the checkout, made relative to
+ * `source-path`; the ones outside it are dropped. The `exclude` input is passed as given.
  *
  * A submodule has its own text domain and its own POT, and a checkout with submodules would fold
  * its strings in.
  *
- * @param {string} cwd   The checkout.
- * @param {string} extra The `exclude` input.
+ * @param {string} cwd        The checkout.
+ * @param {string} sourcePath The `source-path` input.
+ * @param {string} extra      The `exclude` input.
  *
  * @returns {string[]} The exclusions.
  */
-function readExcludes(cwd, extra) {
+function readExcludes(cwd, sourcePath, extra) {
+  const base = path.relative(cwd, path.resolve(cwd, sourcePath)).split(path.sep).join('/')
   const submodules = [...(readCheckoutFile(cwd, '.gitmodules') ?? '').matchAll(/^\s*path\s*=\s*(.+?)\s*$/gm)].map(
-    (match) => match[1]
+    (match) => rebaseExclude(match[1], base, true)
   )
+  const distignore = readLines(readCheckoutFile(cwd, '.distignore')).map((line) => rebaseExclude(line, base, false))
 
-  return [...new Set([...readLines(readCheckoutFile(cwd, '.distignore')), ...submodules, ...readLines(extra)])]
+  return [...new Set([...distignore, ...submodules, ...readLines(extra)].filter((exclude) => exclude !== null))]
 }
 
 /**
@@ -237,7 +262,7 @@ async function runGeneratePot({ core, exec, env, cwd: workspace = process.cwd(),
   const sourcePath = String(env.INPUT_SOURCE_PATH ?? '').trim() || '.'
   const domain = String(env.INPUT_DOMAIN ?? '').trim()
   const headers = readHeaders(env.INPUT_HEADERS)
-  const excludes = readExcludes(cwd, env.INPUT_EXCLUDE)
+  const excludes = readExcludes(cwd, sourcePath, env.INPUT_EXCLUDE)
 
   const phar = await setupWpCli({ core, exec, env, wpCli })
 
