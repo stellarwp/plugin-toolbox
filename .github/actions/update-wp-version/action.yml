@@ -35,6 +35,11 @@ outputs:
   min-version:
     description: 'The minimum version set, e.g. `6.6`. Empty when `min-version` is empty.'
     value: ${{ steps.update.outputs.min-version }}
+  changed:
+    description: >-
+      `true` when a file was written, `false` when every header was already at its version or no
+      file carries one, so a later step can skip the commit.
+    value: ${{ steps.update.outputs.changed }}
 
 runs:
   using: 'composite'
