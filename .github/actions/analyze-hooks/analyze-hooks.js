@@ -125,7 +125,10 @@ function code(source) {
     } else if (/^(\/[/*]|#)/.test(match[0])) {
       if (match[0].startsWith('/**')) {
         const since = match[0].match(/@since\b.*$/gm) ?? []
-        docblocks.push({ end: at + match[0].length, since: since.map((line) => squash(line.replace(/\*\/$/, ''))) })
+        docblocks.push({
+          end: at + match[0].length,
+          since: since.map((line) => squash(line.replace(/\*\/$/, ''))),
+        })
       }
       blankTo(at + match[0].length)
     } else {
@@ -138,7 +141,11 @@ function code(source) {
   return { text: pieces.join(''), docblocks }
 }
 
-/** @typedef {{live: boolean, since: Set<string>}} Hook A hook in one tree: whether it is live, and its `@since` lines. */
+/**
+ * A hook in one tree: whether it is live, and its `@since` lines.
+ *
+ * @typedef {{live: boolean, since: Set<string>}} Hook
+ */
 
 /**
  * The hooks a set of PHP files calls. A hook is live while one of its calls is not a `_deprecated`
@@ -148,7 +155,7 @@ function code(source) {
  * @param {string[]} sources The files.
  *
  * @returns {{filters: Map<string, Hook>, actions: Map<string, Hook>}} The hooks by name, per kind.
- *           */
+ */
 function hooks(sources) {
   const found = { filters: new Map(), actions: new Map() }
 
@@ -518,7 +525,7 @@ async function runAnalyzeHooks({ core, exec, env, cwd: workspace = process.cwd()
   // Every file under `paths` with a hook call, whole, so a name on any line after the parenthesis
   // and a call inside a comment are read right. `-e ''` matches every line, each printed after its
   // file's name and a NUL.
-  // ponytail: the file names are passed as arguments, which holds for a few thousand files.
+  // The file names are passed as arguments, which holds for a few thousand files.
   const sources = async (...tree) => {
     const prefix = tree.length ? `${tree[0]}:` : ''
     const files = (await grep(['-l', '-E', '(apply_filters|do_action)', ...tree, '--', ...paths]))
