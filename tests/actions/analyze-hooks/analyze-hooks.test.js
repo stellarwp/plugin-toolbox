@@ -258,6 +258,13 @@ describe('analyze-hooks', () => {
     assert.strictEqual(written['analyze-hooks-removed-filters.yaml'], entry('Removed filters: `tec_removed_filter`'))
   })
 
+  it('writes to the changelogger defaults when package.json is not JSON', async (t) => {
+    write('package.json', '{ not json')
+    await run(t)
+
+    assert.ok('analyze-hooks-added-actions.yaml' in entries('changelog'))
+  })
+
   it('refuses a types input that is not an object of known keys', () => {
     assert.throws(() => readTypes('[]'), /not a JSON object/)
     assert.throws(() => readTypes('{nope'), /not valid JSON/)

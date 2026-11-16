@@ -21,6 +21,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
+const { readChangeloggerSection } = require('../../lib/changelogger.js')
 const { runOrFail } = require('../../lib/exec.js')
 const { compareVersions } = require('../../lib/versions.js')
 const { readWorkingDirectory, readCheckoutFile } = require('../../lib/workspace.js')
@@ -190,26 +191,18 @@ function readTypes(input) {
 }
 
 /**
- * Reads what the repository's changelogger configures, from package.json.
+ * Reads what the repository's changelogger configures, from package.json. A file that is missing,
+ * not JSON, or without a `changelogger` section gives the changelogger's defaults, as it does for
+ * the changelogger itself.
  *
  * @param {string|null} packageJson The file's contents, or null when there is none.
- *
- * @throws {Error} When the file is not JSON.
  *
  * @returns {{changesDir: string, changelogFiles: string[], labels: Object<string, string>}} Where
  *          the pending entries live, the files the changelog is written to, and the label each
  *          type is written with.
  */
 function readChangelogger(packageJson) {
-  let config = {}
-
-  if (packageJson !== null) {
-    try {
-      config = JSON.parse(packageJson)?.changelogger ?? {}
-    } catch {
-      throw new Error(`package.json is not valid JSON, so the changelogger's configuration cannot be read. ${WHAT}`)
-    }
-  }
+  const config = readChangeloggerSection(packageJson) ?? {}
 
   const written = (Array.isArray(config.files) ? config.files : []).map((file) => file?.path)
 
