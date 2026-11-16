@@ -41,17 +41,22 @@ function parsePlugins(plugins) {
     })
 }
 
-/**
- * The environment without the variables that carry a token.
- *
- * @param {object} env The environment to copy.
- *
- * @returns {object} A copy without `GH_TOKEN` and `COMPOSER_AUTH`.
- */
-function withoutTokens(env) {
-  const { GH_TOKEN, COMPOSER_AUTH, ...rest } = env
+/** The variables a Composer run needs. Everything else, tokens and runner credentials included, is left out. */
+const COMPOSER_ENV = ['PATH', 'HOME', 'COMPOSER_HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'PHP_INI_SCAN_DIR', 'PHPRC']
 
-  return rest
+/**
+ * The environment of a Composer run that is not allowed to see any credential.
+ *
+ * An allowlist rather than a list of what to remove: the runner puts several tokens in the
+ * environment of a github-script step (`INPUT_GITHUB-TOKEN`, `ACTIONS_RUNTIME_TOKEN`, ...), and a
+ * new one would otherwise leak.
+ *
+ * @param {object} env The environment to copy from.
+ *
+ * @returns {object} Only the variables Composer needs.
+ */
+function composerEnvWithoutCredentials(env) {
+  return Object.fromEntries(COMPOSER_ENV.filter((name) => env[name] !== undefined).map((name) => [name, env[name]]))
 }
 
 /**
@@ -83,15 +88,17 @@ async function sh(exec, command, args, options = {}) {
  * @param {string} options.tmp       A scratch directory that holds `plugin.zip`.
  * @param {string} options.name      The directory name of the plugin.
  *
- * @throws {Error} When the name is the checkout's own, or the archive holds no directory.
+ * @throws {Error} When the target is the checkout or holds it, or the archive holds no directory.
  *
  * @returns {Promise<string>} The directory the plugin is in.
  */
 async function place({ exec, dest, workspace, tmp, name }) {
   const target = path.join(dest, name)
 
-  if (target === workspace) {
-    throw new Error(`The plugin '${name}' has the same directory name as this repository.`)
+  // Not only the checkout itself: a destination such as `../..` would put the target above it, and
+  // the old copy is removed recursively.
+  if (workspace === target || workspace.startsWith(target + path.sep)) {
+    throw new Error(`The plugin '${name}' would replace the checkout or a directory that holds it.`)
   }
 
   const unpacked = path.join(tmp, 'unpacked')
@@ -147,11 +154,18 @@ async function downloadPlugins({ core, exec, plugins, workspace, tmp, dest = pat
     const target = await place({ exec, dest, workspace, tmp, name })
 
     if (fs.existsSync(path.join(target, 'composer.json'))) {
-      // Composer runs the plugin's own scripts, so a WordPress.org plugin, which the caller does not
-      // control, runs without the tokens. Only a GitHub repository the caller named gets them.
-      const options = github ? {} : { env: withoutTokens(process.env) }
+      const args = ['install', '--no-interaction', '--no-progress', '--prefer-dist', `--working-dir=${target}`]
 
-      await sh(exec, 'composer', ['install', '--no-interaction', '--no-progress', '--prefer-dist', `--working-dir=${target}`], options)
+      if (github) {
+        // A repository the caller named: it is trusted like the caller's own, and gets the tokens.
+        await sh(exec, 'composer', args)
+      } else {
+        // A WordPress.org plugin is code the caller does not control, and Composer would run its
+        // scripts and plugins. So it gets no credentials, and neither runs.
+        await sh(exec, 'composer', [...args, '--no-scripts', '--no-plugins'], {
+          env: composerEnvWithoutCredentials(process.env),
+        })
+      }
     }
 
     placed.push(target)

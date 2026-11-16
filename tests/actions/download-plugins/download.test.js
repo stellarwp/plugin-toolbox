@@ -133,37 +133,43 @@ describe('download-plugins', () => {
 
       await assert.rejects(
         downloadPlugins({ core, exec, plugins: parsePlugins('repo'), workspace, tmp }),
-        /same directory name as this repository/
+        /would replace the checkout/
       )
       assert.ok(fs.existsSync(workspace))
       assert.ok(dest)
     })
 
-    it('gives Composer the tokens for a GitHub plugin, and not for a WordPress.org one', async (t) => {
-      process.env.COMPOSER_AUTH = '{"github-oauth":{"github.com":"secret"}}'
-      process.env.GH_TOKEN = 'secret'
-      t.after(() => {
-        delete process.env.COMPOSER_AUTH
-        delete process.env.GH_TOKEN
-      })
+    it('gives Composer the tokens for a GitHub plugin, and no credential for a WordPress.org one', async (t) => {
+      const secrets = {
+        COMPOSER_AUTH: '{"github-oauth":{"github.com":"secret"}}',
+        GH_TOKEN: 'secret',
+        'INPUT_GITHUB-TOKEN': 'secret',
+        ACTIONS_RUNTIME_TOKEN: 'secret',
+      }
 
-      const composerEnv = async (spec) => {
+      Object.assign(process.env, secrets)
+      t.after(() => Object.keys(secrets).forEach((name) => delete process.env[name]))
+
+      const composerCall = async (spec) => {
         const { workspace, tmp } = runner()
         const { core } = await coreWithOutputs(t)
         const { exec, calls } = recordingExec(rules(tmp, 'plugin', { 'composer.json': '{}' }))
 
         await downloadPlugins({ core, exec, plugins: parsePlugins(spec), workspace, tmp })
 
-        return calls.find((call) => call.command === 'composer').options.env
+        return calls.find((call) => call.command === 'composer')
       }
 
-      assert.equal((await composerEnv('stellarwp/plugin')), undefined)
+      const github = await composerCall('stellarwp/plugin')
 
-      const env = await composerEnv('plugin')
+      assert.equal(github.options.env, undefined)
+      assert.ok(!github.args.includes('--no-scripts'))
 
-      assert.ok(env.PATH)
-      assert.equal(env.COMPOSER_AUTH, undefined)
-      assert.equal(env.GH_TOKEN, undefined)
+      const wporg = await composerCall('plugin')
+
+      assert.ok(wporg.options.env.PATH)
+      assert.deepEqual(Object.keys(wporg.options.env).filter((name) => name in secrets), [])
+      assert.ok(wporg.args.includes('--no-scripts') && wporg.args.includes('--no-plugins'))
     })
 
     it('places the plugins in a destination of the caller\'s choice', async (t) => {
@@ -176,6 +182,19 @@ describe('download-plugins', () => {
 
       assert.deepEqual(placed, [path.join(dest, 'akismet')])
       assert.ok(fs.existsSync(path.join(dest, 'akismet')))
+    })
+
+    it('refuses a destination that puts the target above the checkout', async (t) => {
+      const { workspace, dest, tmp } = runner()
+      const { core } = await coreWithOutputs(t)
+      const { exec } = recordingExec(rules(tmp, 'work'))
+
+      // dest is the checkout's parent, `work`; a plugin named `work` in its parent would be it.
+      await assert.rejects(
+        downloadPlugins({ core, exec, plugins: parsePlugins('work'), workspace, tmp, dest: path.dirname(dest) }),
+        /would replace the checkout/
+      )
+      assert.ok(fs.existsSync(workspace))
     })
 
     it('fails when a command fails', async (t) => {
