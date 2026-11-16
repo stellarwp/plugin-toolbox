@@ -56,7 +56,8 @@ Nothing to set `Tested up to:` in `readme.txt`. For the plugin file, a `.puprc` 
 }
 ```
 
-The same file listed several times, once per regex, counts as one.
+The same file listed several times, once per regex, counts as one. A leading `./` is allowed:
+`./the-events-calendar.php` is the same root file.
 
 ## What it refuses
 
