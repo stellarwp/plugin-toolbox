@@ -31,10 +31,10 @@ const WP_CLI = {
 }
 
 /**
- * The header lines make-pot stamps on every run: the time, the plugin version and its own version.
+ * The header fields make-pot stamps on every run: the time, the plugin version and its own version.
  * A POT that differs in these only holds the same strings.
  */
-const STAMPED_HEADERS = ['POT-Creation-Date:', 'Project-Id-Version:', 'X-Generator:']
+const STAMPED_HEADERS = ['POT-Creation-Date', 'Project-Id-Version', 'X-Generator']
 
 /**
  * Splits a multi-line value into its lines, trimmed, without the empty ones and the `#` comments.
@@ -165,8 +165,25 @@ function setupWpCli({ core, exec, env, wpCli }) {
 }
 
 /**
+ * A POT without the stamped header fields. Only the header entry, the first block before a blank
+ * line, is read for them, so a translation entry that holds a header name keeps it.
+ *
+ * @param {string} pot The POT's contents.
+ *
+ * @returns {string} The contents without the stamped header lines.
+ */
+function withoutStampedHeaders(pot) {
+  const normalized = pot.replace(/\r\n/g, '\n')
+  const end = normalized.indexOf('\n\n')
+  const header = end === -1 ? normalized : normalized.slice(0, end)
+  const kept = header.split('\n').filter((line) => !STAMPED_HEADERS.some((field) => line.startsWith(`"${field}:`)))
+
+  return kept.join('\n') + normalized.slice(header.length)
+}
+
+/**
  * Whether the POT's strings changed, against the file git tracks. A tracked POT that differs in
- * the stamped headers only is put back as it was, so a second run leaves nothing to commit.
+ * the stamped header fields only is put back as it was, so a second run leaves nothing to commit.
  *
  * @param {object} exec    The @actions/exec toolkit.
  * @param {string} cwd     The checkout.
@@ -184,18 +201,11 @@ async function stringsChanged(exec, cwd, potPath) {
     return true
   }
 
-  const diff = await exec.getExecOutput(
-    'git',
-    ['diff', '--quiet', ...STAMPED_HEADERS.map((header) => `-I${header}`), '--', potPath],
-    { ...options, ignoreReturnCode: true }
-  )
+  const before = await runOrFail(exec, 'git', ['show', `:./${potPath}`], options, 'git show')
+  const after = fs.readFileSync(path.join(cwd, potPath), 'utf8')
 
-  if (diff.exitCode === 1) {
+  if (withoutStampedHeaders(before) !== withoutStampedHeaders(after)) {
     return true
-  }
-
-  if (diff.exitCode !== 0) {
-    throw new Error(`git diff failed (exit code ${diff.exitCode}):\n${diff.stderr.trim()}`)
   }
 
   await runOrFail(exec, 'git', ['checkout', '--', potPath], options, 'git checkout')

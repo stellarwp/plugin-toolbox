@@ -301,6 +301,17 @@ describe('generate-pot', () => {
       assert.strictEqual(git('status', '--porcelain'), '')
     })
 
+    it('reports a changed string that holds a stamped header name as changed', async (t) => {
+      write('lang/plugin.pot', pot({ msgid: 'X-Generator: old' }))
+      commit()
+      const generated = pot({ msgid: 'X-Generator: new' })
+
+      const { outputs } = await run(t, { generated })
+
+      assert.strictEqual(outputs.changed, 'yes')
+      assert.strictEqual(read('lang/plugin.pot'), generated)
+    })
+
     it('reports a POT that another header changed as changed', async (t) => {
       write('lang/plugin.pot', pot())
       commit()
