@@ -2,6 +2,9 @@
 __pycache__/
 node_modules/
 
+# Linked checkouts for local work.
+.worktrees/
+
 # No lockfile is committed. Each install resolves the newest versions the ranges in package.json
 # allow, so the versions the tests run against cannot quietly drift from the ones a release gets.
 package-lock.json
