@@ -1,6 +1,6 @@
 # analyze-hooks
 
-Files the actions and filters a release adds, deprecates or removes, and the views it changes, as pending
+Files the actions and filters a release adds, updates, deprecates or removes, and the views it changes, as pending
 changelog entries, so the release notes name them.
 
 ```yaml
@@ -29,9 +29,11 @@ or four numeric parts, with or without a leading `v` (`6.18.3`, `v5.3.0`, `4.19.
 | File in the changes directory | Entry |
 |---|---|
 | `analyze-hooks-added-filters.yaml` | ``Added filters: `a`, `b` `` |
+| `analyze-hooks-updated-filters.yaml` | ``Updated filters: `a` `` |
 | `analyze-hooks-deprecated-filters.yaml` | ``Deprecated filters: `a` `` |
 | `analyze-hooks-removed-filters.yaml` | ``Removed filters: `a` `` |
 | `analyze-hooks-added-actions.yaml` | ``Added actions: `a` `` |
+| `analyze-hooks-updated-actions.yaml` | ``Updated actions: `a` `` |
 | `analyze-hooks-deprecated-actions.yaml` | ``Deprecated actions: `a` `` |
 | `analyze-hooks-removed-actions.yaml` | ``Removed actions: `a` `` |
 | `analyze-hooks-changed-views.yaml` | ``Changed views: `v2/list` `` |
@@ -47,6 +49,10 @@ Each is a `patch` entry of type `tweak`, and a kind with nothing to list writes 
   every call is, and gone when it has none. A hook is added when it is live now and was not at the
   tag, deprecated when it is deprecated now and was not, and removed when it is gone now and was
   live or deprecated. A hook that moved, or that still has another call elsewhere, is not listed.
+- **Updated hooks** are hooks in the same state in both trees whose docblocks have more `@since`
+  lines now than at the tag: a change to a hook's signature is recorded as one more line, such as
+  `@since TBD Added the $type parameter.` The lines of every call's docblock count once each. A
+  docblock belongs to a call when no `;`, `{` or `}` comes between them.
 - **Views** are the `.php` files under `views-path` that changed since the tag, named by their path
   under that directory without `.php`.
 
@@ -92,7 +98,7 @@ An entry left out of `types`, here the removed hooks, stays a `tweak` reading `R
 |---|---|---|
 | `paths` | `src` | Where to search for hooks, one git pathspec per line. `:!vendor` excludes a directory. |
 | `views-path` | `src/views` | The directory of the templates a theme can override. Empty lists no view. |
-| `types` | | The changelog type per entry, as a JSON object in a string. Keys: `added-filters`, `deprecated-filters`, `removed-filters`, `added-actions`, `deprecated-actions`, `removed-actions`, `changed-views`. |
+| `types` | | The changelog type per entry, as a JSON object in a string. Keys: `added-filters`, `updated-filters`, `deprecated-filters`, `removed-filters`, `added-actions`, `updated-actions`, `deprecated-actions`, `removed-actions`, `changed-views`. |
 | `working-directory` | | Where the repository is checked out. Empty is the workspace. |
 
 ## Outputs

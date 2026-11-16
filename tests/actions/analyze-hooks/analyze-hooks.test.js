@@ -157,6 +157,32 @@ describe('analyze-hooks', () => {
     assert.strictEqual(written['analyze-hooks-removed-actions.yaml'], entry('Removed actions: `tec_was_deprecated`'))
   })
 
+  it('lists a hook whose docblocks gained a @since line as updated', async (t) => {
+    const docblock = (...since) => `/**\n * A hook.\n *\n${since.map((line) => ` * @since ${line}\n`).join('')} */\n`
+    write(
+      'src/Tribe/Updated.php',
+      `<?php\n${docblock('5.1.0')}$label = apply_filters( 'tec_updated', $label );\n${docblock('5.0.0')}do_action( 'tec_same' );\n`
+    )
+    commit('documented hooks')
+    git('tag', '6.18.3')
+    write(
+      'src/Tribe/Updated.php',
+      [
+        '<?php',
+        `${docblock('5.1.0', 'TBD Added the $type parameter.')}$label = apply_filters(`,
+        "\t'tec_updated', $label, $type );",
+        // The same @since on a second call, and one on a docblock that a statement separates.
+        `${docblock('5.0.0')}do_action( 'tec_same' );`,
+        `${docblock('9.9.9')}$x = 1;\ndo_action( 'tec_same' );`,
+        '',
+      ].join('\n')
+    )
+    commit('update one')
+    await run(t)
+
+    assert.deepStrictEqual(entries(), { 'analyze-hooks-updated-filters.yaml': entry('Updated filters: `tec_updated`') })
+  })
+
   it('removes an entry from an earlier run when its change is reverted, and is stable when run twice', async (t) => {
     await run(t)
     const first = entries()

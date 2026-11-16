@@ -9,7 +9,8 @@
  *    outside comments and outside the HTML of a template.
  *    A hook is added when it is live now and was not at the tag, deprecated when every call became
  *    a `_deprecated` one, and removed when no call is left, so one that moved, or that still has
- *    another call elsewhere, is not listed;
+ *    another call elsewhere, is not listed. A hook in both trees whose docblocks gained a `@since`
+ *    line is updated;
  *  - the `.php` files under `views-path` that `git diff` reports as changed.
  *
  * Each kind becomes one entry, `<changesDir>/analyze-hooks-<change>-<kind>.yaml`, so
@@ -46,9 +47,11 @@ const HOOK_CALL = /\b(apply_filters|do_action)(_ref_array|_deprecated)?\s*\(\s*(
 /** Every entry the action can write, as `<change>-<kind>`: the keys the `types` input takes. */
 const ENTRY_KEYS = [
   'added-filters',
+  'updated-filters',
   'deprecated-filters',
   'removed-filters',
   'added-actions',
+  'updated-actions',
   'deprecated-actions',
   'removed-actions',
   'changed-views',
@@ -73,6 +76,9 @@ function lastReleaseTag(tags) {
     .pop()
 }
 
+/** Whitespace removed, so text rewrapped or respaced by hand still compares equal. */
+const squash = (text) => text.replace(/\s+/g, '')
+
 /**
  * What `code` steps over in PHP: the closing tag, a block comment, a line comment (`#[` opens an
  * attribute, not a comment), a quoted string and a heredoc or nowdoc.
@@ -86,9 +92,11 @@ const TOKEN =
  *
  * @param {string} source A PHP file.
  *
- * @returns {string} The code, as long as the source.
+ * @returns {{text: string, docblocks: {end: number, since: string[]}[]}} The code, as long as the
+ *          source, and each `/**` comment: where it ends and its `@since` lines.
  */
 function code(source) {
+  const docblocks = []
   const pieces = []
   let at = 0
   const blankTo = (end) => {
@@ -112,6 +120,10 @@ function code(source) {
     if (match[0] === '?>') {
       toPhp(at + 2)
     } else if (/^(\/[/*]|#)/.test(match[0])) {
+      if (match[0].startsWith('/**')) {
+        const since = match[0].match(/@since\b.*$/gm) ?? []
+        docblocks.push({ end: at + match[0].length, since: since.map((line) => squash(line.replace(/\*\/$/, ''))) })
+      }
       blankTo(at + match[0].length)
     } else {
       pieces.push(match[0])
@@ -120,28 +132,36 @@ function code(source) {
   }
   pieces.push(source.slice(at))
 
-  return pieces.join('')
+  return { text: pieces.join(''), docblocks }
 }
+
+/** @typedef {{live: boolean, since: Set<string>}} Hook A hook in one tree: whether it is live, and its `@since` lines. */
 
 /**
  * The hooks a set of PHP files calls. A hook is live while one of its calls is not a `_deprecated`
- * one, and deprecated when every call is.
+ * one, and deprecated when every call is. Its `@since` lines are those of the docblock above each
+ * call, when no `;`, `{` or `}` comes between the two.
  *
  * @param {string[]} sources The files.
  *
- * @returns {{filters: Map<string, {live: boolean}>, actions: Map<string, {live: boolean}>}} The
- *          hooks by name, per kind.
- */
+ * @returns {{filters: Map<string, Hook>, actions: Map<string, Hook>}} The hooks by name, per kind.
+ *           */
 function hooks(sources) {
   const found = { filters: new Map(), actions: new Map() }
 
   for (const source of sources) {
-    for (const match of code(source).matchAll(HOOK_CALL)) {
+    const { text, docblocks } = code(source)
+
+    for (const match of text.matchAll(HOOK_CALL)) {
       const kind = found[match[1] === 'apply_filters' ? 'filters' : 'actions']
       const name = match[3] ?? match[4]
-      const hook = kind.get(name) ?? { live: false }
+      const hook = kind.get(name) ?? { live: false, since: new Set() }
+      const docblock = docblocks.findLast((doc) => doc.end <= match.index)
 
       hook.live ||= match[2] !== '_deprecated'
+      if (docblock && !/[;{}]/.test(text.slice(docblock.end, match.index))) {
+        docblock.since.forEach((line) => hook.since.add(line))
+      }
       kind.set(name, hook)
     }
   }
@@ -152,8 +172,8 @@ function hooks(sources) {
 /**
  * The state of a hook in a tree.
  *
- * @param {Map<string, {live: boolean}>} kind The tree's hooks of one kind.
- * @param {string}                       name The hook.
+ * @param {Map<string, Hook>} kind The tree's hooks of one kind.
+ * @param {string}            name The hook.
  *
  * @returns {'live'|'deprecated'|'gone'} Whether it has a call that is not deprecated, only
  *          deprecated calls, or none.
@@ -181,15 +201,18 @@ function analyze(before, after, changedFiles, viewsPath) {
   const entries = []
 
   // A hook that became live is added, one whose calls all became deprecated is deprecated, and one
-  // with no call left, live or deprecated before, is removed.
+  // with no call left, live or deprecated before, is removed. One that stayed as it was is updated
+  // when its docblocks have more `@since` lines than at the tag.
   for (const kind of ['filters', 'actions']) {
-    const names = { Added: [], Deprecated: [], Removed: [] }
+    const names = { Added: [], Updated: [], Deprecated: [], Removed: [] }
 
     for (const name of new Set([...old[kind].keys(), ...now[kind].keys()])) {
       const [was, is] = [state(old[kind], name), state(now[kind], name)]
 
       if (is !== was) {
         names[{ live: 'Added', deprecated: 'Deprecated', gone: 'Removed' }[is]].push(name)
+      } else if (is !== 'gone' && now[kind].get(name).since.size > old[kind].get(name).since.size) {
+        names.Updated.push(name)
       }
     }
 
@@ -322,9 +345,6 @@ function describe(entry, types) {
     ? { key, type: types[key], text: names }
     : { key, type: DEFAULT_TYPE, text: `${entry.change} ${entry.kind}: ${names}` }
 }
-
-/** Whitespace removed, so an entry rewrapped or respaced by hand still compares equal. */
-const squash = (text) => text.replace(/\s+/g, '')
 
 /** A YAML scalar on one line: double quoted, single quoted or plain. */
 const SCALAR = '(?:"((?:[^"\\\\]|\\\\.)*)"|\'((?:[^\']|\'\')*)\'|(.+))'
