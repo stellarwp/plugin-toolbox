@@ -11,7 +11,8 @@
  *    a `_deprecated` one, and removed when no call is left, so one that moved, or that still has
  *    another call elsewhere, is not listed. A hook in both trees whose docblocks gained a `@since`
  *    line is updated;
- *  - the `.php` files under `views-path` that `git diff` reports as changed.
+ *  - the `.php` files under `views-path` that `git diff` reports as changed, by their path in the
+ *    checkout.
  *
  * Each kind becomes one entry, `<changesDir>/analyze-hooks-<change>-<kind>.yaml`, so
  * a second run rewrites the same files. An entry a changelog file already carries above the last
@@ -191,12 +192,12 @@ function state(kind, name) {
  *
  * @param {string[]} before       The files with a hook call at the last release.
  * @param {string[]} after        The files with a hook call now.
- * @param {string[]} changedFiles The files changed since the last release.
- * @param {string}   viewsPath    The directory views live in. Empty lists no view.
+ * @param {string[]} changedFiles The views changed since the last release, by their path in the
+ *                                repository.
  *
  * @returns {{change: string, kind: string, names: string[]}[]} One entry per change and kind.
  */
-function analyze(before, after, changedFiles, viewsPath) {
+function analyze(before, after, changedFiles) {
   const [old, now] = [hooks(before), hooks(after)]
   const entries = []
 
@@ -223,14 +224,9 @@ function analyze(before, after, changedFiles, viewsPath) {
     }
   }
 
-  if (viewsPath !== '') {
-    const views = changedFiles
-      .filter((file) => file.startsWith(`${viewsPath}/`) && file.endsWith('.php'))
-      .map((file) => file.slice(viewsPath.length + 1, -'.php'.length))
-
-    if (views.length) {
-      entries.push({ change: 'Changed', kind: 'views', names: [...new Set(views)].sort() })
-    }
+  const views = changedFiles.filter((file) => file.endsWith('.php'))
+  if (views.length) {
+    entries.push({ change: 'Changed', kind: 'views', names: [...new Set(views)].sort() })
   }
 
   return entries
@@ -469,7 +465,7 @@ function readKnown(cwd, changesDir, changelogFiles, version) {
  */
 async function runAnalyzeHooks({ core, exec, env, cwd: workspace = process.cwd() }) {
   const paths = readPaths(env.INPUT_PATHS)
-  const viewsPath = String(env.INPUT_VIEWS_PATH ?? '').trim().replace(/\/+$/, '')
+  const viewsPath = String(env.INPUT_VIEWS_PATH ?? '').trim()
   const types = readTypes(env.INPUT_TYPES)
   const cwd = readWorkingDirectory(env.INPUT_WORKING_DIRECTORY, { base: workspace, what: WHAT })
   const { changesDir, changelogFiles, labels } = readChangelogger(readCheckoutFile(cwd, 'package.json'))
@@ -541,7 +537,9 @@ async function runAnalyzeHooks({ core, exec, env, cwd: workspace = process.cwd()
   const changed =
     viewsPath === ''
       ? []
-      : (await git(['diff', '--name-only', tag, '--', viewsPath], 'Listing the changed views')).split('\n')
+      : // --relative names a file by its path in the checkout, which git prints the same whatever the
+        // form of the pathspec, `./src/views` or `src/views/`.
+        (await git(['diff', '--name-only', '--relative', tag, '--', viewsPath], 'Listing the changed views')).split('\n')
 
   const known = readKnown(cwd, changesDir, changelogFiles, tag.replace(/^v/, ''))
   const dir = path.join(cwd, changesDir)
@@ -557,7 +555,7 @@ async function runAnalyzeHooks({ core, exec, env, cwd: workspace = process.cwd()
   const summary = [`## Hook and view changes since ${tag}`]
   const files = []
 
-  for (const found of analyze(await sources(tag), await sources(), changed, viewsPath)) {
+  for (const found of analyze(await sources(tag), await sources(), changed)) {
     const entry = describe(found, types)
 
     if (isKnown(entry, known, labels)) {

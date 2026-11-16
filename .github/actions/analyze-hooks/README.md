@@ -36,7 +36,7 @@ or four numeric parts, with or without a leading `v` (`6.18.3`, `v5.3.0`, `4.19.
 | `analyze-hooks-updated-actions.yaml` | ``Updated actions: `a` `` |
 | `analyze-hooks-deprecated-actions.yaml` | ``Deprecated actions: `a` `` |
 | `analyze-hooks-removed-actions.yaml` | ``Removed actions: `a` `` |
-| `analyze-hooks-changed-views.yaml` | ``Changed views: `v2/list` `` |
+| `analyze-hooks-changed-views.yaml` | ``Changed views: `src/views/v2/list.php` `` |
 
 Each is a `patch` entry of type `tweak`, and a kind with nothing to list writes no file.
 
@@ -54,7 +54,8 @@ Each is a `patch` entry of type `tweak`, and a kind with nothing to list writes 
   `@since TBD Added the $type parameter.` The lines of every call's docblock count once each. A
   docblock belongs to a call when no `;`, `{` or `}` comes between them.
 - **Views** are the `.php` files under `views-path` that changed since the tag, named by their path
-  under that directory without `.php`.
+  in the checkout, `.php` included, so a reader with an override of the file finds it by that
+  path.
 
 The files are rewritten on every run, so a second run changes nothing and an entry whose change was
 reverted is removed. An entry is not written again when another pending change file holds it, or

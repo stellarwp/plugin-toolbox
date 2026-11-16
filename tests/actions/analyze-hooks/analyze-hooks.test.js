@@ -109,7 +109,7 @@ describe('analyze-hooks', () => {
     assert.deepStrictEqual(entries(), {
       'analyze-hooks-added-actions.yaml': entry('Added actions: `tec_added_action`, `tec_added_ref`'),
       'analyze-hooks-added-filters.yaml': entry('Added filters: `tec_added_a`, `tec_added_b`'),
-      'analyze-hooks-changed-views.yaml': entry('Changed views: `v2/list`'),
+      'analyze-hooks-changed-views.yaml': entry('Changed views: `src/views/v2/list.php`'),
       'analyze-hooks-removed-actions.yaml': entry('Removed actions: `tec_removed_action`'),
       'analyze-hooks-removed-filters.yaml': entry('Removed filters: `tec_removed_filter`'),
     })
@@ -204,7 +204,7 @@ describe('analyze-hooks', () => {
   })
 
   it('does not write an entry a changelog file or another pending file already has', async (t) => {
-    write('changelog.md', '= [6.18.3] =\n\n* Tweak - Changed views: `v2/list`\n\n= [6.18.2] =\n\n* Fix - A fix.\n')
+    write('changelog.md', '= [6.18.3] =\n\n* Tweak - Changed views: `src/views/v2/list.php`\n\n= [6.18.2] =\n\n* Fix - A fix.\n')
     write('changelog/by-hand.yaml', 'significance: patch\ntype: tweak\nentry: "Removed actions: `tec_removed_action`"\n')
     await run(t)
 
@@ -215,14 +215,14 @@ describe('analyze-hooks', () => {
   })
 
   it('still lists a change an earlier release also made', async (t) => {
-    write('readme.txt', 'Stable tag: 6.18.2\n\n== Changelog ==\n\n= [6.18.2] 2026-01-01 =\n\n* Tweak - Changed views: `v2/list`\n')
+    write('readme.txt', 'Stable tag: 6.18.2\n\n== Changelog ==\n\n= [6.18.2] 2026-01-01 =\n\n* Tweak - Changed views: `src/views/v2/list.php`\n')
     await run(t)
 
     assert.ok('analyze-hooks-changed-views.yaml' in entries())
   })
 
   it('still lists it when the changelog has no section for the last release', async (t) => {
-    write('changelog.md', '### [6.18.1] 2026-01-01\n\n* Tweak - Changed views: `v2/list`\n')
+    write('changelog.md', '### [6.18.1] 2026-01-01\n\n* Tweak - Changed views: `src/views/v2/list.php`\n')
     await run(t)
 
     assert.ok('analyze-hooks-changed-views.yaml' in entries())
@@ -305,7 +305,16 @@ describe('analyze-hooks', () => {
     commit('a template')
     await run(t, { INPUT_VIEWS_PATH: 'themes/ld30/templates/' })
 
-    assert.strictEqual(entries()['analyze-hooks-changed-views.yaml'], entry('Changed views: `course`'))
+    assert.strictEqual(
+      entries()['analyze-hooks-changed-views.yaml'],
+      entry('Changed views: `themes/ld30/templates/course.php`')
+    )
+  })
+
+  it('reads a views path that starts with ./', async (t) => {
+    await run(t, { INPUT_VIEWS_PATH: './src/views' })
+
+    assert.strictEqual(entries()['analyze-hooks-changed-views.yaml'], entry('Changed views: `src/views/v2/list.php`'))
   })
 
   it('writes the names only under a type of its own, where the changelogger keeps its change files', async (t) => {

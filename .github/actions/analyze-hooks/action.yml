@@ -19,8 +19,8 @@ inputs:
   views-path:
     description: >-
       The directory of the templates a theme can override. Every `.php` file under it that changed
-      since the last release is listed, by its path under the directory without `.php`. Empty lists
-      no view.
+      since the last release is listed by its path in the checkout, e.g. `src/views/v2/list.php`.
+      Empty lists no view.
     required: false
     default: 'src/views'
   types:
