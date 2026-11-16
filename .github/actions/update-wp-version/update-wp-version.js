@@ -92,11 +92,12 @@ function minimumFor(tested) {
 function readPluginFile(cwd, required) {
   let files
   try {
-    // A plugin file is listed once per regex, so the names are deduplicated.
+    // A plugin file is listed once per regex, so the names are deduplicated. `./plugin.php` names
+    // the same root file as `plugin.php`.
     files = [
       ...new Set(
         readVersionFiles(readCheckoutFile(cwd, '.puprc'), WHAT)
-          .map((entry) => entry.file)
+          .map((entry) => entry.file.replace(/^\.\//, ''))
           .filter((file) => ROOT_PHP.test(file))
       ),
     ]

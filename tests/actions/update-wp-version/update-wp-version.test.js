@@ -273,6 +273,13 @@ describe('update-wp-version', () => {
     await refuses(t, '6.8', 'yes', /No \.puprc/)
   })
 
+  it('takes a plugin file .puprc lists with a leading ./', async (t) => {
+    write('.puprc', puprc(['./test-plugin.php', './test-plugin.php', 'readme.txt']))
+    await run(t, '6.8', 'yes')
+
+    assert.strictEqual(read('test-plugin.php'), PLUGIN.replace('least: 6.0', 'least: 6.6'))
+  })
+
   it('still sets the tested version in readme.txt when .puprc names no single plugin file', async (t) => {
     write('other.php', PLUGIN_TESTED)
     write('.puprc', puprc(['test-plugin.php', 'other.php']))
