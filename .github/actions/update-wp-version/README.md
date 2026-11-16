@@ -17,7 +17,7 @@ version given, or two minor versions behind.
     # Empty leaves Requires at least; `auto` sets it two minors back; `6.9` sets exactly that.
     min-version: ${{ inputs.min-version }}
 
-# Commit here: this action only writes files.
+# Commit here, when steps.wp.outputs.changed is 'true': this action only writes files.
 ```
 
 It commits nothing: the step that commits the release preparation carries the change.
@@ -43,10 +43,13 @@ so the action sets it in both.
 
 Only an existing header is rewritten. A file without the header is left as it is, and a missing
 `readme.txt` is skipped. Only the first line carrying a header changes, so a version quoted further
-down the file stays. The whole value is
+down the file stays. `Tested up to` is never lowered: a file at `7.1.4` stays at `7.1.4` when
+`tested-up-to` is `7.1`, and the run reports it. The whole value is
 replaced, so `Tested up to: 6.8-RC1` becomes `Tested up to: 6.8`. When no file carries a header to set, the action writes a warning and passes.
 
-The job summary lists the versions and the files updated.
+The log and the job summary say, for each header each file carries, whether it changed from one
+version to another, was already at the version, or was left above it. The `changed` output is
+`true` when any file was written.
 
 ## What the repository needs
 
@@ -97,6 +100,7 @@ a single plugin file, only `readme.txt` is updated.
 | Output | Example | What it is |
 |---|---|---|
 | `min-version` | `6.6` | The minimum version set. Empty when the `min-version` input is empty |
+| `changed` | `true` | `true` when a file was written, `false` when every header was already at its version, was left above it, or no file carries one |
 
 ## How it runs
 

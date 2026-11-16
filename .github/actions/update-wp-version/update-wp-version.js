@@ -8,8 +8,9 @@
  * `Requires at least:` is set in readme.txt and in the plugin file. The plugin file is the single
  * root-level PHP file .puprc lists under `paths.versions`.
  *
- * Only an existing header is rewritten: a file without one is left as it is. The action writes
- * files and commits nothing.
+ * Only an existing header is rewritten: a file without one is left as it is. `Tested up to` is
+ * never lowered: a file at 7.1.4 stays there when 7.1 is asked for. The action writes files and
+ * commits nothing.
  *
  * runUpdateWpVersion checks every input and the .puprc before it writes any file.
  */
@@ -32,6 +33,9 @@ const ROOT_PHP = /^[^/\\]+\.php$/
 
 /** The WordPress.org endpoint whose first offer is the latest WordPress release. */
 const VERSION_CHECK_URL = 'https://api.wordpress.org/core/version-check/1.7/'
+
+/** The header that is never lowered. */
+const TESTED = 'Tested up to'
 
 /** How many minor versions the minimum trails the tested version by. */
 const MINORS_BEHIND = 2
@@ -209,32 +213,60 @@ function readPluginFile(cwd, required) {
 }
 
 /**
+ * Whether a header's current value is above the version to set, so setting it would lower it.
+ *
+ * Only the leading numeric parts count: `7.1.4` is above `7.1`, and `6.8-RC1` is not above `6.8`.
+ * A value with no numeric part, such as `trunk`, is never above.
+ *
+ * @param {string} current The value in the file.
+ * @param {string} version The version to set.
+ *
+ * @returns {boolean} True when the current value is the higher version.
+ */
+function isAbove(current, version) {
+  const numeric = current.match(/^\d+(\.\d+)*/)?.[0]
+
+  return numeric !== undefined && compareVersions(numeric, version) > 0
+}
+
+/**
  * Sets headers in a file of the checkout. Only the first line carrying each header changes, so a
- * version quoted further down is left alone. A header the file does not carry is not added.
+ * version quoted further down is left alone. A header the file does not carry is not added, and
+ * `Tested up to` is never lowered.
  *
  * @param {string}                 cwd     The checkout.
  * @param {string}                 file    The file, relative to it.
  * @param {Object<string, string>} headers The version per header name.
  *
- * @returns {boolean} True when the file carries at least one of the headers.
+ * @returns {{lines: string[], changed: boolean}} What happened to each header the file carries, and
+ *                                                whether the file was written.
  */
 function setHeaders(cwd, file, headers) {
   const before = readCheckoutFile(cwd, file)
   if (before === null) {
-    return false
+    return { lines: [], changed: false }
   }
 
   let after = before
-  let found = false
+  const lines = []
 
   for (const [name, version] of Object.entries(headers)) {
     // The line shape WordPress reads a header from: comment characters, the name, a colon. The
     // whole value up to the next space is replaced, so `6.8-RC1` becomes `6.8`, not `6.8-RC1`.
-    const header = new RegExp(`^([ \\t/*#@]*${name}:[ \\t]*)\\S*`, 'im')
+    const header = new RegExp(`^([ \\t/*#@]*${name}:[ \\t]*)(\\S*)`, 'im')
+    const current = after.match(header)?.[2]
 
-    if (header.test(after)) {
-      found = true
+    if (current === undefined) {
+      continue
+    }
+
+    if (current === version) {
+      lines.push(`${name} already at ${version}`)
+    } else if (name === TESTED && isAbove(current, version)) {
+      lines.push(`${name} left at ${current}, which is above ${version}`)
+    } else {
       after = after.replace(header, (match, lead) => `${lead}${version}`)
+      lines.push(`${name} changed from ${current} to ${version}`)
     }
   }
 
@@ -242,7 +274,7 @@ function setHeaders(cwd, file, headers) {
     fs.writeFileSync(path.join(cwd, file), after)
   }
 
-  return found
+  return { lines, changed: after !== before }
 }
 
 /**
@@ -257,7 +289,7 @@ function setHeaders(cwd, file, headers) {
  * @throws {Error} When an input is refused, the latest release cannot be looked up, `auto` derives
  *                 no minimum, or a minimum is asked for and .puprc does not name the plugin file.
  *
- * @returns {Promise<void>} Resolves once the files, the output and the summary are written.
+ * @returns {Promise<void>} Resolves once the files, the outputs and the summary are written.
  */
 async function runUpdateWpVersion({ core, env, cwd: workspace = process.cwd(), fetchImpl = globalThis.fetch }) {
   const tested = await readTestedUpTo(env.INPUT_TESTED_UP_TO, fetchImpl)
@@ -266,22 +298,27 @@ async function runUpdateWpVersion({ core, env, cwd: workspace = process.cwd(), f
   const pluginFile = readPluginFile(cwd, minimum !== '')
 
   // Everything is checked by now; the writes start here.
-  const headers = { 'Tested up to': tested, ...(minimum ? { 'Requires at least': minimum } : {}) }
-  const updated = ['readme.txt', pluginFile].filter((file) => file !== null && setHeaders(cwd, file, headers))
+  const headers = { [TESTED]: tested, ...(minimum ? { 'Requires at least': minimum } : {}) }
+  const results = ['readme.txt', pluginFile]
+    .filter((file) => file !== null)
+    .map((file) => ({ file, ...setHeaders(cwd, file, headers) }))
+  const lines = results.flatMap(({ file, lines }) => lines.map((line) => `\`${file}\`: ${line}`))
 
-  if (updated.length === 0) {
+  if (lines.length === 0) {
     core.warning('No file carries a header to set, so nothing was written.')
   }
 
   core.setOutput('min-version', minimum)
+  core.setOutput('changed', String(results.some((result) => result.changed)))
   core.info(`Tested up to ${tested}, minimum ${minimum || 'unchanged'}.`)
+  lines.forEach((line) => core.info(line.replaceAll('`', '')))
   await core.summary
     .addRaw(
       [
         '## Version Updates',
         `* Tested Up To: \`${tested}\``,
         `* Minimum Required Version: ${minimum ? `\`${minimum}\`` : 'Unchanged'}`,
-        ...updated.map((file) => `* Updated \`${file}\``),
+        ...lines.map((line) => `* ${line}`),
       ].join('\n'),
       true
     )

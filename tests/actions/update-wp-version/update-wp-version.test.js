@@ -129,6 +129,7 @@ describe('update-wp-version', () => {
     const { outputs, summary } = await run(t, '6.8.1', 'auto')
 
     assert.strictEqual(outputs['min-version'], '6.6')
+    assert.strictEqual(outputs.changed, 'true')
     assert.match(read('readme.txt'), /^Tested up to: 6\.8\.1$/m)
     assert.match(read('readme.txt'), /^Requires at least: 6\.6$/m)
     assert.strictEqual(read('test-plugin.php'), PLUGIN.replace('least: 6.0', 'least: 6.6'))
@@ -138,8 +139,9 @@ describe('update-wp-version', () => {
       '## Version Updates\n' +
         '* Tested Up To: `6.8.1`\n' +
         '* Minimum Required Version: `6.6`\n' +
-        '* Updated `readme.txt`\n' +
-        '* Updated `test-plugin.php`\n'
+        '* `readme.txt`: Tested up to changed from 6.4 to 6.8.1\n' +
+        '* `readme.txt`: Requires at least changed from 6.0 to 6.6\n' +
+        '* `test-plugin.php`: Requires at least changed from 6.0 to 6.6\n'
     )
   })
 
@@ -157,7 +159,7 @@ describe('update-wp-version', () => {
     assert.strictEqual(outputs['min-version'], '')
     assert.strictEqual(read('readme.txt'), README.replace('up to: 6.4', 'up to: 7.0'))
     assert.strictEqual(read('test-plugin.php'), PLUGIN)
-    assert.match(summary, /\* Minimum Required Version: Unchanged\n\* Updated `readme.txt`\n$/)
+    assert.match(summary, /\* Minimum Required Version: Unchanged\n\* `readme.txt`: Tested up to changed from 6\.4 to 7\.0\n$/)
   })
 
   it('changes the header only, not a version quoted further down', async (t) => {
@@ -173,12 +175,37 @@ describe('update-wp-version', () => {
     assert.match(read('readme.txt'), /^Tested up to: 6\.8$/m)
   })
 
+  it('reports a header already at the version, and sets changed to false when nothing changed', async (t) => {
+    await run(t, '6.8', 'auto')
+    const { outputs, summary, logged } = await run(t, '6.8', 'auto')
+
+    assert.strictEqual(outputs.changed, 'false')
+    assert.match(summary, /\* `readme.txt`: Tested up to already at 6\.8\n/)
+    assert.match(summary, /\* `test-plugin.php`: Requires at least already at 6\.6\n$/)
+    assert.match(logged, /readme\.txt: Tested up to already at 6\.8/)
+  })
+
+  it('never lowers Tested up to, and says so', async (t) => {
+    write('readme.txt', README.replace('up to: 6.4', 'up to: 7.1.4'))
+    write('test-plugin.php', PLUGIN_TESTED.replace('up to: 6.4', 'up to: 7.0'))
+    const { outputs, summary } = await run(t, '7.1', '')
+
+    assert.strictEqual(outputs.changed, 'true')
+    assert.strictEqual(read('readme.txt'), README.replace('up to: 6.4', 'up to: 7.1.4'))
+    assert.match(summary, /\* `readme.txt`: Tested up to left at 7\.1\.4, which is above 7\.1\n/)
+    assert.match(summary, /\* `test-plugin.php`: Tested up to changed from 7\.0 to 7\.1\n$/)
+
+    write('test-plugin.php', PLUGIN)
+    const again = await run(t, '7.1', '')
+    assert.strictEqual(again.outputs.changed, 'false')
+  })
+
   it('updates a Tested up to header the plugin file carries, and adds none', async (t) => {
     write('test-plugin.php', PLUGIN_TESTED)
     const { summary } = await run(t, '6.8', '')
 
     assert.strictEqual(read('test-plugin.php'), PLUGIN_TESTED.replace('up to: 6.4', 'up to: 6.8'))
-    assert.match(summary, /\* Updated `test-plugin.php`\n$/)
+    assert.match(summary, /\* `test-plugin.php`: Tested up to changed from 6\.4 to 6\.8\n$/)
 
     await run(t, '6.9', 'auto')
     assert.strictEqual(
@@ -200,9 +227,10 @@ describe('update-wp-version', () => {
     assert.ok(!summary.includes('readme.txt'))
 
     write('readme.txt', '== Changelog ==\n\n* Fix - Something.\n')
-    const { logged } = await run(t, '6.8', '')
+    const { logged, outputs: noHeader } = await run(t, '6.8', '')
 
     assert.strictEqual(read('readme.txt'), '== Changelog ==\n\n* Fix - Something.\n')
+    assert.strictEqual(noHeader.changed, 'false')
     assert.match(logged, /::warning::No file carries a header to set/)
   })
 
