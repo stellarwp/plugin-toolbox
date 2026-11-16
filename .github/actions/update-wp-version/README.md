@@ -12,6 +12,7 @@ minor versions behind.
 - uses: stellarwp/plugin-toolbox/.github/actions/update-wp-version@v1
   id: wp
   with:
+    # Empty sets the latest WordPress release.
     tested-up-to: ${{ inputs.tested-up-to }}
     update-min-version: ${{ inputs.update-min-version }}
 
@@ -26,6 +27,9 @@ It commits nothing: the step that commits the release preparation carries the ch
 |---|---|---|
 | `Tested up to:` | always | when the file carries the header |
 | `Requires at least:` | with `update-min-version: yes` | with `update-min-version: yes` |
+
+An empty `tested-up-to` is the latest WordPress release: the first offer
+`https://api.wordpress.org/core/version-check/1.7/` returns. A version passed in is used as it is.
 
 The minimum is the tested version two minors back, major and minor only: `6.8` and `6.8.1` both
 give `6.6`.
@@ -65,6 +69,8 @@ Every check runs before any file is written, so a refused run changes nothing.
 
 - `tested-up-to` that is not two or three numeric parts: `banana`, `6`, `6.8.1.2`, `v6.8`. A
   zero-padded part is refused too, such as `6.08` or `06.8`.
+- An empty `tested-up-to` when the latest release cannot be looked up: the request fails, the
+  answer is not JSON, or its first offer holds no such version.
 - `update-min-version` that is not `yes` or `no`.
 - `working-directory` that is not a directory.
 - With `update-min-version: yes`, a tested version whose minor is below 2: `7.0`, `7.1`, `6.1.0`.
@@ -79,7 +85,7 @@ a single plugin file, only `readme.txt` is updated.
 
 | Input | Required | Default | What it does |
 |---|---|---|---|
-| `tested-up-to` | yes | | The WordPress version to set as `Tested up to`, e.g. `6.8` or `6.8.1` |
+| `tested-up-to` | no | the latest release | The WordPress version to set as `Tested up to`, e.g. `6.8` or `6.8.1`. Empty looks up the latest WordPress release |
 | `update-min-version` | no | `no` | `yes` also sets `Requires at least` two minor versions behind |
 | `working-directory` | no | the workspace | Where the repository is checked out, relative to the workspace or absolute |
 
@@ -96,7 +102,8 @@ One [actions/github-script](https://github.com/actions/github-script) step runs
 build.
 
 Inputs reach the script through `process.env`, never by being interpolated into it, so a version is
-data and cannot become part of the program. The script runs no command: it reads and writes files.
+data and cannot become part of the program. The script runs no command: it reads and writes files,
+and with an empty `tested-up-to` it sends one request to `api.wordpress.org`.
 
 `tests/actions/update-wp-version/update-wp-version.test.js` covers the rules above against real
 temporary directories. Run `npm install` once, then `node --test`.

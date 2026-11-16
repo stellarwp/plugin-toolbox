@@ -11,8 +11,11 @@ inputs:
   tested-up-to:
     description: >-
       The WordPress version to set as `Tested up to`, e.g. `6.8` or `6.8.1`: two or three numeric
-      parts, none zero-padded. Anything else fails before any file is written.
-    required: true
+      parts, none zero-padded. Empty is the latest WordPress release, read from
+      api.wordpress.org; a failed lookup fails the step. Anything else fails before any file is
+      written.
+    required: false
+    default: ''
   update-min-version:
     description: >-
       `yes` to also set `Requires at least` two minor versions behind, e.g. `6.8.1` gives `6.6`;

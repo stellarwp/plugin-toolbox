@@ -30,20 +30,63 @@ const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)(\.(0|[1-9]\d*))?$/
 /** A PHP file at the root of the checkout. */
 const ROOT_PHP = /^[^/\\]+\.php$/
 
+/** The WordPress.org endpoint whose first offer is the latest WordPress release. */
+const VERSION_CHECK_URL = 'https://api.wordpress.org/core/version-check/1.7/'
+
 /** How many minor versions the minimum trails the tested version by. */
 const MINORS_BEHIND = 2
 
 /**
- * Reads the `tested-up-to` input.
+ * Looks up the latest WordPress release: the first offer of the WordPress.org version check.
  *
- * @param {string} value The input value.
+ * @param {Function} fetchImpl What `fetch` to use; a test passes a stand-in.
  *
- * @throws {Error} When it is not a version such as 6.8 or 6.8.1.
+ * @throws {Error} When the request fails, or the answer holds no version such as 6.8 or 6.8.1.
  *
- * @returns {string} The version.
+ * @returns {Promise<string>} The version.
  */
-function readTestedUpTo(value) {
+async function latestWordPress(fetchImpl) {
+  let body
+  try {
+    const response = await fetchImpl(VERSION_CHECK_URL)
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+    body = await response.json()
+  } catch (error) {
+    throw new Error(
+      `Looking up the latest WordPress release failed (${error.message}). Pass tested-up-to and run this step again. ${WHAT}`
+    )
+  }
+
+  // The version is written into the plugin's files, so an answer of any other shape is refused.
+  const version = body?.offers?.[0]?.version
+  if (typeof version !== 'string' || !VERSION_PATTERN.test(version)) {
+    throw new Error(
+      `The latest WordPress release has no usable version in ${VERSION_CHECK_URL}. Pass tested-up-to and run this step again. ${WHAT}`
+    )
+  }
+
+  return version
+}
+
+/**
+ * Reads the `tested-up-to` input. Empty means the latest WordPress release.
+ *
+ * @param {string}   value     The input value.
+ * @param {Function} fetchImpl What `fetch` to use for the latest release.
+ *
+ * @throws {Error} When it is not a version such as 6.8 or 6.8.1, or it is empty and the latest
+ *                 release cannot be looked up.
+ *
+ * @returns {Promise<string>} The version.
+ */
+async function readTestedUpTo(value, fetchImpl) {
   const version = String(value ?? '').trim()
+
+  if (version === '') {
+    return latestWordPress(fetchImpl)
+  }
 
   if (!VERSION_PATTERN.test(version)) {
     throw new Error(
@@ -167,18 +210,19 @@ function setHeaders(cwd, file, headers) {
 /**
  * Runs the action.
  *
- * @param {object} options
- * @param {object} options.core The @actions/core toolkit, for the log, the output and the summary.
- * @param {object} options.env  The environment, holding the inputs as `INPUT_*`.
- * @param {string} options.cwd  The workspace, the process's working directory by default.
+ * @param {object}   options
+ * @param {object}   options.core      The @actions/core toolkit, for the log, the output and the summary.
+ * @param {object}   options.env       The environment, holding the inputs as `INPUT_*`.
+ * @param {string}   options.cwd       The workspace, the process's working directory by default.
+ * @param {Function} options.fetchImpl What `fetch` to use for the latest release; a test passes a stand-in.
  *
- * @throws {Error} When an input is refused, no minimum can be derived, or the minimum is asked for
- *                 and .puprc does not name the plugin file.
+ * @throws {Error} When an input is refused, the latest release cannot be looked up, no minimum can
+ *                 be derived, or the minimum is asked for and .puprc does not name the plugin file.
  *
  * @returns {Promise<void>} Resolves once the files, the output and the summary are written.
  */
-async function runUpdateWpVersion({ core, env, cwd: workspace = process.cwd() }) {
-  const tested = readTestedUpTo(env.INPUT_TESTED_UP_TO)
+async function runUpdateWpVersion({ core, env, cwd: workspace = process.cwd(), fetchImpl = globalThis.fetch }) {
+  const tested = await readTestedUpTo(env.INPUT_TESTED_UP_TO, fetchImpl)
   const updateMin = readYesNo(env.INPUT_UPDATE_MIN_VERSION, 'update-min-version', WHAT)
   const cwd = readWorkingDirectory(env.INPUT_WORKING_DIRECTORY, { base: workspace, what: WHAT })
   const minimum = updateMin ? minimumFor(tested) : ''
