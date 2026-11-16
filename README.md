@@ -119,7 +119,7 @@ Three drawers in the toolbox. You can use any one without the others.
 
 | Layer | Lives in | What's in it |
 |---|---|---|
-| Composite actions | `.github/actions/` | Small single-purpose steps with no opinions: `setup-slic`, `setup-bun`, `setup-node`, `prepare-matrix`, `check-php-changes`, `smart-checkout`, `process-changelog`, `generate-pot`, `zip-name`, `release-zip`, `changed-files`, `skip-drafts`, `download-plugins` |
+| Composite actions | `.github/actions/` | Small single-purpose steps with no opinions: `setup-slic`, `setup-bun`, `setup-node`, `prepare-matrix`, `check-php-changes`, `smart-checkout`, `process-changelog`, `generate-pot`, `push-translations`, `zip-name`, `release-zip`, `changed-files`, `skip-drafts`, `download-plugins` |
 | Reusable workflows | `.github/workflows/` | Full jobs built from the actions (standards, analysis, tests, zip, release prep). Most repos will only touch this layer. |
 | File sync | `templates/` + `.github/sync.yml` | Files that must exist in the target repo, grouped by brand and repo type |
 
@@ -171,6 +171,7 @@ Each phase ends with something people can actually use.
 - [x] Add `release-merge`: the release branch into the base branch, the base back into develop, each step safe to rerun and a conflict reported with a `MERGE_CONFLICT` line.
 - [x] Add `release-publish`: the GitHub release for a version at a commit, with a title, notes from a file and assets uploaded before the release is public, skipped when it already exists. The complete deploy workflow to copy, both actions with the build between them, is `templates/workflows/release.yml`.
 - [x] Add `zip-name` and `release-zip`: the zip's name before the build, with a pre-release label (`dev`, `alpha`, `beta`, `rc`) and an optional build number, then `pup build`, `check`, `i18n` and `package` for that version. What `stellarwp/github-actions`' `zip.yml` does, as two actions so the bucket can be asked for the name first. The caller to copy, with the S3 check, the upload, the Slack notice and the artifact around them, is `templates/workflows/zip.yml`.
+- [x] Port `push-translations` from TEC: a POT file to GlotPress, with the GlotPress project and the server folder as inputs.
 - [ ] Turn every hard-coded repo name, slug, or branch pattern into an input.
 - [ ] Self-checks: actionlint everything, unit test anything with real logic.
 - [ ] Tag `v1.0.0`.
