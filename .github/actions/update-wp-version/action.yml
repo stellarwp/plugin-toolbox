@@ -1,0 +1,64 @@
+# Sets the WordPress version a plugin is tested up to and, when asked, the minimum it requires: a
+# version given, or two minor versions behind. It rewrites the headers in readme.txt and the plugin
+# file only: it commits nothing, so the step that commits the release preparation carries the change.
+#
+# The logic lives in update-wp-version.js, run by actions/github-script, so there is no dependency
+# to install and nothing to build.
+name: Update the WordPress version
+description: Sets the 'Tested up to' WordPress version and, optionally, the 'Requires at least' minimum
+
+inputs:
+  tested-up-to:
+    description: >-
+      The WordPress version to set as `Tested up to`, e.g. `6.8` or `6.8.1`: two or three numeric
+      parts, none zero-padded. Empty is the latest WordPress release, read from
+      api.wordpress.org; a failed lookup fails the step. Anything else fails before any file is
+      written.
+    required: false
+    default: ''
+  min-version:
+    description: >-
+      The `Requires at least` version. Empty leaves it. `auto` sets it two minor versions behind
+      `tested-up-to`, e.g. `6.8.1` gives `6.6` and `7.0` gives `6.8`, and never lowers a higher
+      minimum a file already has. A version such as `6.9` sets exactly that, lower or not, and may
+      not be above `tested-up-to`. Anything else fails before any file is
+      written.
+    required: false
+    default: ''
+  working-directory:
+    description: >-
+      Where the repository is checked out, relative to the workspace or absolute. Empty is the
+      workspace. A directory that is not there fails before any file is written.
+    required: false
+    default: ''
+
+outputs:
+  min-version:
+    description: 'The minimum version set, e.g. `6.6`. Empty when `min-version` is empty.'
+    value: ${{ steps.update.outputs.min-version }}
+  changed:
+    description: >-
+      `true` when a file was written, `false` when every header was already at its version, was
+      left above it, or no file carries one, so a later step can skip the commit.
+    value: ${{ steps.update.outputs.changed }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Update the WordPress version
+      id: update
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so an input is data and
+        # never part of the program.
+        INPUT_TESTED_UP_TO: ${{ inputs.tested-up-to }}
+        INPUT_MIN_VERSION: ${{ inputs.min-version }}
+        INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      with:
+        script: |
+          const { runUpdateWpVersion } = require(`${process.env.ACTION_PATH}/update-wp-version.js`)
+          await runUpdateWpVersion({ core, env: process.env })
