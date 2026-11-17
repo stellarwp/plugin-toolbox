@@ -49,7 +49,8 @@ Three lists are joined into `--exclude`, each entry once:
 make-pot matches an exclusion against paths relative to `source-path`, so the `.distignore` and
 submodule paths are made relative to it first: with `source-path: src`, `src/admin` becomes
 `admin`, and a path outside `src`, such as `/tests`, is dropped. A `.distignore` line with no `/`
-in it, such as `node_modules`, is a name that matches at any depth, and is kept as it is.
+in it, such as `node_modules`, is a name that matches at any depth, and is kept as it is, and so is
+a line whose first part holds a `*`, such as `**/private/*.php`.
 
 With none of them, make-pot uses its own defaults.
 

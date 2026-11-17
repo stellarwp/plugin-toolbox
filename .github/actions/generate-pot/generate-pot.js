@@ -118,7 +118,8 @@ function readHeaders(value) {
 /**
  * Makes a checkout path relative to the scanned directory: make-pot matches `--exclude` against
  * paths relative to `source-path`. A line without a `/` other than a trailing one is a name that
- * matches at any depth, and is kept as it is. A line with one is a path from the checkout root.
+ * matches at any depth, and so is one whose first part holds a `*`, such as a leading `**`: both
+ * are kept as they are. Any other line with a `/` is a path from the checkout root.
  *
  * @param {string}  line     The `.distignore` line or submodule path.
  * @param {string}  base     The scanned directory, relative to the checkout; empty for the checkout.
@@ -129,7 +130,9 @@ function readHeaders(value) {
 function rebaseExclude(line, base, anchored) {
   const trimmed = line.replace(/^\/+|\/+$/g, '')
 
-  if (base === '' || (!anchored && !trimmed.includes('/') && !line.startsWith('/'))) {
+  const anyDepth = !line.startsWith('/') && (!trimmed.includes('/') || trimmed.split('/')[0].includes('*'))
+
+  if (base === '' || (!anchored && anyDepth)) {
     return line
   }
 

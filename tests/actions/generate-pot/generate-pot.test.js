@@ -224,12 +224,12 @@ describe('generate-pot', () => {
     })
 
     it('makes the .distignore and submodule paths relative to source-path, and drops the ones outside it', async (t) => {
-      write('.distignore', '/tests\nnode_modules\nsrc/internal.php\n/src/admin/\nassets/js\n')
+      write('.distignore', '/tests\nnode_modules\nsrc/internal.php\n/src/admin/\nassets/js\n**/private/*.php\n*/fixtures\n')
       write('.gitmodules', '[submodule "lib"]\n\tpath = src/vendor/lib\n[submodule "common"]\n\tpath = common\n')
 
       const { php } = await run(t, { generated: pot(), inputs: { INPUT_SOURCE_PATH: './src/', INPUT_EXCLUDE: 'src/*.map' } })
 
-      assert.strictEqual(php.args.at(-1), '--exclude=node_modules,internal.php,admin,vendor/lib,src/*.map')
+      assert.strictEqual(php.args.at(-1), '--exclude=node_modules,internal.php,admin,**/private/*.php,*/fixtures,vendor/lib,src/*.map')
     })
 
     it('reads .distignore in the working directory', async (t) => {
