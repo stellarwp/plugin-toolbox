@@ -27,6 +27,11 @@ on:
         description: 'Version being released, e.g. 4.17.0'
         required: true
         type: string
+      runs-on:
+        description: 'Runner label, e.g. ubuntu-24.04 for a repository without Blacksmith'
+        required: false
+        type: string
+        default: blacksmith-4vcpu-ubuntu-2404
 
 # One deploy at a time for the whole repository, not one per release. Two releases prepared with the
 # same version would otherwise merge side by side, and the second would land its changes under a
@@ -43,7 +48,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.runs-on }}
     # A release that reaches users should wait for a person: give this environment required reviewers
     # in the repository settings, and let its branch policy accept the release branches the dashboard
     # dispatches on.

@@ -68,6 +68,11 @@ on:
         required: false
         type: string
         default: ''
+      runs_on:
+        description: 'Runner label, e.g. ubuntu-24.04 for a repository without Blacksmith'
+        required: false
+        type: string
+        default: blacksmith-4vcpu-ubuntu-2404
 
 permissions:
   contents: read
@@ -78,9 +83,8 @@ permissions:
 
 jobs:
   zip:
-    # pup runs on the PHP set up below, which also serves the plugin's own build. Give runs on
-    # Blacksmith: change the label here.
-    runs-on: ubuntu-24.04
+    # pup runs on the PHP set up below, which also serves the plugin's own build.
+    runs-on: ${{ inputs.runs_on }}
     env:
       # The secrets context is not available in a step's `if`, so whether the bucket and Slack are
       # configured is decided here. Without the secrets the zip is still built and attached as an
