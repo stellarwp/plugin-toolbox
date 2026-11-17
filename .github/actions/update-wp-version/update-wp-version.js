@@ -119,18 +119,16 @@ async function readTestedUpTo(value, fetchImpl) {
  */
 function minimumFor(tested) {
   const [major, minor] = tested.split('.').map(Number)
+  const [minMajor, minMinor] =
+    minor >= MINORS_BEHIND ? [major, minor - MINORS_BEHIND] : [major - 1, minor - MINORS_BEHIND + 10]
 
-  if (minor >= MINORS_BEHIND) {
-    return `${major}.${minor - MINORS_BEHIND}`
-  }
-
-  if (major === 0) {
+  if (minMajor < 1) {
     throw new Error(
       `Cannot derive a minimum version two minors behind ${tested}; pass min-version as a version. ${WHAT}`
     )
   }
 
-  return `${major - 1}.${minor - MINORS_BEHIND + 10}`
+  return `${minMajor}.${minMinor}`
 }
 
 /**
@@ -258,8 +256,9 @@ function setHeaders(cwd, file, headers, keep) {
 
   for (const [name, version] of Object.entries(headers)) {
     // The line shape WordPress reads a header from: comment characters, the name, a colon. The
-    // whole value up to the next space is replaced, so `6.8-RC1` becomes `6.8`, not `6.8-RC1`.
-    const header = new RegExp(`^([ \\t/*#@]*${name}:[ \\t]*)(\\S*)`, 'im')
+    // whole value up to the next space or `*/` is replaced, so `6.8-RC1` becomes `6.8`, and a
+    // comment closed right after the value stays closed.
+    const header = new RegExp(`^([ \\t/*#@]*${name}:[ \\t]*)((?:(?!\\*\\/)\\S)*)`, 'im')
     const current = after.match(header)?.[2]
 
     if (current === undefined) {

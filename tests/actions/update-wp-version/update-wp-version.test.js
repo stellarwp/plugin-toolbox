@@ -175,6 +175,13 @@ describe('update-wp-version', () => {
     assert.match(read('readme.txt'), /^Tested up to: 6\.8$/m)
   })
 
+  it('keeps a comment close that directly follows the value', async (t) => {
+    write('test-plugin.php', PLUGIN.replace(' * Requires at least: 6.0\n */', ' * Requires at least: 6.0*/'))
+    await run(t, '6.8', 'auto')
+
+    assert.match(read('test-plugin.php'), /^ \* Requires at least: 6\.6\*\/$/m)
+  })
+
   it('reports a header already at the version, and sets changed to false when nothing changed', async (t) => {
     await run(t, '6.8', 'auto')
     const { outputs, summary, logged } = await run(t, '6.8', 'auto')
@@ -321,8 +328,14 @@ describe('update-wp-version', () => {
     }
   })
 
-  it('refuses to derive a minimum below 1.0', async (t) => {
-    await refuses(t, '0.1', 'auto', /Cannot derive a minimum version two minors behind 0\.1/)
+  it('refuses to derive a minimum below 1.0, and takes 1.0 from 1.2', async (t) => {
+    for (const tested of ['0.1', '0.2', '1.0', '1.1']) {
+      await refuses(t, tested, 'auto', new RegExp(`Cannot derive a minimum version two minors behind ${tested.replace('.', '\\.')}`))
+    }
+
+    write('readme.txt', README.replace('least: 6.0', 'least: 0.5'))
+    const { outputs } = await run(t, '1.2', 'auto')
+    assert.strictEqual(outputs['min-version'], '1.0')
   })
 
   it('sets a minimum given as a version exactly', async (t) => {
