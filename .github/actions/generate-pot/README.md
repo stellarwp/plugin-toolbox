@@ -52,6 +52,12 @@ submodule paths are made relative to it first: with `source-path: src`, `src/adm
 in it, such as `node_modules`, is a name that matches at any depth, and is kept as it is, and so is
 a line whose first part holds a `*`, such as `**/private/*.php`.
 
+make-pot matches every exclusion at any depth, and drops a leading `/`: `/src/admin/` with
+`source-path: src` becomes `admin`, which also leaves out `src/modules/admin/`, and `/tests` with
+`source-path: .` also leaves out `src/tests/`. No `--exclude` value matches only at the top of the
+scanned directory. When a directory deeper in the source has the same name as one `.distignore`
+leaves out, rename one of them or narrow `source-path`.
+
 With none of them, make-pot uses its own defaults.
 
 ```yaml

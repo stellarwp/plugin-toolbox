@@ -117,9 +117,13 @@ function readHeaders(value) {
 
 /**
  * Makes a checkout path relative to the scanned directory: make-pot matches `--exclude` against
- * paths relative to `source-path`. A line without a `/` other than a trailing one is a name that
- * matches at any depth, and so is one whose first part holds a `*`, such as a leading `**`: both
- * are kept as they are. Any other line with a `/` is a path from the checkout root.
+ * paths relative to `source-path`. A line without a `/` other than a trailing one, or one whose
+ * first part holds a `*`, such as a leading `**`, is kept as it is. Any other line is read as a path
+ * from the checkout root and made relative to the scanned directory.
+ *
+ * make-pot drops a leading `/` and matches an exclusion at any depth, so the result is not anchored
+ * either: `admin` also leaves out `modules/admin`. There is no `--exclude` form that matches only at
+ * the top of the scanned directory.
  *
  * @param {string}  line     The `.distignore` line or submodule path.
  * @param {string}  base     The scanned directory, relative to the checkout; empty for the checkout.
