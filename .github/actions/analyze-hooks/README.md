@@ -46,15 +46,15 @@ Each is a `patch` entry of type `tweak`, and a kind with nothing to list writes 
   `do_action`, `do_action_ref_array` and `do_action_deprecated` calls under `paths` whose name is a
   complete string literal. A name built
   from a variable, interpolation or concatenation is not listed, and neither is a call inside a
-  comment or in the HTML of a template outside `<?php ... ?>`. The name can be on any line after
+  comment, inside a string, or in the HTML of a template outside `<?php ... ?>`. The name can be on any line after
   the parenthesis. A hook is live while one of its calls is not a `_deprecated` one, deprecated when
   every call is, and gone when it has none. A hook is added when it is live now and was not at the
   tag, deprecated when it is deprecated now and was not, and removed when it is gone now and was
   live or deprecated. A hook that moved, or that still has another call elsewhere, is not listed.
-- **Updated hooks** are hooks in the same state in both trees whose docblocks have more `@since`
-  lines now than at the tag: a change to a hook's signature is recorded as one more line, such as
-  `@since TBD Added the $type parameter.` The lines of every call's docblock count once each. A
-  docblock belongs to a call when no `;`, `{` or `}` comes between them.
+- **Updated hooks** are hooks in the same state in both trees whose docblocks have a `@since` line
+  now that they did not have at the tag: a change to a hook's signature is recorded as one more
+  line, such as `@since TBD Added the $type parameter.` The lines of every call's docblock are read
+  together. A docblock belongs to a call when no `;`, `{` or `}` comes between them.
 - **Views** are the `.php` files matched by `views-paths` that were added, changed or removed since
   the tag. A renamed view is changed, under its new path. Each is named by its path in the
   checkout, `.php` included, so a reader with an override of the file finds it by that path.

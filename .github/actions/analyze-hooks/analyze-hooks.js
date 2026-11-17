@@ -95,11 +95,13 @@ const TOKEN =
  *
  * @param {string} source A PHP file.
  *
- * @returns {{text: string, docblocks: {end: number, since: string[]}[]}} The code, as long as the
- *          source, and each `/**` comment: where it ends and its `@since` lines.
+ * @returns {{text: string, docblocks: {end: number, since: string[]}[], strings: number[][]}} The
+ *          code, as long as the source; each `/**` comment, where it ends and its `@since` lines;
+ *          and where each string and heredoc starts and ends.
  */
 function code(source) {
   const docblocks = []
+  const strings = []
   const pieces = []
   let at = 0
   const blankTo = (end) => {
@@ -132,13 +134,14 @@ function code(source) {
       }
       blankTo(at + match[0].length)
     } else {
+      strings.push([at, at + match[0].length])
       pieces.push(match[0])
       at += match[0].length
     }
   }
   pieces.push(source.slice(at))
 
-  return { text: pieces.join(''), docblocks }
+  return { text: pieces.join(''), docblocks, strings }
 }
 
 /**
@@ -160,9 +163,14 @@ function hooks(sources) {
   const found = { filters: new Map(), actions: new Map() }
 
   for (const source of sources) {
-    const { text, docblocks } = code(source)
+    const { text, docblocks, strings } = code(source)
 
     for (const match of text.matchAll(HOOK_CALL)) {
+      // Code quoted in a string is not a call.
+      if (strings.some(([start, end]) => start <= match.index && match.index < end)) {
+        continue
+      }
+
       const kind = found[match[1] === 'apply_filters' ? 'filters' : 'actions']
       const name = match[3] ?? match[4]
       const hook = kind.get(name) ?? { live: false, since: new Set() }
@@ -177,6 +185,19 @@ function hooks(sources) {
   }
 
   return found
+}
+
+/**
+ * Whether a hook's docblocks have a `@since` line they did not have at the tag. A line that came
+ * with a call deleted since does not hide a new one.
+ *
+ * @param {Hook} was The hook at the tag.
+ * @param {Hook} is  The hook now.
+ *
+ * @returns {boolean} True when a line is new.
+ */
+function hasNewSince(was, is) {
+  return [...is.since].some((line) => !was.since.has(line))
 }
 
 /**
@@ -212,7 +233,7 @@ function analyze(before, after, viewsDiff) {
 
   // A hook that became live is added, one whose calls all became deprecated is deprecated, and one
   // with no call left, live or deprecated before, is removed. One that stayed as it was is updated
-  // when its docblocks have more `@since` lines than at the tag.
+  // when its docblocks have a `@since` line they did not have at the tag.
   for (const kind of ['filters', 'actions']) {
     const names = { Added: [], Updated: [], Deprecated: [], Removed: [] }
 
@@ -221,7 +242,7 @@ function analyze(before, after, viewsDiff) {
 
       if (is !== was) {
         names[{ live: 'Added', deprecated: 'Deprecated', gone: 'Removed' }[is]].push(name)
-      } else if (is !== 'gone' && now[kind].get(name).since.size > old[kind].get(name).since.size) {
+      } else if (is !== 'gone' && hasNewSince(old[kind].get(name), now[kind].get(name))) {
         names.Updated.push(name)
       }
     }

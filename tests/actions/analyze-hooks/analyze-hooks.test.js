@@ -183,6 +183,18 @@ describe('analyze-hooks', () => {
     assert.deepStrictEqual(entries(), { 'analyze-hooks-updated-filters.yaml': entry('Updated filters: `tec_updated`') })
   })
 
+  it('lists a hook as updated when a new @since line replaces one that went with a deleted call', async (t) => {
+    const call = (since) => `/**\n * A hook.\n *\n * @since ${since}\n */\ndo_action( 'tec_swapped' );\n`
+    write('src/Tribe/Swapped.php', `<?php\n${call('1.0.0')}${call('2.0.0')}`)
+    commit('two calls')
+    git('tag', '6.18.3')
+    write('src/Tribe/Swapped.php', `<?php\n/**\n * A hook.\n *\n * @since 1.0.0\n * @since 3.0.0\n */\ndo_action( 'tec_swapped' );\n`)
+    commit('one call, one more @since')
+    await run(t)
+
+    assert.deepStrictEqual(entries(), { 'analyze-hooks-updated-actions.yaml': entry('Updated actions: `tec_swapped`') })
+  })
+
   it('removes an entry from an earlier run when its change is reverted, and is stable when run twice', async (t) => {
     await run(t)
     const first = entries()
@@ -253,6 +265,7 @@ describe('analyze-hooks', () => {
         "# do_action( 'tec_hash' );",
         "/* apply_filters( 'tec_block', $a ); */",
         "$s = '// not a comment'; do_action( 'tec_after_string' );",
+        "$sample = \"do_action( 'tec_in_string' );\"; $code = 'apply_filters( \\'tec_quoted\\', $a );';",
         "?><p>Don't do_action( 'tec_html' );</p><?php do_action( 'tec_in_template' ); ?>",
         '',
       ].join('\n')
@@ -267,6 +280,7 @@ describe('analyze-hooks', () => {
     )
     assert.strictEqual(written['analyze-hooks-removed-actions.yaml'], entry('Removed actions: `tec_removed_action`'))
     assert.ok(!written['analyze-hooks-added-filters.yaml'].includes('tec_block'))
+    assert.ok(!written['analyze-hooks-added-filters.yaml'].includes('tec_quoted'))
   })
 
   it('writes nothing, with a warning, before the first release', async (t) => {
