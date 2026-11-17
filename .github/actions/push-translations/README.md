@@ -55,9 +55,11 @@ jobs:
       cancel-in-progress: false
 ```
 
-GitHub runs the jobs of a group one at a time and keeps only the newest waiting one, so the last
-import is from the newest run. A group holds jobs of one repository only, so push a project
-from one repository.
+GitHub runs the jobs of a group one at a time, so two imports never overlap. It does not order them
+by commit: a job that reaches the group later runs later, even when it holds an older POT, and of
+the jobs waiting only the one that arrived last is kept. Run the push from the commit you release,
+after the steps that generate the POT, so the last job to reach the group holds the newest POT. A
+group holds jobs of one repository only, so push a project from one repository.
 
 ## What it does
 
