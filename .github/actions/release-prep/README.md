@@ -24,7 +24,9 @@ workflow around it, ready to copy into a plugin repository.
 Three tools run, in this order, from the root of the checkout:
 
 1. `pup replace-version <version>` rewrites the version in every file `.puprc` lists under
-   `paths.versions`.
+   `paths.versions`. When the version has four parts, such as `5.30.3.1`, and `package.json` is one
+   of those files, `package.json` gets the first three parts, `5.30.3`: npm only takes semver. Every
+   other file gets all four.
 2. `pup replace-tbd <version>` replaces the TBD placeholders (`@since TBD`, `@deprecated TBD`,
    `_deprecated_function( __METHOD__, 'TBD' )` and the like) in the directories `.puprc` lists under
    `checks.tbd.dirs`.
