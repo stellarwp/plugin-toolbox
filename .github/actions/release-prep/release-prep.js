@@ -29,6 +29,7 @@ const {
   pupRunner,
   lastLine,
 } = require('../../lib/pup.js')
+const { readChangeloggerSection } = require('../../lib/changelogger.js')
 const { readCheckoutFile } = require('../../lib/workspace.js')
 
 /**
@@ -297,21 +298,13 @@ function readPuprc(text) {
  *          `changelogger` section at all.
  */
 function readChangeloggerStrategy(text) {
-  let section = null
-
-  if (text !== null) {
-    try {
-      section = JSON.parse(text)?.changelogger ?? null
-    } catch {
-      section = null
-    }
-  }
+  const section = readChangeloggerSection(text)
 
   if (!section) {
     return { strategy: 'semver', versioning: 'semver', configured: false }
   }
 
-  const versioning = (typeof section === 'object' ? section.versioning : undefined) ?? 'semver'
+  const versioning = section.versioning ?? 'semver'
 
   if (versioning === 'stellarwp' || versioning === 'semver') {
     return { strategy: versioning, versioning, configured: true }
