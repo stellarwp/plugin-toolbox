@@ -631,6 +631,7 @@ jobs:
           base-results: ${{ needs.plan.outputs.base == 'true' && env.BASE_RESULTS || '' }}
           base-required: ${{ needs.plan.outputs.base == 'true' }}
           baseline-changed: ${{ steps.changed.outputs.changed == 'true' }}
+          base-ref: ${{ inputs.base-ref }}
 
       - name: Post the result
         if: ${{ !cancelled() && env.COMMENT == 'true' }}

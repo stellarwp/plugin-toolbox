@@ -302,6 +302,7 @@ not start the run. The job that runs the Plugin Check action lowers itself to `c
 | `base-results` | no | none | Results of the target branch, used as the baseline when there is no baseline file. Not used in `strict` mode |
 | `base-required` | no | `false` | `true` when the caller checked the target branch: a missing `base-results` file then fails the compare |
 | `baseline-changed` | no | `false` | `true` when the pull request changes the baseline file; the comment says so |
+| `base-ref` | no | none | A manual run's `base-ref`. When the baseline file is missing, the notes name this ref instead of saying "there is no baseline file" |
 
 | Output | What it is |
 |---|---|
