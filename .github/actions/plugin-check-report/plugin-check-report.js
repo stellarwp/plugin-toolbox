@@ -623,10 +623,16 @@ function buildComment({ marker, status, badge, column, noBaseline, totals, wentU
  * @param {string}  input.source  `file`, `target` or `none`.
  * @param {boolean} input.changed The pull request changes the baseline file, so the comparison is
  *                                with its own change. A reviewer should look at the diff of the file.
+ * @param {string}  input.baseRef The ref a manual run compares with, or ''. The note names it,
+ *                                because the checked ref may have a baseline file of its own.
  *
  * @returns {string} The line, or ''.
  */
-function baselineNote({ source, changed }) {
+function baselineNote({ source, changed, baseRef = '' }) {
+  if (source === 'target' && baseRef) {
+    return `ℹ️ ${baseRef} has no baseline file, so its own results are the baseline. See the job summary to add one.`
+  }
+
   if (source === 'target') {
     return "ℹ️ There is no baseline file, so the baseline is the target branch's results. See the job summary to add one."
   }
@@ -713,16 +719,19 @@ function readTargetResults(env, name) {
  * @param {object} input.verdict      From evaluate.
  * @param {string} input.baselineName The baseline file's name.
  * @param {object} input.env          GITHUB_RUN_ID and GITHUB_REPOSITORY, for the real command.
+ * @param {string} input.baseRef      The ref a manual run compares with, or ''. Names where the file is missing.
  *
  * @returns {string} Markdown with a final line break, or ''.
  */
-function updateSection({ mode, noFile, verdict, baselineName, env }) {
+function updateSection({ mode, noFile, verdict, baselineName, env, baseRef = '' }) {
   if (mode === 'strict') {
     return ''
   }
 
   const lines = []
-  if (noFile) {
+  if (noFile && baseRef) {
+    lines.push(`${baseRef} has no ${baselineName} yet. To start one there, add the file from this run:`)
+  } else if (noFile) {
     lines.push(`There is no ${baselineName} yet. To start one, add the file from this run:`)
   } else if (verdict.errorsDown > 0) {
     lines.push(`Error counts went down. To lower the baseline, replace ${baselineName} with the file from this run:`)
@@ -761,7 +770,8 @@ function updateSection({ mode, noFile, verdict, baselineName, env }) {
  *                              used as the baseline when there is no file) and
  *                              PLUGIN_CHECK_BASE_REQUIRED (`true`: they must exist),
  *                              PLUGIN_CHECK_BASELINE_CHANGED (`true`: this pull request changes the
- *                              baseline file), COMMENT_BADGE,
+ *                              baseline file), PLUGIN_CHECK_BASE_REF (a manual run's base-ref, named
+ *                              in the notes about a missing baseline file), COMMENT_BADGE,
  *                              RUN_URL, ARTIFACT_URL, GITHUB_STEP_SUMMARY.
  * @param {object}   input.log  Where messages go: `out`, `err`, `error`, `warning`, `notice`.
  *
@@ -875,8 +885,11 @@ function compareOrThrow({ args, env, log }) {
   } else if (env.PLUGIN_CHECK_BASE_RESULTS || env.PLUGIN_CHECK_BASE_REQUIRED === 'true') {
     base = readTargetResults(env, baselineName)
     source = 'target'
+    const baseRef = env.PLUGIN_CHECK_BASE_REF || ''
     log.warning(
-      `No baseline file at ${baselineName}, so the target branch was checked too, and its results are the baseline for this run. That makes the run slower. To stop it, commit the baseline.json from this run's plugin-check-report artifact as ${baselineName}.`
+      baseRef
+        ? `${baseRef} has no baseline file at ${baselineName}, so ${baseRef} was checked too, and its results are the baseline for this run. That makes the run slower. To stop it, commit the baseline.json from this run's plugin-check-report artifact as ${baselineName} on ${baseRef}.`
+        : `No baseline file at ${baselineName}, so the target branch was checked too, and its results are the baseline for this run. That makes the run slower. To stop it, commit the baseline.json from this run's plugin-check-report artifact as ${baselineName}.`
     )
   } else {
     log.warning(
@@ -913,7 +926,7 @@ function compareOrThrow({ args, env, log }) {
     wentUp: verdict.wentUp,
     wentDown: verdict.wentDown,
     updateHint: mode !== 'strict' && hasFile && verdict.errorsDown > 0,
-    note: baselineNote({ source, changed: env.PLUGIN_CHECK_BASELINE_CHANGED === 'true' }),
+    note: baselineNote({ source, changed: env.PLUGIN_CHECK_BASELINE_CHANGED === 'true', baseRef: env.PLUGIN_CHECK_BASE_REF || '' }),
     upList: verdict.upList,
     links: linksLine({ artifactUrl: env.ARTIFACT_URL || '', runUrl, resultsPath }),
   })
@@ -922,7 +935,7 @@ function compareOrThrow({ args, env, log }) {
     writeText(commentFile, `${body}\n`, 'write')
   }
   if (env.GITHUB_STEP_SUMMARY) {
-    const how = updateSection({ mode, noFile: !hasFile, verdict, baselineName, env })
+    const how = updateSection({ mode, noFile: !hasFile, verdict, baselineName, env, baseRef: env.PLUGIN_CHECK_BASE_REF || '' })
     writeText(env.GITHUB_STEP_SUMMARY, `${body}\n${how}`, 'append')
   }
 

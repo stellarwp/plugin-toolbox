@@ -641,6 +641,30 @@ describe('compare with no baseline file, in a pull request', () => {
     assert.match(run.summary, /There is no no-baseline\.json yet\. To start one, add the file from this run:/)
   })
 
+  it('names the base-ref of a manual run in the note and in the job summary', () => {
+    const run = compareWith([fixture('errors-up.txt')], {
+      PLUGIN_CHECK_BASE_RESULTS: baseResults(),
+      PLUGIN_CHECK_BASE_REQUIRED: 'true',
+      PLUGIN_CHECK_BASE_REF: 'master',
+    })
+
+    assert.match(run.stdout, /::warning title=Plugin Check::master has no baseline file at no-baseline\.json, so master was checked too/)
+    assert.match(run.comment, /master has no baseline file, so its own results are the baseline\./)
+    assert.doesNotMatch(run.comment, /There is no baseline file/)
+    assert.match(run.summary, /master has no no-baseline\.json yet\. To start one there, add the file from this run:/)
+  })
+
+  it('keeps the old wording when there is no base-ref', () => {
+    const run = compareWith([fixture('errors-up.txt')], {
+      PLUGIN_CHECK_BASE_RESULTS: baseResults(),
+      PLUGIN_CHECK_BASE_REQUIRED: 'true',
+      PLUGIN_CHECK_BASE_REF: '',
+    })
+
+    assert.match(run.comment, /There is no baseline file, so the baseline is the target branch's results\./)
+    assert.match(run.summary, /There is no no-baseline\.json yet\. To start one, add the file from this run:/)
+  })
+
   it('passes when the pull request has no more errors than the target branch', () => {
     const run = compareWith([fixture('same-as-baseline.txt')], { PLUGIN_CHECK_BASE_RESULTS: baseResults(), PLUGIN_CHECK_BASE_REQUIRED: 'true' })
 

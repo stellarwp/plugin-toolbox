@@ -19,11 +19,25 @@ on:
   # The branches pull requests target. A push there keeps them honest after a merge.
   push:
     branches: [main]
+  # A manual run: the branch to check, and the branch whose baseline it is compared with. The
+  # result is in the run's summary, as there is no pull request to comment on.
   workflow_dispatch:
+    inputs:
+      head-ref:
+        description: Branch to check
+        required: true
+      base-ref:
+        description: Branch to compare with
+        required: true
+        # Change this to the branch your pull requests target. It also has to hold the plugin's
+        # .plugin-check.json and .plugin-check-baseline.json, which the run reads from it.
+        default: main
 
-# A new push to a pull request cancels the run still going for the older commit.
+# A new push to a pull request cancels the run still going for the older commit. A manual run has a
+# group of its own (the run id), so it never cancels another: group names ignore case, and two
+# branches can differ only by case.
 concurrency:
-  group: plugin-check-${{ github.event.pull_request.number || github.ref }}
+  group: plugin-check-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -41,3 +55,6 @@ jobs:
       plugin-slug: my-plugin
       # The pup release your release build uses. It builds the plugin for the check.
       pup-version: '2.0.0'
+      # Empty for a pull request or a push, so those behave as before.
+      head-ref: ${{ inputs.head-ref }}
+      base-ref: ${{ inputs.base-ref }}

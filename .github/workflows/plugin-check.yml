@@ -32,6 +32,13 @@ name: Plugin Check
 # more than the caller gave. `concurrency` is the caller's too: here it would be evaluated with the
 # caller's context and could clash with the caller's own group.
 #
+# A manual run (workflow_dispatch) can pass `head-ref` and `base-ref`: the branch to check, and the
+# branch to compare it with. There is no pull request then, so no comment is written: the result is
+# in the run's summary and in the plugin-check-report artifact, and the run fails the same way.
+# `base-ref` names where the settings come from: its `.plugin-check-baseline.json` and its
+# `.plugin-check.json` (the excluded checks), so a branch older than the Plugin Check setup still
+# runs with the right ones. With no baseline file there, `base-ref` is built and checked too. Both inputs are empty for a pull request or a push.
+#
 # Run it locally: see "Running it locally" in .github/actions/plugin-check-report/README.md. In
 # short, `wp plugin check <slug> --format=json > results.txt` in a local WordPress, then
 # `node .github/actions/plugin-check-report/plugin-check-report.js compare results.txt`.
@@ -109,6 +116,21 @@ on:
         required: false
         type: string
         default: 'false'
+      head-ref:
+        description: >-
+          For a manual run: the branch, tag or commit to check. Empty checks the ref the run was
+          started on. Leave it empty for a pull request or a push.
+        required: false
+        type: string
+        default: ''
+      base-ref:
+        description: >-
+          For a manual run: the branch, tag or commit to compare with. The baseline is its
+          `.plugin-check-baseline.json`; with no such file, it is built and checked too. Empty keeps
+          the baseline file of the checked ref. Leave it empty for a pull request or a push.
+        required: false
+        type: string
+        default: ''
     secrets:
       composer-token:
         description: >-
@@ -173,36 +195,91 @@ jobs:
       matrix: ${{ steps.target.outputs.matrix }}
       base: ${{ steps.target.outputs.base }}
       checks: ${{ steps.exclude.outputs.checks }}
+      head-sha: ${{ steps.refs.outputs.head }}
+      base-sha: ${{ steps.refs.outputs.base }}
     steps:
       - uses: actions/checkout@v7
         with:
           path: source
+          ref: ${{ inputs.head-ref }}
           sparse-checkout: |
             .plugin-check.json
             .plugin-check-baseline.json
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
+      # The two files of base-ref, when a manual run names one. A branch older than the Plugin
+      # Check setup has neither, and without .plugin-check.json it would run the checks that cannot
+      # work, so base-ref decides both the baseline and the excluded checks.
+      - name: Check out the settings of base-ref
+        if: ${{ inputs.base-ref != '' }}
+        uses: actions/checkout@v7
+        with:
+          path: base
+          ref: ${{ inputs.base-ref }}
+          sparse-checkout: |
+            .plugin-check.json
+            .plugin-check-baseline.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # A manual run's refs, as commits, once: the jobs after this one use these, so a push during
+      # the run cannot make the settings, the build and the report come from different commits.
+      # Empty for a pull request or a push, which use the event's own refs.
+      - name: Resolve head-ref and base-ref to commits
+        id: refs
+        env:
+          HEAD_REF: ${{ inputs.head-ref }}
+          BASE_REF: ${{ inputs.base-ref }}
+        run: |
+          if [ -n "$HEAD_REF" ]; then
+            echo "head=$(git -C source rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$BASE_REF" ]; then
+            echo "base=$(git -C base rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The file the settings come from: the one on base-ref when a manual run names it and has the
+      # file, else the checked ref's own.
+      - name: Pick the settings file
+        id: settings
+        env:
+          BASE_REF: ${{ inputs.base-ref }}
+        run: |
+          config=source/.plugin-check.json
+          if [ -n "$BASE_REF" ] && [ -f base/.plugin-check.json ]; then
+            config=base/.plugin-check.json
+          fi
+          echo "config=$GITHUB_WORKSPACE/$config" >> "$GITHUB_OUTPUT"
+
       # The checks to skip: the `exclude-checks` input when it names any, else the list in the
-      # repository's .plugin-check.json. Like the report job, this needs a runner of version 2.336.0
+      # settings file (.plugin-check.json). Like the report job, this needs a runner of version 2.336.0
       # or newer for `$/`; the two small jobs run on ubuntu-latest, which has it.
       - name: List the excluded checks
         id: exclude
         uses: $/.github/actions/plugin-check-report/exclude-checks
         with:
           exclude-checks: ${{ inputs.exclude-checks }}
-          config-file: ${{ github.workspace }}/source/.plugin-check.json
+          config-file: ${{ steps.settings.outputs.config }}
 
-      # A pull request in baseline mode, in a repository with no baseline file, is compared with the
-      # target branch, so that commit is built and checked too. Strict mode needs no baseline, and a
-      # push has no target to compare with.
+      # A pull request, or a manual run with a base-ref, in baseline mode, in a repository with no
+      # baseline file, is compared with the target branch, so that commit is built and checked too.
+      # Strict mode needs no baseline, and a push has no target to compare with. The baseline file
+      # is the one on base-ref when there is one, else the one of the checked ref.
       - name: Decide whether to check the target branch
         id: target
         env:
           EVENT: ${{ github.event_name }}
           MODE: ${{ inputs.mode }}
+          HEAD_REF: ${{ inputs.head-ref }}
+          BASE_REF: ${{ inputs.base-ref }}
         run: |
-          if [ "$EVENT" = pull_request ] && [ "$MODE" != strict ] && [ ! -f source/.plugin-check-baseline.json ]; then
+          baseline=source/.plugin-check-baseline.json
+          [ -z "$BASE_REF" ] || baseline=base/.plugin-check-baseline.json
+          if [ "$EVENT" = workflow_dispatch ]; then
+            echo "::notice title=Plugin Check::Checking ${HEAD_REF:-$GITHUB_REF_NAME} against ${BASE_REF:-the baseline file of ${HEAD_REF:-$GITHUB_REF_NAME}}."
+          fi
+          if { [ "$EVENT" = pull_request ] || [ -n "$BASE_REF" ]; } && [ "$MODE" != strict ] && [ ! -f "$baseline" ]; then
             echo 'matrix={"target":["head","base"]}' >> "$GITHUB_OUTPUT"
             echo 'base=true' >> "$GITHUB_OUTPUT"
             echo "::notice title=Plugin Check::There is no .plugin-check-baseline.json, so the target branch is built and checked too. Commit the baseline.json from the plugin-check-report artifact of this run to stop that."
@@ -241,8 +318,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: source
-          # "base" is the commit the pull request targets, as it is without the pull request.
-          ref: ${{ matrix.target == 'base' && github.event.pull_request.base.sha || '' }}
+          # "base" is the commit the pull request targets, as it is without the pull request, or the
+          # base-ref of a manual run. "head" is the head-ref of a manual run, else the run's own ref.
+          # A manual run's refs are the commits the plan job resolved.
+          ref: ${{ matrix.target == 'base' && (github.event.pull_request.base.sha || needs.plan.outputs.base-sha) || needs.plan.outputs.head-sha }}
           submodules: ${{ inputs.submodules }}
           # Nothing here pushes over git, and the job goes on to run third-party code.
           persist-credentials: false
@@ -484,6 +563,9 @@ jobs:
         uses: actions/checkout@v7
         with:
           path: source
+          # A manual run takes the baseline file from base-ref, or from head-ref when there is none:
+          # the same commits the plan job resolved.
+          ref: ${{ needs.plan.outputs.base-sha || needs.plan.outputs.head-sha }}
           sparse-checkout: .plugin-check-baseline.json
           sparse-checkout-cone-mode: false
           # The merge commit and its two parents, to see whether the pull request changes the file.
@@ -549,6 +631,7 @@ jobs:
           base-results: ${{ needs.plan.outputs.base == 'true' && env.BASE_RESULTS || '' }}
           base-required: ${{ needs.plan.outputs.base == 'true' }}
           baseline-changed: ${{ steps.changed.outputs.changed == 'true' }}
+          base-ref: ${{ inputs.base-ref }}
 
       - name: Post the result
         if: ${{ !cancelled() && env.COMMENT == 'true' }}

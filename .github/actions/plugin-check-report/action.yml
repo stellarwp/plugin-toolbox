@@ -59,6 +59,12 @@ inputs:
       passes as "no baseline".
     required: false
     default: 'false'
+  base-ref:
+    description: >-
+      The ref a manual run compares with. Empty for a pull request or a push. When the baseline file
+      is missing, the notes name this ref, because the checked ref may have a baseline file of its own.
+    required: false
+    default: ''
   baseline-changed:
     description: >-
       `true` when the pull request changes the baseline file. The comment then says so, because the
@@ -125,6 +131,7 @@ runs:
         PLUGIN_CHECK_BASE_RESULTS: ${{ inputs.base-results }}
         PLUGIN_CHECK_BASE_REQUIRED: ${{ inputs.base-required }}
         PLUGIN_CHECK_BASELINE_CHANGED: ${{ inputs.baseline-changed }}
+        PLUGIN_CHECK_BASE_REF: ${{ inputs.base-ref }}
         COMMENT_MARKER: ${{ steps.paths.outputs.marker }}
         ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
