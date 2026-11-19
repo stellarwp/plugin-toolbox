@@ -265,8 +265,10 @@ A `workflow_dispatch` run has no pull request, so it has no head, no target and 
 inputs say what a pull request would say:
 
 - `head-ref` is what is built and checked. Empty means the ref the run was started on.
-- `base-ref` is what it is compared with. The baseline is `.plugin-check-baseline.json` on that ref.
-  With no such file there, `base-ref` is built and checked too, as a pull request's target is.
+- `base-ref` is what it is compared with. The baseline is `.plugin-check-baseline.json` on that ref,
+  and the excluded checks are its `.plugin-check.json`, so a branch older than the Plugin Check
+  setup still runs with the right ones. With no baseline file there, `base-ref` is built and checked
+  too, as a pull request's target is. The `exclude-checks` input still replaces the file.
 
 The caller passes them from its own `workflow_dispatch` inputs; see
 `templates/workflows/plugin-check.yml`. For a pull request or a push both are empty, and nothing

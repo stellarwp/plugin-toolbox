@@ -35,8 +35,9 @@ name: Plugin Check
 # A manual run (workflow_dispatch) can pass `head-ref` and `base-ref`: the branch to check, and the
 # branch to compare it with. There is no pull request then, so no comment is written: the result is
 # in the run's summary and in the plugin-check-report artifact, and the run fails the same way.
-# `base-ref` names where the baseline comes from: its `.plugin-check-baseline.json`, or, when it has
-# none, its own build and check. Both inputs are empty for a pull request or a push.
+# `base-ref` names where the settings come from: its `.plugin-check-baseline.json` and its
+# `.plugin-check.json` (the excluded checks), so a branch older than the Plugin Check setup still
+# runs with the right ones. With no baseline file there, `base-ref` is built and checked too. Both inputs are empty for a pull request or a push.
 #
 # Run it locally: see "Running it locally" in .github/actions/plugin-check-report/README.md. In
 # short, `wp plugin check <slug> --format=json > results.txt` in a local WordPress, then
@@ -205,26 +206,43 @@ jobs:
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
-      # The baseline file of base-ref, when a manual run names one. Only that file, as above.
-      - name: Check out the baseline file of base-ref
+      # The two files of base-ref, when a manual run names one. A branch older than the Plugin
+      # Check setup has neither, and without .plugin-check.json it would run the checks that cannot
+      # work, so base-ref decides both the baseline and the excluded checks.
+      - name: Check out the settings of base-ref
         if: ${{ inputs.base-ref != '' }}
         uses: actions/checkout@v7
         with:
           path: base
           ref: ${{ inputs.base-ref }}
-          sparse-checkout: .plugin-check-baseline.json
+          sparse-checkout: |
+            .plugin-check.json
+            .plugin-check-baseline.json
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
+      # The file the settings come from: the one on base-ref when a manual run names it and has the
+      # file, else the checked ref's own.
+      - name: Pick the settings file
+        id: settings
+        env:
+          BASE_REF: ${{ inputs.base-ref }}
+        run: |
+          config=source/.plugin-check.json
+          if [ -n "$BASE_REF" ] && [ -f base/.plugin-check.json ]; then
+            config=base/.plugin-check.json
+          fi
+          echo "config=$GITHUB_WORKSPACE/$config" >> "$GITHUB_OUTPUT"
+
       # The checks to skip: the `exclude-checks` input when it names any, else the list in the
-      # repository's .plugin-check.json. Like the report job, this needs a runner of version 2.336.0
+      # settings file (.plugin-check.json). Like the report job, this needs a runner of version 2.336.0
       # or newer for `$/`; the two small jobs run on ubuntu-latest, which has it.
       - name: List the excluded checks
         id: exclude
         uses: $/.github/actions/plugin-check-report/exclude-checks
         with:
           exclude-checks: ${{ inputs.exclude-checks }}
-          config-file: ${{ github.workspace }}/source/.plugin-check.json
+          config-file: ${{ steps.settings.outputs.config }}
 
       # A pull request, or a manual run with a base-ref, in baseline mode, in a repository with no
       # baseline file, is compared with the target branch, so that commit is built and checked too.
