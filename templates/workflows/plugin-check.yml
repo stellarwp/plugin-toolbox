@@ -33,10 +33,11 @@ on:
         # .plugin-check.json and .plugin-check-baseline.json, which the run reads from it.
         default: main
 
-# A new push to a pull request cancels the run still going for the older commit. Manual runs of
-# different branches have their own groups, so they do not cancel each other.
+# A new push to a pull request cancels the run still going for the older commit. A manual run has a
+# group of its own (the run id), so it never cancels another: group names ignore case, and two
+# branches can differ only by case.
 concurrency:
-  group: plugin-check-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && format('{0}:{1}:{2}', github.ref, inputs.head-ref, inputs.base-ref)) || github.ref }}
+  group: plugin-check-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || github.ref }}
   cancel-in-progress: true
 
 permissions:
