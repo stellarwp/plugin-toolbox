@@ -29,6 +29,8 @@ on:
       base-ref:
         description: Branch to compare with
         required: true
+        # Change this to the branch your pull requests target. It also has to hold the plugin's
+        # .plugin-check.json and .plugin-check-baseline.json, which the run reads from it.
         default: main
 
 # A new push to a pull request cancels the run still going for the older commit.
