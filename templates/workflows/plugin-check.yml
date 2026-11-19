@@ -36,7 +36,7 @@ on:
 # A new push to a pull request cancels the run still going for the older commit. Manual runs of
 # different branches have their own groups, so they do not cancel each other.
 concurrency:
-  group: plugin-check-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && format('{0}-{1}-{2}', github.ref, inputs.head-ref, inputs.base-ref)) || github.ref }}
+  group: plugin-check-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && format('{0}:{1}:{2}', github.ref, inputs.head-ref, inputs.base-ref)) || github.ref }}
   cancel-in-progress: true
 
 permissions:
