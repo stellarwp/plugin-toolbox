@@ -154,6 +154,12 @@ jobs:
       - name: Set up PHP
         if: steps.changes.outputs.changed == 'true'
         uses: shivammathur/setup-php@v2
+        # Blacksmith reports itself as self-hosted, so setup-php would apt-install PHP from the
+        # Launchpad PPA on every run and fail with only "Could not setup PHP" when Launchpad is down.
+        # use_builds_cache downloads the prebuilt PHP that GitHub-hosted runners get instead. Elsewhere
+        # it stays empty: setup-php reads an explicit 'false' as "use the PPA", even on GitHub-hosted.
+        env:
+          use_builds_cache: ${{ startsWith(runner.name, 'blacksmith-') && 'true' || '' }}
         with:
           php-version: ${{ inputs.php-version }}
           extensions: ${{ inputs.php-extensions }}
