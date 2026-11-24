@@ -230,6 +230,58 @@ describe('analyze-hooks', () => {
     assert.deepStrictEqual(entries(), {})
   })
 
+  it('reads a re-use docblock that a blank line, a statement\'s first line or nothing separates from the call', async (t) => {
+    const reuse = '/** This filter is documented in wp-includes/post-template.php */'
+    write(
+      'src/Tribe/Reuses.php',
+      [
+        '<?php',
+        reuse,
+        '',
+        "$c = apply_filters( 'the_content', $c );",
+        reuse,
+        '$t = sprintf(',
+        "\t'%s', apply_filters( 'the_title', $t )",
+        ');',
+        `${reuse} $e = apply_filters( 'the_excerpt', $e );`,
+        '',
+      ].join('\n')
+    )
+    commit('re-uses')
+    await run(t)
+
+    const listed = Object.values(entries()).join('')
+    for (const name of ['the_content', 'the_title', 'the_excerpt']) {
+      assert.ok(!listed.includes(name), name)
+    }
+  })
+
+  it('does not read a line that names a hook under another label as its entry', async (t) => {
+    const docblock = (...since) => `/**\n * A hook.\n *\n${since.map((line) => ` * @since ${line}\n`).join('')} */\n`
+    write('src/Tribe/Updated.php', `<?php\n${docblock('5.0.0')}$x = apply_filters( 'tec_x', $x );\n`)
+    commit('a hook')
+    git('tag', '6.18.3')
+    write('src/Tribe/Updated.php', `<?php\n${docblock('5.0.0', 'TBD Added a param.')}$x = apply_filters( 'tec_x', $x );\n`)
+    commit('update it')
+    write('changelog.md', '* Tweak - Fixed the args of `tec_x`.\n* Tweak - Added filters: `tec_x`\n')
+    await run(t, { INPUT_TYPES: '{"updated-filters": "tweak"}' })
+
+    assert.deepStrictEqual(entries(), { 'analyze-hooks-updated-filters.yaml': entry('`tec_x`', 'tweak') })
+  })
+
+  it('reads a bullet that wraps onto the next lines as one line', async (t) => {
+    write(
+      'readme.txt',
+      '== Changelog ==\n\n= [6.18.3] TBD =\n\n* Tweak - Added actions: `tec_added_action`,\n  `tec_added_ref`\n* Tweak - Removed filters:\n`tec_removed_filter`.\n\n= [6.18.2] 2026-01-01 =\n'
+    )
+    await run(t)
+
+    const written = Object.keys(entries())
+    assert.ok(!written.includes('analyze-hooks-added-actions.yaml'))
+    assert.ok(!written.includes('analyze-hooks-removed-filters.yaml'))
+    assert.ok(written.includes('analyze-hooks-added-filters.yaml'))
+  })
+
   it('reads an entry as written when a line lists its names, whatever the strategy wrote around them', async (t) => {
     write(
       'package.json',

@@ -10,9 +10,10 @@
  *    A hook is added when it is live now and was not at the tag, deprecated when every call became
  *    a `_deprecated` one, and removed when no call is left, so one that moved, or that still has
  *    another call elsewhere, is not listed. A hook in both trees whose docblocks gained a `@since`
- *    line is updated. A docblock belongs to a call when it ends on the line above the call's line.
- *    A call under a docblock that says the hook is documented in another file is a re-use: it does
- *    not make a hook added or updated, and while it is there the hook is not removed;
+ *    line is updated, reading the `@since` lines of a docblock that ends on the line above a call's
+ *    line. A call after a docblock that says the hook is documented in another file, with no `;`,
+ *    `{` or `}` between them, is a re-use: it does not make a hook added or updated, and while it
+ *    is there the hook is not removed;
  *  - the `.php` files under `views-paths` that `git diff` reports as added, changed or renamed, or
  *    removed, by their path in the checkout.
  *
@@ -158,9 +159,10 @@ function code(source) {
 /**
  * The hooks a set of PHP files calls. A hook is live while one of its calls is not a `_deprecated`
  * one, and deprecated when every call is. Its `@since` lines are those of the docblock that ends on
- * the line above each call's line. A call under a docblock that says `This filter is documented in`
- * or `This action is documented in` re-uses a hook documented elsewhere: it marks the hook as
- * called, and its `@since` lines and whether it is deprecated are not read.
+ * the line above each call's line. A call is a re-use of a hook documented elsewhere when the
+ * docblock before it, with no `;`, `{` or `}` between them, says `This filter is documented in` or
+ * `This action is documented in`: it marks the hook as called, and its `@since` lines and whether
+ * it is deprecated are not read.
  *
  * @param {string[]} sources The files.
  *
@@ -181,14 +183,18 @@ function hooks(sources) {
       const kind = found[match[1] === 'apply_filters' ? 'filters' : 'actions']
       const name = match[3] ?? match[4]
       const hook = kind.get(name) ?? { own: false, live: false, since: new Set() }
-      const last = docblocks.findLast((doc) => doc.end <= match.index)
-      // One line break between the two: the `*/` is on the line above the call's.
-      const docblock = last && text.slice(last.end, match.index).split('\n').length === 2 ? last : undefined
+      const docblock = docblocks.findLast((doc) => doc.end <= match.index)
+      const between = docblock ? text.slice(docblock.end, match.index) : ''
 
-      if (!docblock?.reuse) {
+      const reuse = docblock?.reuse && !/[;{}]/.test(between)
+
+      if (!reuse) {
         hook.own = true
         hook.live ||= match[2] !== '_deprecated'
-        docblock?.since.forEach((line) => hook.since.add(line))
+        // One line break between the two: the `*/` is on the line above the call's.
+        if (between.split('\n').length === 2) {
+          docblock.since.forEach((line) => hook.since.add(line))
+        }
       }
       kind.set(name, hook)
     }
@@ -430,9 +436,9 @@ function scalar(body, key) {
  * and every one of its names in backticks, or in a pending change file that is not this action's.
  *
  * The label is the text before the names, `Added filters:`, or for an entry with a type of its own
- * one of the labels the changelogger writes that type with. Matching names rather than the whole
- * line holds for a strategy that adds a period, or that merges entries of a type into one line
- * with names a developer wrote by hand.
+ * one of the labels the changelogger writes that type with. It is followed by a name, directly or
+ * after ` - `. Matching names rather than the whole line holds for a strategy that adds a period,
+ * or that merges entries of a type into one line with names a developer wrote by hand.
  *
  * @param {{type: string, text: string, label: string|undefined, names: string[]}} entry The entry.
  * @param {object}                   known
@@ -454,9 +460,12 @@ function isKnown(entry, known, labels) {
   const typeLabels = configured.length ? configured : [entry.type, `${entry.type[0].toUpperCase()}${entry.type.slice(1)}`]
   const candidates = entry.label ? [entry.label] : typeLabels
   const names = entry.names.map((name) => squash(`\`${name}\``))
+  // The label is followed by a name, or by ` - ` and a name, so `Tweak - Fixed the args of `x``
+  // is not read as a `Tweak` entry for `x`.
+  const labelled = (line, label) => [`${label}\``, `${label}-\``].some((start) => line.includes(start))
 
   return known.lines.some(
-    (line) => candidates.some((label) => line.includes(squash(label))) && names.every((name) => line.includes(name))
+    (line) => candidates.some((label) => labelled(line, squash(label))) && names.every((name) => line.includes(name))
   )
 }
 
@@ -497,15 +506,23 @@ function sinceLastRelease(text, version) {
  */
 function readKnown(cwd, changesDir, changelogFiles, version) {
   // Each `* ` or `- ` line after the heading above it, which is where keepachangelog writes the
-  // type's label: `### Changed` then `- Added filters: …`.
+  // type's label: `### Changed` then `- Added filters: …`. The lines a bullet wraps onto, up to a
+  // blank line, a heading or the next bullet, are part of it.
   const lines = []
   for (const file of changelogFiles) {
     let heading = ''
+    let bullet = false
     for (const line of sinceLastRelease(readCheckoutFile(cwd, file) ?? '', version).split('\n')) {
       if (/^[=#]/.test(line)) {
         heading = line
+        bullet = false
       } else if (/^[*-] /.test(line)) {
         lines.push(squash(`${heading} ${line.slice(2)}`))
+        bullet = true
+      } else if (line.trim() === '') {
+        bullet = false
+      } else if (bullet) {
+        lines[lines.length - 1] += squash(line)
       }
     }
   }
