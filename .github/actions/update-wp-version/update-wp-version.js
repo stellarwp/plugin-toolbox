@@ -303,8 +303,9 @@ function readPluginFile(cwd, required) {
  */
 function isAbove(current, version) {
   const numeric = current.match(/^\d+(\.\d+)*/)?.[0]
+  const floor = version.match(/^\d+(\.\d+)*/)?.[0]
 
-  return numeric !== undefined && compareVersions(numeric, version) > 0
+  return numeric !== undefined && floor !== undefined && compareVersions(numeric, floor) > 0
 }
 
 /**

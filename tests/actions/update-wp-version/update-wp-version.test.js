@@ -30,7 +30,7 @@ const PLUGIN = `<?php
  */
 `
 
-/** A plugin file that also carries the tested version, as LearnDash's does. */
+/** A plugin file that also carries the tested version. */
 const PLUGIN_TESTED = `<?php
 /**
  * Plugin Name: Test Plugin
@@ -266,6 +266,11 @@ describe('update-wp-version', () => {
     write('readme.txt', README.replace('least: 6.0', 'least: 6.9'))
     write('test-plugin.php', PLUGIN.replace('least: 6.0', 'least: 7.0'))
     assert.strictEqual((await run(t, '7.0', 'auto')).outputs['min-version'], '7.0')
+
+    // A kept value with a suffix is compared by its numeric part, on either side.
+    write('readme.txt', README.replace('least: 6.0', 'least: 6.9-RC1'))
+    write('test-plugin.php', PLUGIN.replace('least: 6.0', 'least: 6.8'))
+    assert.strictEqual((await run(t, '7.0', 'auto')).outputs['min-version'], '6.9-RC1')
 
     write('readme.txt', README.replace('Requires at least: 6.0\n', ''))
     write('test-plugin.php', PLUGIN.replace(' * Requires at least: 6.0\n', ''))

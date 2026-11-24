@@ -48,8 +48,7 @@ when readme.txt and the plugin file end with different versions, the higher one 
 file carries the header, the output is empty.
 
 The plugin file is the single root-level `.php` file `.puprc` lists under `paths.versions`. Some
-plugins keep `Tested up to:` there as well as in `readme.txt`, as LearnDash does in `sfwd_lms.php`,
-so the action sets it in both.
+plugins keep `Tested up to:` there as well as in `readme.txt`, so the action sets it in both.
 
 Only an existing header is rewritten. A file without the header is left as it is, and a missing
 `readme.txt` is skipped. Only the first line carrying a header changes, so a version quoted further
@@ -69,7 +68,7 @@ Nothing to set `Tested up to:` in `readme.txt`. For the plugin file, a `.puprc` 
 {
   "paths": {
     "versions": [
-      { "file": "the-events-calendar.php", "regex": "(Version: )(.+)" },
+      { "file": "my-plugin.php", "regex": "(Version: )(.+)" },
       { "file": "readme.txt", "regex": "(Stable tag: )(.+)" }
     ]
   }
@@ -77,7 +76,7 @@ Nothing to set `Tested up to:` in `readme.txt`. For the plugin file, a `.puprc` 
 ```
 
 The same file listed several times, once per regex, counts as one. A leading `./` is allowed:
-`./the-events-calendar.php` is the same root file.
+`./my-plugin.php` is the same root file.
 
 ## What it refuses
 
