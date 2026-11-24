@@ -23,7 +23,7 @@ Generates a plugin's POT file with `wp i18n make-pot`, and says whether its stri
 Build the assets first when the plugin ships compiled JavaScript with strings in it. The action
 writes the POT and commits nothing.
 
-On a runner that reports itself as self-hosted, such as Blacksmith, setup-php installs PHP with apt
+On a runner that reports itself as self-hosted, setup-php installs PHP with apt
 from the Launchpad PPA, and the step fails with only `Could not setup PHP` when Launchpad is down.
 Set `use_builds_cache: true` in the setup-php step's `env` to download the prebuilt PHP that
 GitHub-hosted runners get instead.
@@ -32,9 +32,10 @@ GitHub-hosted runners get instead.
 
 Without `pot-path`, the POT goes to `<Domain Path>/<Text Domain>.pot` under `source-path`, read from
 the plugin's main file: the first top-level PHP file of `source-path`, in name order, with a
-`Plugin Name` header in its first 8 KiB. A `Text Domain` of
-`my-plugin` and a `Domain Path` of `/languages/` give `languages/my-plugin.pot`. The `domain`
-input stands in for `Text Domain`.
+`Plugin Name` header in its first 8 KiB. A `Text Domain` of `my-plugin` and a `Domain Path` of
+`/languages/` give `languages/my-plugin.pot`. The `domain` input stands in for `Text Domain`. When
+`domain` is empty, the header's `Text Domain` is passed to make-pot as `--domain`, so the POT holds
+the domain it is named after.
 
 A `Text Domain` read from the header and each part of the `Domain Path` take letters, digits,
 dots, dashes and underscores, and do not start with a dash or a dot, so they cannot read as an
@@ -64,25 +65,32 @@ Four lists are joined into `--exclude`, each entry once:
 
 - The lines of `.distignore`, when the checkout has one: what the zip leaves out is not translated.
   Empty lines and `#` comments are skipped.
-- The path of each line of the root `.gitattributes` that sets `export-ignore`, which the zip
-  leaves out too. As in git, the last of `export-ignore`, `-export-ignore` and `!export-ignore` on a
-  line wins. `[attr]` macro lines, quoted patterns and patterns with a `,`, which would split the
-  `--exclude` value, are skipped. A `.gitattributes` in a subdirectory is not read.
-- The path of each git submodule, read from `.gitmodules`. A submodule has its own text domain and
-  its own POT, and its strings do not belong in this one.
+- The tracked files and directories git marks `export-ignore`, which the zip leaves out too. The
+  action asks git with `git ls-files` and `git check-attr`, so every `.gitattributes` git reads
+  counts, and a later line that unsets the attribute wins, as in git: `*.php export-ignore`
+  followed by `plugin.php -export-ignore` keeps `plugin.php`. A directory marked as a whole, such
+  as `/tests export-ignore`, is given as the directory, and so is a directory whose tracked files
+  are all marked. A path with a `,`, which would split the `--exclude` value, is skipped with a
+  warning, and its strings are scanned.
+- The path of each git submodule, read from `.gitmodules` with `git config`. A submodule has its
+  own text domain and its own POT, and its strings do not belong in this one.
 - The lines of the `exclude` input, passed as given.
 
+Reading the `export-ignore` paths needs a git checkout: in a directory that is not one, the step
+fails before anything is downloaded.
+
 make-pot matches an exclusion against paths relative to `source-path`, so the `.distignore`,
-`.gitattributes` and submodule paths are made relative to it first: with `source-path: src`,
+`export-ignore` and submodule paths are made relative to it first: with `source-path: src`,
 `src/admin` becomes `admin`, and a path outside `src`, such as `/tests`, is dropped. A path with no
 `/` in it, such as `node_modules`, is a name that matches at any depth, and is kept as it is, and so
-is a path whose first part holds a `*`, such as `**/private/*.php`.
+is a `.distignore` line whose first part holds a `*`, such as `**/private/*.php`. The
+`export-ignore` and submodule paths are always read from the checkout root.
 
 make-pot matches every exclusion at any depth, and drops a leading `/`: `/src/admin/` with
 `source-path: src` becomes `admin`, which also leaves out `src/modules/admin/`, and `/tests` with
 `source-path: .` also leaves out `src/tests/`. No `--exclude` value matches only at the top of the
 scanned directory. When a directory deeper in the source has the same name as one `.distignore` or
-`.gitattributes` leaves out, rename the deeper one.
+`export-ignore` leaves out, rename the deeper one.
 
 make-pot always adds its own exclusions to these. In the i18n-command release that wp-cli 2.12.0
 bundles, v2.6.5, they are `node_modules`, `.*`, `vendor`, `Gruntfile.js`, `webpack.config.js`,
@@ -123,11 +131,11 @@ depth.
 
 | Input | Default | |
 |---|---|---|
-| `pot-path` | | Where the POT is written, relative to the checkout, e.g. `lang/my-plugin.pot`. Empty is `<Domain Path>/<Text Domain>.pot` from the plugin header, under `source-path`. |
+| `pot-path` | | Where the POT is written, relative to the checkout, e.g. `languages/my-plugin.pot`. Empty is `<Domain Path>/<Text Domain>.pot` from the plugin header, under `source-path`. |
 | `source-path` | `.` | The directory scanned for strings, relative to the checkout. |
-| `domain` | | The text domain, passed as `--domain`, and the POT's file name when `pot-path` is empty. Empty leaves it to make-pot. |
+| `domain` | | The text domain, passed as `--domain`, and the POT's file name when `pot-path` is empty. Empty passes the header's `Text Domain` when `pot-path` is empty, and leaves it to make-pot otherwise. |
 | `headers` | | POT headers to set, as a JSON object of strings in a string. Empty sets none. |
-| `exclude` | | Extra exclusions, one per line, relative to `source-path`, added to `.distignore`, the `export-ignore` paths of `.gitattributes` and the submodule paths. |
+| `exclude` | | Extra exclusions, one per line, relative to `source-path`, added to `.distignore`, the paths git marks `export-ignore` and the submodule paths. |
 | `working-directory` | | Where the repository is checked out. Empty is the workspace. |
 
 ## Outputs

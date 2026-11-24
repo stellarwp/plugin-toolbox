@@ -86,11 +86,11 @@ describe('generate-pot', () => {
    * @param {object} options.wpCli     The release expected; the stand-in's by default.
    * @param {string} options.cwd       The workspace.
    *
-   * @returns {Promise<{outputs: object, calls: object[], php: object}>} The outputs, the curl and
-   *          php calls, and the php call.
+   * @returns {Promise<{outputs: object, calls: object[], php: object, logged: Function}>} The
+   *          outputs, the curl and php calls, the php call, and a reader for the log.
    */
   const run = async (t, { inputs = {}, generated, phar = PHAR, wpCli = FAKE_WP_CLI, cwd = repo } = {}) => {
-    const { core, outputs } = await coreWithOutputs(t)
+    const { core, outputs, logged } = await coreWithOutputs(t)
     const real = await recordedRealExec()
     const fake = recordingExec([
       { command: 'curl', effect: (args) => fs.writeFileSync(args[args.indexOf('-o') + 1], phar) },
@@ -118,7 +118,7 @@ describe('generate-pot', () => {
       wpCli,
     })
 
-    return { outputs: outputs(), calls: fake.calls, php: fake.calls.find((call) => call.command === 'php') }
+    return { outputs: outputs(), calls: fake.calls, php: fake.calls.find((call) => call.command === 'php'), logged }
   }
 
   beforeEach(() => {
@@ -135,7 +135,7 @@ describe('generate-pot', () => {
   })
 
   describe('the wp-cli phar', () => {
-    it('pins the release TEC runs', () => {
+    it('pins wp-cli 2.12.0', () => {
       assert.deepStrictEqual(WP_CLI, {
         version: '2.12.0',
         sha512:
@@ -181,6 +181,7 @@ describe('generate-pot', () => {
     it('leaves no file behind when the download fails', async (t) => {
       const { core } = await coreWithOutputs(t)
       const { exec } = recordingExec([
+        { command: 'git', stdout: '' },
         { command: 'curl', exitCode: 56, stderr: 'Connection reset', effect: (args) => fs.writeFileSync(args[args.indexOf('-o') + 1], 'half') },
       ])
 
@@ -213,7 +214,7 @@ describe('generate-pot', () => {
         generated: pot(),
         inputs: {
           INPUT_SOURCE_PATH: 'src',
-          INPUT_DOMAIN: 'kadence-blocks',
+          INPUT_DOMAIN: 'my-plugin',
           INPUT_HEADERS: '{ "Report-Msgid-Bugs-To": "https://example.com/bugs", "Last-Translator": "" }',
         },
       })
@@ -222,7 +223,7 @@ describe('generate-pot', () => {
         'src',
         'lang/plugin.pot',
         '--skip-audit',
-        '--domain=kadence-blocks',
+        '--domain=my-plugin',
         '--headers={"Report-Msgid-Bugs-To":"https://example.com/bugs","Last-Translator":""}',
       ])
     })
@@ -245,36 +246,65 @@ describe('generate-pot', () => {
       assert.strictEqual(php.args.at(-1), '--exclude=node_modules,internal.php,admin,**/private/*.php,*/fixtures,vendor/lib,src/*.map')
     })
 
-    it('excludes the export-ignore paths of .gitattributes, relative to source-path', async (t) => {
-      write(
-        '.gitattributes',
-        '# Not in the zip\n* text=auto\n/src/tests export-ignore\n/.github  export-ignore  linguist-vendored\n' +
-          'src/docs -export-ignore\nsrc/keep !export-ignore\nnode_modules export-ignore\n/README.md export-ignore\n'
-      )
-      write('.distignore', 'node_modules\n')
+    it('reads a quoted submodule path from .gitmodules the way git does', async (t) => {
+      write('.gitmodules', '[submodule "common"]\n\tpath = "common lib"\n')
+
+      const { php } = await run(t, { generated: pot() })
+
+      assert.strictEqual(php.args.at(-1), '--exclude=common lib')
+    })
+
+    it('excludes the tracked files git marks export-ignore, relative to source-path', async (t) => {
+      write('.gitattributes', '/src/tests export-ignore\nsrc/mixed/drop.php export-ignore\n/README.md export-ignore\n')
+      for (const name of ['README.md', 'src/a.php', 'src/mixed/drop.php', 'src/mixed/keep.php', 'src/tests/a.php', 'src/tests/b.php']) {
+        write(name, '<?php')
+      }
+      commit()
 
       const { php } = await run(t, { generated: pot(), inputs: { INPUT_SOURCE_PATH: 'src' } })
 
-      assert.strictEqual(php.args.at(-1), '--exclude=node_modules,tests')
+      assert.strictEqual(php.args.at(-1), '--exclude=mixed/drop.php,tests')
     })
 
-    it('takes the last export-ignore, -export-ignore or !export-ignore of a line, as git does', async (t) => {
-      write('.gitattributes', 'a export-ignore -export-ignore\nb -export-ignore export-ignore\nc export-ignore !export-ignore\n')
+    it('collapses the files to their directory when git marks every tracked file under it', async (t) => {
+      write('.gitattributes', '*.md export-ignore\ndocs/** export-ignore\n')
+      for (const name of ['README.md', 'docs/a.php', 'docs/deep/b.php', 'src/notes.md', 'src/a.php']) {
+        write(name, '<?php')
+      }
+      commit()
 
       const { php } = await run(t, { generated: pot() })
 
-      assert.strictEqual(php.args.at(-1), '--exclude=b')
+      assert.strictEqual(php.args.at(-1), '--exclude=README.md,docs,src/notes.md')
     })
 
-    it('skips the [attr] macro lines, quoted patterns and patterns with a comma of .gitattributes', async (t) => {
-      write(
-        '.gitattributes',
-        '[attr]dist export-ignore\n"with space" export-ignore\na,b export-ignore\n/kept export-ignore\n'
-      )
+    it('keeps a file a later .gitattributes line takes out of export-ignore', async (t) => {
+      write('.gitattributes', '*.php export-ignore\nplugin.php -export-ignore\n')
+      write('other.php', '<?php')
+      commit()
 
       const { php } = await run(t, { generated: pot() })
 
-      assert.strictEqual(php.args.at(-1), '--exclude=/kept')
+      assert.strictEqual(php.args.at(-1), '--exclude=other.php')
+    })
+
+    it('skips an export-ignore path with a comma, which --exclude cannot hold, and warns', async (t) => {
+      write('.gitattributes', '*.txt export-ignore\n')
+      write('a,b.txt', 'x')
+      write('c.txt', 'x')
+      commit()
+
+      const { php, logged } = await run(t, { generated: pot() })
+
+      assert.strictEqual(php.args.at(-1), '--exclude=c.txt')
+      assert.match(logged(), /::warning::a,b\.txt is marked export-ignore, but --exclude cannot hold a comma/)
+    })
+
+    it('fails before the download when the checkout is not a git repository', async (t) => {
+      fs.rmSync(path.join(repo, '.git'), { recursive: true, force: true })
+
+      await assert.rejects(run(t, { generated: pot() }), /git ls-files failed/)
+      assert.deepStrictEqual(fs.readdirSync(runnerTemp), [])
     })
 
     it('reads .distignore in the working directory', async (t) => {
@@ -294,7 +324,10 @@ describe('generate-pot', () => {
     it('fails when make-pot fails', async (t) => {
       const { core } = await coreWithOutputs(t)
       fs.writeFileSync(path.join(runnerTemp, 'wp-cli-9.9.9.phar'), PHAR)
-      const { exec } = recordingExec([{ command: 'php', exitCode: 1, stderr: 'Error: Not a valid source directory.' }])
+      const { exec } = recordingExec([
+        { command: 'git', stdout: '' },
+        { command: 'php', exitCode: 1, stderr: 'Error: Not a valid source directory.' },
+      ])
 
       await assert.rejects(
         runGeneratePot({ core, exec, env: { RUNNER_TEMP: runnerTemp, INPUT_POT_PATH: 'lang/plugin.pot' }, cwd: repo, wpCli: FAKE_WP_CLI }),
@@ -334,15 +367,17 @@ describe('generate-pot', () => {
       const { php, outputs } = await run(t, { generated: pot(), inputs: { INPUT_POT_PATH: '' } })
 
       assert.strictEqual(php.args[6], 'languages/my-plugin.pot')
+      assert.strictEqual(php.args.at(-1), '--domain=my-plugin')
       assert.strictEqual(outputs['pot-path'], 'languages/my-plugin.pot')
     })
 
     it('takes the domain input over the Text Domain header', async (t) => {
       write('plugin.php', header(['Domain Path: lang']))
 
-      const { outputs } = await run(t, { generated: pot(), inputs: { INPUT_POT_PATH: '', INPUT_DOMAIN: 'other' } })
+      const { php, outputs } = await run(t, { generated: pot(), inputs: { INPUT_POT_PATH: '', INPUT_DOMAIN: 'other' } })
 
       assert.strictEqual(outputs['pot-path'], 'lang/other.pot')
+      assert.strictEqual(php.args.at(-1), '--domain=other')
     })
 
     it('reads the plugin file in source-path, and puts the POT under it', async (t) => {
@@ -364,9 +399,10 @@ describe('generate-pot', () => {
     it('is overridden by the pot-path input', async (t) => {
       write('plugin.php', header(['Text Domain: my-plugin', 'Domain Path: /languages']))
 
-      const { outputs } = await run(t, { generated: pot() })
+      const { php, outputs } = await run(t, { generated: pot() })
 
       assert.strictEqual(outputs['pot-path'], 'lang/plugin.pot')
+      assert.deepStrictEqual(php.args.slice(5), ['.', 'lang/plugin.pot', '--skip-audit'])
     })
 
     const refused = [

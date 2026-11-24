@@ -11,15 +11,16 @@ description: Generates the POT file of a plugin with wp-cli and says whether its
 inputs:
   pot-path:
     description: >-
-      Where the POT is written, relative to the checkout, e.g. `lang/the-events-calendar.pot` or
-      `languages/give.pot`. Empty is `<Domain Path>/<Text Domain>.pot` under `source-path`, read from
-      the header of the plugin's main file, the first top-level PHP file of `source-path`, in name
-      order, with a `Plugin Name` header; the `domain` input stands in for `Text Domain`. A header
-      `Text Domain` and each `Domain Path` part take letters, digits, dots, dashes and underscores,
-      not starting with a dash or a dot. No such file, no `Domain Path`, a `Domain Path` of `/`, no
-      `Text Domain` without `domain`, a header value that breaks that rule, an absolute path or one
-      outside the checkout fails before anything runs. A path that starts with `-` is passed to
-      make-pot after `./`.
+      Where the POT is written, relative to the checkout, e.g. `languages/my-plugin.pot`.
+      Empty is `<Domain Path>/<Text Domain>.pot` under `source-path`, read from the header of
+      the plugin's main file, the first top-level PHP file of `source-path`, in name order,
+      with a `Plugin Name` header; the `domain` input stands in for `Text Domain`, and when it
+      is empty the header's `Text Domain` is passed as `--domain`. A header `Text Domain` and
+      each `Domain Path` part take letters, digits, dots, dashes and underscores, not starting
+      with a dash or a dot. No such file, no `Domain Path`, a `Domain Path` of `/`, no `Text
+      Domain` without `domain`, a header value that breaks that rule, an absolute path or one
+      outside the checkout fails before anything runs. A path that starts with `-` is passed
+      to make-pot after `./`.
     required: false
     default: ''
   source-path:
@@ -31,8 +32,9 @@ inputs:
   domain:
     description: >-
       The text domain to extract, passed as `--domain`, and the POT's file name when `pot-path` is
-      empty. Empty leaves it to make-pot, which reads the `Text Domain` header of the plugin, or uses
-      the directory name.
+      empty. Empty passes the header's `Text Domain` when `pot-path` is empty too, and otherwise
+      leaves it to make-pot, which reads the `Text Domain` header of the plugin, or uses the
+      directory name.
     required: false
     default: ''
   headers:
@@ -45,10 +47,11 @@ inputs:
   exclude:
     description: >-
       Extra files and directories to leave out, one per line, as `--exclude` takes them: relative to
-      `source-path`, e.g. `*.js.map`. They are added to the lines of `.distignore`, the paths
-      the root `.gitattributes` marks `export-ignore` and the git submodule paths, which are always
-      left out once made relative to `source-path`; the ones outside it are dropped. make-pot adds its
-      own exclusions to all of them.
+      `source-path`, e.g. `*.js.map`. They are added to the lines of `.distignore`, the tracked
+      paths git marks `export-ignore` (read with `git check-attr`, so the checkout has to be a git
+      checkout) and the git submodule paths, which are always left out once made relative to
+      `source-path`; the ones outside it are dropped. An `export-ignore` path with a `,` is skipped
+      with a warning. make-pot adds its own exclusions to all of them.
     required: false
     default: ''
   working-directory:

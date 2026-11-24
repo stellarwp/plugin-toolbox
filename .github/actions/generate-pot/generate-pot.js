@@ -78,7 +78,8 @@ function readLines(text) {
  *                 plugin's root or holds a part that is not a plain name; or when the `domain` input
  *                 is empty and the `Text Domain` is missing or not a plain name.
  *
- * @returns {string} The path, relative to the checkout.
+ * @returns {{potPath: string, domain: string}} The path, relative to the checkout, and the text
+ *          domain it is named after.
  */
 function defaultPotPath(cwd, sourcePath, domain) {
   const header = readPluginHeader(path.resolve(cwd, sourcePath))
@@ -86,7 +87,7 @@ function defaultPotPath(cwd, sourcePath, domain) {
   if (header === null) {
     throw new Error(
       `pot-path is empty and no PHP file at the top of '${sourcePath}' has a Plugin Name header to read the ` +
-        `Text Domain and Domain Path from. Pass pot-path, such as lang/my-plugin.pot. ${WHAT}`
+        `Text Domain and Domain Path from. Pass pot-path, such as languages/my-plugin.pot. ${WHAT}`
     )
   }
 
@@ -114,12 +115,16 @@ function defaultPotPath(cwd, sourcePath, domain) {
     )
   }
 
-  return path.posix.join(sourcePath.split(path.sep).join('/'), header.domainPath, `${textDomain}.pot`)
+  return {
+    potPath: path.posix.join(sourcePath.split(path.sep).join('/'), header.domainPath, `${textDomain}.pot`),
+    domain: textDomain,
+  }
 }
 
 /**
  * Reads the `pot-path` input: where the POT is written, relative to the checkout. Empty takes the
- * path from the plugin header.
+ * path from the plugin header, and the text domain with it, so make-pot extracts the domain the
+ * file is named after.
  *
  * @param {string} value      The input value.
  * @param {string} cwd        The checkout.
@@ -129,20 +134,24 @@ function defaultPotPath(cwd, sourcePath, domain) {
  * @throws {Error} When it is empty and the plugin header does not give a path, or the path is
  *                 absolute or leads outside the checkout.
  *
- * @returns {string} The path: the input as given, or the one read from the plugin header.
+ * @returns {{potPath: string, domain: string}} The path, the input as given or the one read from the
+ *          plugin header, and the text domain to pass: the `domain` input, or the header's when the
+ *          path came from it.
  */
 function readPotPath(value, cwd, sourcePath, domain) {
-  const trimmed = String(value ?? '').trim() || defaultPotPath(cwd, sourcePath, domain)
+  const given = String(value ?? '').trim()
+  const { potPath: trimmed, domain: textDomain } =
+    given === '' ? defaultPotPath(cwd, sourcePath, domain) : { potPath: given, domain }
 
   const relative = path.relative(cwd, path.resolve(cwd, trimmed))
   if (path.isAbsolute(trimmed) || relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error(
       `pot-path '${trimmed}' is not a path inside the checkout. Pass it relative to the checkout, such as ` +
-        `lang/my-plugin.pot. ${WHAT}`
+        `languages/my-plugin.pot. ${WHAT}`
     )
   }
 
-  return trimmed
+  return { potPath: trimmed, domain: textDomain }
 }
 
 /**
@@ -211,21 +220,109 @@ function rebaseExclude(line, base, anchored) {
 }
 
 /**
- * The paths `.gitattributes` marks `export-ignore`, which a zip leaves out like the `.distignore`
- * lines. As in git, the last of `export-ignore`, `-export-ignore` and `!export-ignore` on a line
- * wins. An `[attr]` macro line, a quoted pattern and a pattern with a `,`, which `--exclude` would
- * split, are skipped.
+ * The tracked files and directories git marks `export-ignore`, which `git archive` and pup's zip
+ * leave out like the `.distignore` lines. git reads its own `.gitattributes` files, so a later line
+ * that unsets the attribute wins as it does in git. A directory whose tracked files are all marked
+ * is given once, in place of its files. A path with a `,`, which `--exclude` would split, is skipped
+ * with a warning, and its strings are scanned.
  *
- * @param {string|null} text The contents of `.gitattributes`.
+ * @param {object} core The @actions/core toolkit, for the warning.
+ * @param {object} exec The @actions/exec toolkit.
+ * @param {string} cwd  The checkout.
  *
- * @returns {string[]} The paths, as written.
+ * @throws {Error} When git fails: the directory is not a git checkout.
+ *
+ * @returns {Promise<string[]>} The paths, relative to the checkout.
  */
-function readExportIgnores(text) {
-  return readLines(text)
-    .map((line) => line.split(/\s+/))
-    .filter(([pattern]) => !pattern.startsWith('[attr]') && !pattern.startsWith('"') && !pattern.includes(','))
-    .filter(([, ...attributes]) => attributes.filter((a) => /^[-!]?export-ignore$/.test(a)).at(-1) === 'export-ignore')
-    .map(([pattern]) => pattern)
+async function readExportIgnores(core, exec, cwd) {
+  const options = { cwd, silent: true }
+  const files = (await runOrFail(exec, 'git', ['ls-files', '-z'], options, 'git ls-files')).split('\0').filter(Boolean)
+
+  // Every directory is asked too: git archive leaves out a directory marked as a whole, such as
+  // `/tests export-ignore`, although that line marks none of the files in it.
+  const dirs = new Set()
+  for (const file of files) {
+    for (let dir = path.posix.dirname(file); dir !== '.'; dir = path.posix.dirname(dir)) {
+      dirs.add(dir)
+    }
+  }
+
+  const asked = [...dirs, ...files]
+  if (asked.length === 0) {
+    return []
+  }
+
+  const answer = await runOrFail(
+    exec,
+    'git',
+    ['check-attr', '--stdin', '-z', 'export-ignore'],
+    { ...options, input: Buffer.from(`${asked.join('\0')}\0`) },
+    'git check-attr'
+  )
+
+  // The answer is `<path> NUL <attribute> NUL <value> NUL` for each path asked.
+  const fields = answer.split('\0')
+  const marked = new Set()
+  for (let i = 0; i + 2 < fields.length; i += 3) {
+    if (fields[i + 2] === 'set') {
+      marked.add(fields[i])
+    }
+  }
+
+  const prefixes = (file) => file.split('/').map((part, i, parts) => parts.slice(0, i + 1).join('/'))
+  const ignored = files.filter((file) => prefixes(file).some((prefix) => marked.has(prefix)))
+  const ignoredSet = new Set(ignored)
+
+  // The directories that hold a tracked file that stays in the zip.
+  const kept = new Set(files.filter((file) => !ignoredSet.has(file)).flatMap((file) => prefixes(file).slice(0, -1)))
+
+  const paths = [...new Set(ignored.map((file) => prefixes(file).find((prefix) => !kept.has(prefix))))]
+
+  return paths.filter((exclude) => {
+    if (exclude.includes(',')) {
+      core.warning(`${exclude} is marked export-ignore, but --exclude cannot hold a comma, so its strings are scanned.`)
+      return false
+    }
+
+    return true
+  })
+}
+
+/**
+ * The paths of the git submodules, read from `.gitmodules` by git, so a quoted path is read as git
+ * reads it.
+ *
+ * @param {object} exec The @actions/exec toolkit.
+ * @param {string} cwd  The checkout.
+ *
+ * @throws {Error} When git fails for another reason than finding no submodule path.
+ *
+ * @returns {Promise<string[]>} The paths, relative to the checkout.
+ */
+async function readSubmodulePaths(exec, cwd) {
+  if (readCheckoutFile(cwd, '.gitmodules') === null) {
+    return []
+  }
+
+  const result = await exec.getExecOutput(
+    'git',
+    ['config', '--file', '.gitmodules', '-z', '--get-regexp', '^submodule\\..*\\.path$'],
+    { cwd, silent: true, ignoreReturnCode: true }
+  )
+
+  // git config exits 1 when no key matches.
+  if (result.exitCode === 1) {
+    return []
+  }
+  if (result.exitCode !== 0) {
+    throw new Error(`git config --file .gitmodules failed (exit code ${result.exitCode}):\n${result.stderr.trim()}`)
+  }
+
+  // Each entry is `<key> LF <value> NUL`.
+  return result.stdout
+    .split('\0')
+    .filter(Boolean)
+    .map((entry) => entry.slice(entry.indexOf('\n') + 1))
 }
 
 /**
@@ -241,31 +338,34 @@ function asPositional(value) {
 }
 
 /**
- * What make-pot leaves out: the `.distignore` lines, the `export-ignore` paths of `.gitattributes`,
- * the git submodule paths and the `exclude` input, in that order, each once. The first three are
- * paths from the checkout, made relative to `source-path`; the ones outside it are dropped. The
- * `exclude` input is passed as given.
+ * What make-pot leaves out: the `.distignore` lines, the paths git marks `export-ignore`, the git
+ * submodule paths and the `exclude` input, in that order, each once. The first three are paths from
+ * the checkout, made relative to `source-path`; the ones outside it are dropped. The `exclude` input
+ * is passed as given.
  *
  * A submodule has its own text domain and its own POT, and a checkout with submodules would fold
  * its strings in.
  *
- * @param {string} cwd        The checkout.
- * @param {string} sourcePath The `source-path` input.
- * @param {string} extra      The `exclude` input.
+ * @param {object} options
+ * @param {object} options.core       The @actions/core toolkit, for warnings.
+ * @param {object} options.exec       The @actions/exec toolkit, for git.
+ * @param {string} options.cwd        The checkout.
+ * @param {string} options.sourcePath The `source-path` input.
+ * @param {string} options.extra      The `exclude` input.
  *
- * @returns {string[]} The exclusions.
+ * @throws {Error} When git fails: the directory is not a git checkout.
+ *
+ * @returns {Promise<string[]>} The exclusions.
  */
-function readExcludes(cwd, sourcePath, extra) {
+async function readExcludes({ core, exec, cwd, sourcePath, extra }) {
   const base = path.relative(cwd, path.resolve(cwd, sourcePath)).split(path.sep).join('/')
-  const submodules = [...(readCheckoutFile(cwd, '.gitmodules') ?? '').matchAll(/^\s*path\s*=\s*(.+?)\s*$/gm)].map(
-    (match) => rebaseExclude(match[1], base, true)
-  )
-  const distignore = [
-    ...readLines(readCheckoutFile(cwd, '.distignore')),
-    ...readExportIgnores(readCheckoutFile(cwd, '.gitattributes')),
-  ].map((line) => rebaseExclude(line, base, false))
+  const distignore = readLines(readCheckoutFile(cwd, '.distignore')).map((line) => rebaseExclude(line, base, false))
+  const exportIgnores = (await readExportIgnores(core, exec, cwd)).map((file) => rebaseExclude(file, base, true))
+  const submodules = (await readSubmodulePaths(exec, cwd)).map((submodule) => rebaseExclude(submodule, base, true))
 
-  return [...new Set([...distignore, ...submodules, ...readLines(extra)].filter((exclude) => exclude !== null))]
+  const excludes = [...distignore, ...exportIgnores, ...submodules, ...readLines(extra)]
+
+  return [...new Set(excludes.filter((exclude) => exclude !== null))]
 }
 
 /**
@@ -373,10 +473,9 @@ async function stringsChanged(exec, cwd, potPath) {
 async function runGeneratePot({ core, exec, env, cwd: workspace = process.cwd(), wpCli = WP_CLI }) {
   const cwd = readWorkingDirectory(env.INPUT_WORKING_DIRECTORY, { base: workspace, what: WHAT })
   const sourcePath = String(env.INPUT_SOURCE_PATH ?? '').trim() || '.'
-  const domain = String(env.INPUT_DOMAIN ?? '').trim()
-  const potPath = readPotPath(env.INPUT_POT_PATH, cwd, sourcePath, domain)
+  const { potPath, domain } = readPotPath(env.INPUT_POT_PATH, cwd, sourcePath, String(env.INPUT_DOMAIN ?? '').trim())
   const headers = readHeaders(env.INPUT_HEADERS)
-  const excludes = readExcludes(cwd, sourcePath, env.INPUT_EXCLUDE)
+  const excludes = await readExcludes({ core, exec, cwd, sourcePath, extra: env.INPUT_EXCLUDE })
 
   const phar = await setupWpCli({ core, exec, env, wpCli })
 
