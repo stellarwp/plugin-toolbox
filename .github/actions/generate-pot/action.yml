@@ -12,16 +12,22 @@ inputs:
   pot-path:
     description: >-
       Where the POT is written, relative to the checkout, e.g. `lang/the-events-calendar.pot` or
-      `languages/give.pot`. Empty, absolute or outside the checkout fails before anything runs.
-    required: true
+      `languages/give.pot`. Empty is `<Domain Path>/<Text Domain>.pot` under `source-path`, read from
+      the header of the plugin's main file, the first PHP file at the top of `source-path` with a
+      `Plugin Name` header; the `domain` input stands in for `Text Domain`. No such file, no
+      `Domain Path`, no `Text Domain` without `domain`, an absolute path or one outside the checkout
+      fails before anything runs.
+    required: false
+    default: ''
   source-path:
     description: 'The directory scanned for strings, relative to the checkout.'
     required: false
     default: '.'
   domain:
     description: >-
-      The text domain to extract, passed as `--domain`. Empty leaves it to make-pot, which reads the
-      `Text Domain` header of the plugin, or uses the directory name.
+      The text domain to extract, passed as `--domain`, and the POT's file name when `pot-path` is
+      empty. Empty leaves it to make-pot, which reads the `Text Domain` header of the plugin, or uses
+      the directory name.
     required: false
     default: ''
   headers:
@@ -34,9 +40,10 @@ inputs:
   exclude:
     description: >-
       Extra files and directories to leave out, one per line, as `--exclude` takes them: relative to
-      `source-path`, e.g. `*.js.map`. They are added to the lines of `.distignore` and the git
-      submodule paths, which are always left out once made relative to `source-path`; the ones
-      outside it are dropped.
+      `source-path`, e.g. `*.js.map`. They are added to the lines of `.distignore`, the paths
+      `.gitattributes` marks `export-ignore` and the git submodule paths, which are always left out
+      once made relative to `source-path`; the ones outside it are dropped. make-pot adds its own
+      exclusions to all of them.
     required: false
     default: ''
   working-directory:
@@ -48,13 +55,16 @@ inputs:
 
 outputs:
   pot-path:
-    description: 'The POT, relative to the checkout, as given.'
+    description: >-
+      The POT, relative to the checkout: the `pot-path` input as given, or the path read from the
+      plugin header when it is empty.
     value: ${{ steps.pot.outputs.pot-path }}
   changed:
     description: >-
       `yes` when the POT is new or its strings changed. `no` when the POT git tracks differs only in
-      the `POT-Creation-Date`, `Project-Id-Version` and `X-Generator` headers, or not at all; the
-      file is then put back as it was.
+      the `POT-Creation-Date`, `Project-Id-Version` and `X-Generator` headers, the
+      `# Copyright (C) <year>` line and the `#:` references, or not at all; the file is then put back
+      as it was.
     value: ${{ steps.pot.outputs.changed }}
 
 runs:

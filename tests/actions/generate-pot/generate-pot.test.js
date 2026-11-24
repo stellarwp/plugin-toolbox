@@ -37,10 +37,14 @@ const FAKE_WP_CLI = { version: '9.9.9', sha512: crypto.createHash('sha512').upda
  * @param {string} options.version The plugin version, in Project-Id-Version.
  * @param {string} options.wp      The wp-cli version, in X-Generator.
  * @param {string} options.msgid   The one string.
+ * @param {string} options.year    The year in the Copyright line.
+ * @param {number} options.line    The line of the string, in its `#:` reference.
  *
  * @returns {string} The file.
  */
-const pot = ({ date = '2026-01-01T00:00:00+00:00', version = '1.0.0', wp = '2.12.0', msgid = 'Hello' } = {}) => `msgid ""
+const pot = ({ date = '2026-01-01T00:00:00+00:00', version = '1.0.0', wp = '2.12.0', msgid = 'Hello', year = '2026', line = 3 } = {}) => `# Copyright (C) ${year} Plugin
+# This file is distributed under the same license as the Plugin plugin.
+msgid ""
 msgstr ""
 "Project-Id-Version: Plugin ${version}\\n"
 "Report-Msgid-Bugs-To: https://example.com\\n"
@@ -48,7 +52,7 @@ msgstr ""
 "X-Generator: WP-CLI ${wp}\\n"
 "X-Domain: plugin\\n"
 
-#: plugin.php:3
+#: plugin.php:${line}
 msgid "${msgid}"
 msgstr ""
 `
@@ -232,6 +236,19 @@ describe('generate-pot', () => {
       assert.strictEqual(php.args.at(-1), '--exclude=node_modules,internal.php,admin,**/private/*.php,*/fixtures,vendor/lib,src/*.map')
     })
 
+    it('excludes the export-ignore paths of .gitattributes, relative to source-path', async (t) => {
+      write(
+        '.gitattributes',
+        '# Not in the zip\n* text=auto\n/src/tests export-ignore\n/.github  export-ignore  linguist-vendored\n' +
+          'src/docs -export-ignore\nsrc/keep !export-ignore\nnode_modules export-ignore\n/README.md export-ignore\n'
+      )
+      write('.distignore', 'node_modules\n')
+
+      const { php } = await run(t, { generated: pot(), inputs: { INPUT_SOURCE_PATH: 'src' } })
+
+      assert.strictEqual(php.args.at(-1), '--exclude=node_modules,tests')
+    })
+
     it('reads .distignore in the working directory', async (t) => {
       const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'generate-pot-workspace-'))
       t.after(() => fs.rmSync(workspace, { recursive: true, force: true }))
@@ -260,7 +277,7 @@ describe('generate-pot', () => {
 
   describe('the inputs', () => {
     const refused = [
-      ['an empty pot-path', { INPUT_POT_PATH: ' ' }, /pot-path is empty/],
+      ['an empty pot-path without a plugin file', { INPUT_POT_PATH: ' ' }, /pot-path is empty and no PHP file at the top of '\.' has a Plugin Name header/],
       ['an absolute pot-path', { INPUT_POT_PATH: '/tmp/plugin.pot' }, /pot-path '\/tmp\/plugin\.pot' is not a path inside the checkout/],
       ['a pot-path outside the checkout', { INPUT_POT_PATH: '../plugin.pot' }, /not a path inside the checkout/],
       ['headers that are not JSON', { INPUT_HEADERS: '{nope' }, /headers is not valid JSON/],
@@ -275,6 +292,60 @@ describe('generate-pot', () => {
         const { exec, calls } = recordingExec()
 
         await assert.rejects(runGeneratePot({ core, exec, env: { RUNNER_TEMP: runnerTemp, INPUT_POT_PATH: 'lang/plugin.pot', ...inputs }, cwd: repo }), message)
+        assert.deepStrictEqual(calls, [])
+      })
+    }
+  })
+
+  describe('the pot-path default', () => {
+    const header = (lines) => `<?php\n/**\n * Plugin Name: Plugin\n${lines.map((line) => ` * ${line}\n`).join('')} */\n`
+
+    it('is <Domain Path>/<Text Domain>.pot from the plugin header, and is reported', async (t) => {
+      write('plugin.php', header(['Text Domain: my-plugin', 'Domain Path: /languages/']))
+
+      const { php, outputs } = await run(t, { generated: pot(), inputs: { INPUT_POT_PATH: '' } })
+
+      assert.strictEqual(php.args[6], 'languages/my-plugin.pot')
+      assert.strictEqual(outputs['pot-path'], 'languages/my-plugin.pot')
+    })
+
+    it('takes the domain input over the Text Domain header', async (t) => {
+      write('plugin.php', header(['Domain Path: lang']))
+
+      const { outputs } = await run(t, { generated: pot(), inputs: { INPUT_POT_PATH: '', INPUT_DOMAIN: 'other' } })
+
+      assert.strictEqual(outputs['pot-path'], 'lang/other.pot')
+    })
+
+    it('reads the plugin file in source-path, and puts the POT under it', async (t) => {
+      write('src/main.php', header(['Text Domain: my-plugin', 'Domain Path: /lang']))
+
+      const { outputs } = await run(t, { generated: pot(), inputs: { INPUT_POT_PATH: '', INPUT_SOURCE_PATH: './src/' } })
+
+      assert.strictEqual(outputs['pot-path'], 'src/lang/my-plugin.pot')
+    })
+
+    it('is overridden by the pot-path input', async (t) => {
+      write('plugin.php', header(['Text Domain: my-plugin', 'Domain Path: /languages']))
+
+      const { outputs } = await run(t, { generated: pot() })
+
+      assert.strictEqual(outputs['pot-path'], 'lang/plugin.pot')
+    })
+
+    const refused = [
+      ['no Text Domain and no domain input', ['Domain Path: /languages'], /plugin\.php has no Text Domain header\. Pass domain or pot-path/],
+      ['no Domain Path', ['Text Domain: my-plugin'], /plugin\.php has no Domain Path header\. Pass pot-path/],
+      ['a Domain Path outside the checkout', ['Text Domain: my-plugin', 'Domain Path: ../../elsewhere'], /not a path inside the checkout/],
+    ]
+
+    for (const [name, lines, message] of refused) {
+      it(`refuses a plugin header with ${name} before anything is downloaded`, async (t) => {
+        write('plugin.php', header(lines))
+        const { core } = await coreWithOutputs(t)
+        const { exec, calls } = recordingExec()
+
+        await assert.rejects(runGeneratePot({ core, exec, env: { RUNNER_TEMP: runnerTemp, INPUT_POT_PATH: '' }, cwd: repo }), message)
         assert.deepStrictEqual(calls, [])
       })
     }
@@ -326,6 +397,25 @@ describe('generate-pot', () => {
       commit()
 
       const { outputs } = await run(t, { generated: pot().replace('X-Domain: plugin', 'X-Domain: other') })
+
+      assert.strictEqual(outputs.changed, 'yes')
+    })
+
+    it('puts back a POT that differs in the Copyright year and the #: references only', async (t) => {
+      write('lang/plugin.pot', pot({ year: '2025' }))
+      commit()
+
+      const { outputs } = await run(t, { generated: pot({ line: 7 }) })
+
+      assert.strictEqual(outputs.changed, 'no')
+      assert.strictEqual(read('lang/plugin.pot'), pot({ year: '2025' }))
+    })
+
+    it('reports a POT with a changed translator comment as changed', async (t) => {
+      write('lang/plugin.pot', pot())
+      commit()
+
+      const { outputs } = await run(t, { generated: pot().replace('#: plugin.php', '#. translators: a name\n#: plugin.php') })
 
       assert.strictEqual(outputs.changed, 'yes')
     })

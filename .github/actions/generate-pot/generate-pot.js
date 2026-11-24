@@ -15,6 +15,7 @@ const path = require('node:path')
 
 const { runOrFail } = require('../../lib/exec.js')
 const { downloadPhar } = require('../../lib/phar.js')
+const { readPluginHeader } = require('../../lib/plugin-header.js')
 const { readWorkingDirectory, readCheckoutFile } = require('../../lib/workspace.js')
 
 /** What was not done, to close every error message. */
@@ -37,6 +38,13 @@ const WP_CLI = {
 const STAMPED_HEADERS = ['POT-Creation-Date', 'Project-Id-Version', 'X-Generator']
 
 /**
+ * The comment lines that change without a string changing: the `# Copyright (C) <year>` line of the
+ * header entry, and the `#:` references, which name a file and line of each string.
+ */
+const COPYRIGHT = '# Copyright '
+const REFERENCE = '#:'
+
+/**
  * Splits a multi-line value into its lines, trimmed, without the empty ones and the `#` comments.
  *
  * @param {string|null} text The value: an input, or a file's contents.
@@ -51,21 +59,56 @@ function readLines(text) {
 }
 
 /**
- * Reads the `pot-path` input: where the POT is written, relative to the checkout.
+ * Where the POT goes when `pot-path` is empty: `<Domain Path>/<Text Domain>.pot` under `source-path`,
+ * read from the plugin's main file at the top of `source-path`. The `domain` input stands in for the
+ * `Text Domain` header.
  *
- * @param {string} value The input value.
- * @param {string} cwd   The checkout.
+ * @param {string} cwd        The checkout.
+ * @param {string} sourcePath The `source-path` input.
+ * @param {string} domain     The `domain` input; empty reads the `Text Domain` header.
  *
- * @throws {Error} When it is empty, absolute, or leads outside the checkout.
+ * @throws {Error} When there is no plugin file, or it has no `Domain Path`, or no `Text Domain` and
+ *                 the `domain` input is empty.
  *
- * @returns {string} The path, as given.
+ * @returns {string} The path, relative to the checkout.
  */
-function readPotPath(value, cwd) {
-  const trimmed = String(value ?? '').trim()
+function defaultPotPath(cwd, sourcePath, domain) {
+  const header = readPluginHeader(path.resolve(cwd, sourcePath))
 
-  if (trimmed === '') {
-    throw new Error(`pot-path is empty. Pass where the POT is written, such as lang/my-plugin.pot. ${WHAT}`)
+  if (header === null) {
+    throw new Error(
+      `pot-path is empty and no PHP file at the top of '${sourcePath}' has a Plugin Name header to read the ` +
+        `Text Domain and Domain Path from. Pass pot-path, such as lang/my-plugin.pot. ${WHAT}`
+    )
   }
+
+  const textDomain = domain || header.textDomain
+  if (textDomain === null) {
+    throw new Error(`pot-path is empty and ${header.file} has no Text Domain header. Pass domain or pot-path. ${WHAT}`)
+  }
+  if (header.domainPath === null) {
+    throw new Error(`pot-path is empty and ${header.file} has no Domain Path header. Pass pot-path. ${WHAT}`)
+  }
+
+  return path.posix.join(sourcePath.split(path.sep).join('/'), header.domainPath, `${textDomain}.pot`)
+}
+
+/**
+ * Reads the `pot-path` input: where the POT is written, relative to the checkout. Empty takes the
+ * path from the plugin header.
+ *
+ * @param {string} value      The input value.
+ * @param {string} cwd        The checkout.
+ * @param {string} sourcePath The `source-path` input.
+ * @param {string} domain     The `domain` input.
+ *
+ * @throws {Error} When it is empty and the plugin header does not give a path, or the path is
+ *                 absolute or leads outside the checkout.
+ *
+ * @returns {string} The path: the input as given, or the one read from the plugin header.
+ */
+function readPotPath(value, cwd, sourcePath, domain) {
+  const trimmed = String(value ?? '').trim() || defaultPotPath(cwd, sourcePath, domain)
 
   const relative = path.relative(cwd, path.resolve(cwd, trimmed))
   if (path.isAbsolute(trimmed) || relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
@@ -144,9 +187,25 @@ function rebaseExclude(line, base, anchored) {
 }
 
 /**
- * What make-pot leaves out: the `.distignore` lines, the git submodule paths and the `exclude`
- * input, in that order, each once. The first two are paths from the checkout, made relative to
- * `source-path`; the ones outside it are dropped. The `exclude` input is passed as given.
+ * The paths `.gitattributes` marks `export-ignore`, which a zip leaves out like the `.distignore`
+ * lines. A line that unsets the attribute, `-export-ignore` or `!export-ignore`, is skipped.
+ *
+ * @param {string|null} text The contents of `.gitattributes`.
+ *
+ * @returns {string[]} The paths, as written.
+ */
+function readExportIgnores(text) {
+  return readLines(text)
+    .map((line) => line.split(/\s+/))
+    .filter(([, ...attributes]) => attributes.includes('export-ignore'))
+    .map(([pattern]) => pattern)
+}
+
+/**
+ * What make-pot leaves out: the `.distignore` lines, the `export-ignore` paths of `.gitattributes`,
+ * the git submodule paths and the `exclude` input, in that order, each once. The first three are
+ * paths from the checkout, made relative to `source-path`; the ones outside it are dropped. The
+ * `exclude` input is passed as given.
  *
  * A submodule has its own text domain and its own POT, and a checkout with submodules would fold
  * its strings in.
@@ -162,7 +221,10 @@ function readExcludes(cwd, sourcePath, extra) {
   const submodules = [...(readCheckoutFile(cwd, '.gitmodules') ?? '').matchAll(/^\s*path\s*=\s*(.+?)\s*$/gm)].map(
     (match) => rebaseExclude(match[1], base, true)
   )
-  const distignore = readLines(readCheckoutFile(cwd, '.distignore')).map((line) => rebaseExclude(line, base, false))
+  const distignore = [
+    ...readLines(readCheckoutFile(cwd, '.distignore')),
+    ...readExportIgnores(readCheckoutFile(cwd, '.gitattributes')),
+  ].map((line) => rebaseExclude(line, base, false))
 
   return [...new Set([...distignore, ...submodules, ...readLines(extra)].filter((exclude) => exclude !== null))]
 }
@@ -197,25 +259,31 @@ function setupWpCli({ core, exec, env, wpCli }) {
 }
 
 /**
- * A POT without the stamped header fields. Only the header entry, the first block before a blank
- * line, is read for them, so a translation entry that holds a header name keeps it.
+ * A POT without the lines that change when no string does: the stamped header fields and the
+ * Copyright line, read from the header entry only, the first block before a blank line, so a
+ * translation entry that holds a header name keeps it; and the `#:` references of every entry.
  *
  * @param {string} pot The POT's contents.
  *
- * @returns {string} The contents without the stamped header lines.
+ * @returns {string} The contents without those lines.
  */
-function withoutStampedHeaders(pot) {
+function withoutStampedLines(pot) {
   const normalized = pot.replace(/\r\n/g, '\n')
   const end = normalized.indexOf('\n\n')
   const header = end === -1 ? normalized : normalized.slice(0, end)
-  const kept = header.split('\n').filter((line) => !STAMPED_HEADERS.some((field) => line.startsWith(`"${field}:`)))
+  const kept = header
+    .split('\n')
+    .filter((line) => !line.startsWith(COPYRIGHT) && !STAMPED_HEADERS.some((field) => line.startsWith(`"${field}:`)))
 
-  return kept.join('\n') + normalized.slice(header.length)
+  return [...kept, ...normalized.slice(header.length).split('\n')]
+    .filter((line) => !line.startsWith(REFERENCE))
+    .join('\n')
 }
 
 /**
  * Whether the POT's strings changed, against the file git tracks. A tracked POT that differs in
- * the stamped header fields only is put back as it was, so a second run leaves nothing to commit.
+ * the stamped header fields, the Copyright line and the `#:` references only is put back as it was,
+ * so a second run leaves nothing to commit.
  *
  * @param {object} exec    The @actions/exec toolkit.
  * @param {string} cwd     The checkout.
@@ -236,7 +304,7 @@ async function stringsChanged(exec, cwd, potPath) {
   const before = await runOrFail(exec, 'git', ['show', `:./${potPath}`], options, 'git show')
   const after = fs.readFileSync(path.join(cwd, potPath), 'utf8')
 
-  if (withoutStampedHeaders(before) !== withoutStampedHeaders(after)) {
+  if (withoutStampedLines(before) !== withoutStampedLines(after)) {
     return true
   }
 
@@ -265,9 +333,9 @@ async function stringsChanged(exec, cwd, potPath) {
  */
 async function runGeneratePot({ core, exec, env, cwd: workspace = process.cwd(), wpCli = WP_CLI }) {
   const cwd = readWorkingDirectory(env.INPUT_WORKING_DIRECTORY, { base: workspace, what: WHAT })
-  const potPath = readPotPath(env.INPUT_POT_PATH, cwd)
   const sourcePath = String(env.INPUT_SOURCE_PATH ?? '').trim() || '.'
   const domain = String(env.INPUT_DOMAIN ?? '').trim()
+  const potPath = readPotPath(env.INPUT_POT_PATH, cwd, sourcePath, domain)
   const headers = readHeaders(env.INPUT_HEADERS)
   const excludes = readExcludes(cwd, sourcePath, env.INPUT_EXCLUDE)
 

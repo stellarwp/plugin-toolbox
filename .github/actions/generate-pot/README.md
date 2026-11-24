@@ -15,8 +15,6 @@ Generates a plugin's POT file with `wp i18n make-pot`, and says whether its stri
 
 - id: pot
   uses: stellarwp/plugin-toolbox/.github/actions/generate-pot@v1
-  with:
-    pot-path: lang/my-plugin.pot
 
 - if: steps.pot.outputs.changed == 'yes'
   run: echo "Commit ${{ steps.pot.outputs.pot-path }} and push it to translation here."
@@ -24,6 +22,23 @@ Generates a plugin's POT file with `wp i18n make-pot`, and says whether its stri
 
 Build the assets first when the plugin ships compiled JavaScript with strings in it. The action
 writes the POT and commits nothing.
+
+On a runner that reports itself as self-hosted, such as Blacksmith, setup-php installs PHP with apt
+from the Launchpad PPA, and the step fails with only `Could not setup PHP` when Launchpad is down.
+Set `use_builds_cache: true` in the setup-php step's `env` to download the prebuilt PHP that
+GitHub-hosted runners get instead.
+
+## Where the POT goes
+
+Without `pot-path`, the POT goes to `<Domain Path>/<Text Domain>.pot` under `source-path`, read from
+the plugin's main file: the first PHP file at the top of `source-path`, in name order, with a
+`Plugin Name` header in its first 8 KiB, which is how make-pot finds it. A `Text Domain` of
+`my-plugin` and a `Domain Path` of `/languages/` give `languages/my-plugin.pot`. The `domain`
+input stands in for `Text Domain`.
+
+The step fails before anything runs when there is no such file, when it has no `Domain Path`, or
+when it has no `Text Domain` and `domain` is empty. Pass `pot-path` then. `pot-path` overrides the
+header, and the `pot-path` output reports the path used either way.
 
 ## What it runs
 
@@ -38,32 +53,35 @@ download, and checks it again.
 
 ## What is left out
 
-Three lists are joined into `--exclude`, each entry once:
+Four lists are joined into `--exclude`, each entry once:
 
 - The lines of `.distignore`, when the checkout has one: what the zip leaves out is not translated.
   Empty lines and `#` comments are skipped.
+- The path of each `.gitattributes` line that sets `export-ignore`, which the zip leaves out too. A
+  line with `-export-ignore` or `!export-ignore` is skipped.
 - The path of each git submodule, read from `.gitmodules`. A submodule has its own text domain and
   its own POT, and its strings do not belong in this one.
 - The lines of the `exclude` input, passed as given.
 
-make-pot matches an exclusion against paths relative to `source-path`, so the `.distignore` and
-submodule paths are made relative to it first: with `source-path: src`, `src/admin` becomes
-`admin`, and a path outside `src`, such as `/tests`, is dropped. A `.distignore` line with no `/`
-in it, such as `node_modules`, is a name that matches at any depth, and is kept as it is, and so is
-a line whose first part holds a `*`, such as `**/private/*.php`.
+make-pot matches an exclusion against paths relative to `source-path`, so the `.distignore`,
+`.gitattributes` and submodule paths are made relative to it first: with `source-path: src`,
+`src/admin` becomes `admin`, and a path outside `src`, such as `/tests`, is dropped. A path with no
+`/` in it, such as `node_modules`, is a name that matches at any depth, and is kept as it is, and so
+is a path whose first part holds a `*`, such as `**/private/*.php`.
 
 make-pot matches every exclusion at any depth, and drops a leading `/`: `/src/admin/` with
 `source-path: src` becomes `admin`, which also leaves out `src/modules/admin/`, and `/tests` with
 `source-path: .` also leaves out `src/tests/`. No `--exclude` value matches only at the top of the
-scanned directory. When a directory deeper in the source has the same name as one `.distignore`
-leaves out, rename one of them or narrow `source-path`.
+scanned directory. When a directory deeper in the source has the same name as one `.distignore` or
+`.gitattributes` leaves out, rename the deeper one.
 
-With none of them, make-pot uses its own defaults.
+make-pot always adds its own exclusions to these. In the i18n-command release that wp-cli 2.12.0
+bundles, v2.6.5, they are `node_modules`, `.*`, `vendor`, `Gruntfile.js`, `webpack.config.js`,
+`*.min.js`, `test` and `tests`.
 
 ```yaml
 - uses: stellarwp/plugin-toolbox/.github/actions/generate-pot@v1
   with:
-    pot-path: languages/my-plugin.pot
     domain: my-plugin
     headers: '{"Report-Msgid-Bugs-To": "https://example.com/support", "Last-Translator": "", "Language-Team": ""}'
     exclude: |
@@ -73,36 +91,42 @@ With none of them, make-pot uses its own defaults.
 
 ## The changed check
 
-make-pot stamps the time (`POT-Creation-Date`), the plugin version (`Project-Id-Version`) and its
-own version (`X-Generator`) on every run, so the file differs each time even with the same strings.
-The check leaves out these three lines of the header entry only: a translation entry that holds one
-of the names is compared like any other.
+`changed` says whether the strings changed. make-pot writes lines that change without a string
+changing, and the check leaves them out before it compares the POT with the one git tracks:
+
+- the time (`POT-Creation-Date`), the plugin version (`Project-Id-Version`) and make-pot's own
+  version (`X-Generator`), read from the header entry only: a translation entry that holds one of
+  the names is compared like any other;
+- the `# Copyright (C) <year>` line of the header entry;
+- the `#:` references, the file and line of each string, in every entry.
 
 | The POT | `changed` | The file |
 |---|---|---|
 | is not tracked by git: a new POT | `yes` | kept |
 | differs from the tracked one in anything else | `yes` | kept |
-| differs in those three header lines only, or not at all | `no` | put back with `git checkout` |
+| differs in those lines only, or not at all | `no` | put back with `git checkout` |
 
-A second run therefore leaves nothing to commit. The check needs a git checkout, at any depth.
+A second run therefore leaves nothing to commit. The tracked POT keeps its `#:` references until a
+string changes, so they can point to lines that have moved. The check needs a git checkout, at any
+depth.
 
 ## Inputs
 
 | Input | Default | |
 |---|---|---|
-| `pot-path` | required | Where the POT is written, relative to the checkout, e.g. `lang/my-plugin.pot`. |
+| `pot-path` | | Where the POT is written, relative to the checkout, e.g. `lang/my-plugin.pot`. Empty is `<Domain Path>/<Text Domain>.pot` from the plugin header, under `source-path`. |
 | `source-path` | `.` | The directory scanned for strings, relative to the checkout. |
-| `domain` | | The text domain, passed as `--domain`. Empty leaves it to make-pot. |
+| `domain` | | The text domain, passed as `--domain`, and the POT's file name when `pot-path` is empty. Empty leaves it to make-pot. |
 | `headers` | | POT headers to set, as a JSON object of strings in a string. Empty sets none. |
-| `exclude` | | Extra exclusions, one per line, relative to `source-path`, added to `.distignore` and the submodule paths. |
+| `exclude` | | Extra exclusions, one per line, relative to `source-path`, added to `.distignore`, the `export-ignore` paths of `.gitattributes` and the submodule paths. |
 | `working-directory` | | Where the repository is checked out. Empty is the workspace. |
 
 ## Outputs
 
 | Output | |
 |---|---|
-| `pot-path` | The POT, relative to the checkout, as given. |
-| `changed` | `yes` when the POT is new or its strings changed, `no` otherwise. |
+| `pot-path` | The POT, relative to the checkout: the `pot-path` input as given, or the path read from the plugin header. |
+| `changed` | `yes` when the POT is new or its strings changed, `no` when it differs in the lines [the changed check](#the-changed-check) leaves out only, or not at all. |
 
 ## How it runs
 
