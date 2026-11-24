@@ -407,11 +407,12 @@ function buildRows(now, base) {
  * @param {boolean} input.noBaseline  There was nothing to compare with: only the totals count.
  * @param {string}  input.baselineName The baseline file's name, for the hint to update it.
  * @param {boolean} input.fromFile    The baseline is the committed file, which can be lowered.
+ * @param {string}  input.baseRef     The ref a manual run compares with, or ''. A manual run gets no advice to commit a file.
  *
  * @returns {object} `messages` (`{level, text}` in print order), `totals`, `wentUp`, `wentDown`,
  *          `errorsDown` (how many rules have fewer errors), `errorsUp`, `upList` and `failed`.
  */
-function evaluate({ rows, mode, noBaseline, baselineName = BASELINE_FILE, fromFile = true }) {
+function evaluate({ rows, mode, noBaseline, baselineName = BASELINE_FILE, fromFile = true, baseRef = '' }) {
   const totals = { errorsBase: 0, errorsNow: 0, warningsBase: 0, warningsNow: 0 }
   const messages = []
   let failed = false
@@ -470,8 +471,8 @@ function evaluate({ rows, mode, noBaseline, baselineName = BASELINE_FILE, fromFi
   }
 
   // Fewer errors than the file says leaves room for them to come back unnoticed. Strict mode does
-  // not use the file, so it asks for nothing.
-  if (mode !== 'strict' && fromFile && errorsDown > 0) {
+  // not use the file, so it asks for nothing. Nor does a manual run, which has nothing to commit.
+  if (mode !== 'strict' && fromFile && !baseRef && errorsDown > 0) {
     messages.push({
       level: 'notice',
       text: `Error counts went down. Lower the baseline so they cannot come back: commit the baseline.json from this run's plugin-check-report artifact as ${baselineName}.`,
@@ -653,7 +654,7 @@ function baselineNote({ source, changed, baseRef = '' }) {
  *
  * @returns {{errors: Map<string, number>, warnings: Map<string, number>}} Counts.
  */
-function readBaselineFile(file, name) {
+function readBaselineFile(file, name, baseRef = '') {
   try {
     return readBaseline(fs.readFileSync(file, 'utf8'))
   } catch (error) {
@@ -668,8 +669,13 @@ function readBaselineFile(file, name) {
     // A parser's message has no full stop of its own, and the sentence after it needs one.
     const stop = /[.!?]$/.test(reason) ? '' : '.'
 
+    // The file of this run holds the results of head-ref, so a manual run does not offer it as the fix.
+    const fix = baseRef
+      ? `It is the file on ${baseRef}. Fix it there, or compare with another base-ref.`
+      : "Fix it, or replace it with the baseline.json from this run's plugin-check-report artifact."
+
     throw new CheckFailure(
-      `The baseline file ${name} is not valid: ${reason}${stop} Fix it, or replace it with the baseline.json from this run's plugin-check-report artifact.`,
+      `The baseline file ${name} is not valid: ${reason}${stop} ${fix}`,
       error.exitCode,
       true
     )
@@ -693,8 +699,12 @@ function readTargetResults(env, name) {
   const file = env.PLUGIN_CHECK_BASE_RESULTS || ''
 
   if (!file || !isFile(file)) {
+    const baseRef = env.PLUGIN_CHECK_BASE_REF || ''
+
     throw new CheckFailure(
-      `The target branch could not be checked, so there is nothing to compare with. Look at the job that checks the target branch in this run. To skip that check, commit the baseline.json from this run's plugin-check-report artifact as ${name}.`,
+      baseRef
+        ? `${baseRef} could not be checked, so there is nothing to compare with. Look at the job that checks ${baseRef} in this run.`
+        : `The target branch could not be checked, so there is nothing to compare with. Look at the job that checks the target branch in this run. To skip that check, commit the baseline.json from this run's plugin-check-report artifact as ${name}.`,
       1,
       true
     )
@@ -878,7 +888,7 @@ function compareOrThrow({ args, env, log }) {
   let base = { errors: new Map(), warnings: new Map() }
 
   if (hasFile) {
-    base = readBaselineFile(baselinePath, baselineName)
+    base = readBaselineFile(baselinePath, baselineName, env.PLUGIN_CHECK_BASE_REF || '')
   } else if (mode === 'strict') {
     // Strict mode does not use a baseline, so it has nothing to say and builds nothing.
     log.out('No baseline file. Strict mode does not need one.')
@@ -898,7 +908,7 @@ function compareOrThrow({ args, env, log }) {
   }
 
   const noBaseline = source === 'none'
-  const verdict = evaluate({ rows: buildRows(now, base), mode, noBaseline, baselineName, fromFile: hasFile })
+  const verdict = evaluate({ rows: buildRows(now, base), mode, noBaseline, baselineName, fromFile: hasFile, baseRef: env.PLUGIN_CHECK_BASE_REF || '' })
 
   for (const { level, text: message } of verdict.messages) {
     log[level](message)
@@ -925,7 +935,7 @@ function compareOrThrow({ args, env, log }) {
     totals: verdict.totals,
     wentUp: verdict.wentUp,
     wentDown: verdict.wentDown,
-    updateHint: mode !== 'strict' && hasFile && verdict.errorsDown > 0,
+    updateHint: mode !== 'strict' && hasFile && !env.PLUGIN_CHECK_BASE_REF && verdict.errorsDown > 0,
     note: baselineNote({ source, changed: env.PLUGIN_CHECK_BASELINE_CHANGED === 'true', baseRef: env.PLUGIN_CHECK_BASE_REF || '' }),
     upList: verdict.upList,
     links: linksLine({ artifactUrl: env.ARTIFACT_URL || '', runUrl, resultsPath }),
