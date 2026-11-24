@@ -330,6 +330,16 @@ describe('plugin-check-report compare', () => {
       assert.match(run.comment, /Rules that went down: \d+\. Update the baseline file, see the job summary\./)
     })
 
+    it('asks for no commit in a manual run when an error count went down', () => {
+      const run = compareWith([fixture('errors-down.txt')], { PLUGIN_CHECK_BASELINE: BASELINE, PLUGIN_CHECK_BASE_REF: 'develop' })
+
+      assert.equal(run.status, 0)
+      assert.match(run.stdout, /::notice title=Plugin Check::.* went down from /)
+      assert.doesNotMatch(run.stdout, /commit the baseline/)
+      assert.doesNotMatch(run.comment, /Update the baseline file|job summary/)
+      assert.doesNotMatch(run.summary, /gh run download|baseline\.json/)
+    })
+
     it('does not ask for an update when only warnings went down, or in strict mode', () => {
       const warningsDown = baselineFile({ ...JSON.parse(fs.readFileSync(BASELINE, 'utf8')), warnings: { [DIRECT_QUERY]: 9 } })
       const quiet = compareWith([fixture('same-as-baseline.txt')], { PLUGIN_CHECK_BASELINE: warningsDown })
@@ -365,6 +375,14 @@ describe('plugin-check-report compare', () => {
       assert.equal(run.status, 1)
       assert.match(run.summary, /raise their counts in baseline\.json in this pull request, so reviewers see it/)
       assert.match(run.summary, /gh run download <run-id> --repo <owner>\/<repo> /, 'placeholders outside a run')
+    })
+
+    it('names the base-ref and offers no replacement file when the baseline file is not valid in a manual run', () => {
+      const run = compareWith([fixture('clean.txt')], { PLUGIN_CHECK_BASELINE: baselineFile('[1]'), PLUGIN_CHECK_BASE_REF: 'develop' })
+
+      assert.notEqual(run.status, 0)
+      assert.match(run.stdout, /::error title=Plugin Check::The baseline file baseline\.json is not valid: .* It is the file on develop\. Fix it there, or compare with another base-ref\./)
+      assert.doesNotMatch(run.stdout, /replace it with/)
     })
 
     it('fails with the file named, as an error annotation, when the baseline file is not valid', () => {
@@ -641,6 +659,32 @@ describe('compare with no baseline file, in a pull request', () => {
     assert.match(run.summary, /There is no no-baseline\.json yet\. To start one, add the file from this run:/)
   })
 
+  it('names the base-ref of a manual run, and never asks for a commit', () => {
+    const run = compareWith([fixture('errors-up.txt')], {
+      PLUGIN_CHECK_BASE_RESULTS: baseResults(),
+      PLUGIN_CHECK_BASE_REQUIRED: 'true',
+      PLUGIN_CHECK_BASE_REF: 'master',
+    })
+
+    assert.match(run.stdout, /::warning title=Plugin Check::master has no baseline file at no-baseline\.json, so master was checked too/)
+    assert.match(run.comment, /master has no baseline file, so its own results are the baseline\./)
+    assert.doesNotMatch(run.comment, /There is no baseline file/)
+    assert.doesNotMatch(run.comment, /job summary/)
+    assert.doesNotMatch(run.summary, /baseline\.json|gh run download|commit/)
+    assert.doesNotMatch(run.stdout, /commit the baseline/)
+  })
+
+  it('keeps the old wording when there is no base-ref', () => {
+    const run = compareWith([fixture('errors-up.txt')], {
+      PLUGIN_CHECK_BASE_RESULTS: baseResults(),
+      PLUGIN_CHECK_BASE_REQUIRED: 'true',
+      PLUGIN_CHECK_BASE_REF: '',
+    })
+
+    assert.match(run.comment, /There is no baseline file, so the baseline is the target branch's results\./)
+    assert.match(run.summary, /There is no no-baseline\.json yet\. To start one, add the file from this run:/)
+  })
+
   it('passes when the pull request has no more errors than the target branch', () => {
     const run = compareWith([fixture('same-as-baseline.txt')], { PLUGIN_CHECK_BASE_RESULTS: baseResults(), PLUGIN_CHECK_BASE_REQUIRED: 'true' })
 
@@ -675,6 +719,14 @@ describe('compare with no baseline file, in a pull request', () => {
       assert.match(run.stdout, /::error title=Plugin Check::The target branch could not be checked, so there is nothing to compare with\./)
       assert.equal(run.comment, '', 'no comment body, so the workflow writes "could not run"')
     }
+  })
+
+  it('names the base-ref and asks for no commit when a manual run could not check it', () => {
+    const run = compareWith([fixture('clean.txt')], { PLUGIN_CHECK_BASE_REQUIRED: 'true', PLUGIN_CHECK_BASE_REF: 'master' })
+
+    assert.equal(run.status, 1)
+    assert.match(run.stdout, /::error title=Plugin Check::master could not be checked, so there is nothing to compare with\. Look at the job that checks master in this run\./)
+    assert.doesNotMatch(run.stdout, /commit the baseline/)
   })
 
   it('fails when the results of the target branch are not Plugin Check output', () => {

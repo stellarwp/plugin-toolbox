@@ -248,6 +248,8 @@ the check to require in branch protection is `plugin-check / Plugin Check`.
 | `cache-paths` | empty | Build caches kept between runs, one path per line, relative to the repository |
 | `mode` | `baseline` | `baseline` or `strict`. See [Modes](#modes) |
 | `submodules` | `false` | Passed to `actions/checkout` |
+| `head-ref` | empty | Manual runs only: the branch, tag or commit to check. Empty checks the ref the run started on. See [Manual runs](#manual-runs) |
+| `base-ref` | empty | Manual runs only: the branch, tag or commit to compare with. See [Manual runs](#manual-runs) |
 
 | Secret | Becomes, in the build step only |
 |---|---|
@@ -256,6 +258,28 @@ the check to require in branch protection is `plugin-check / Plugin Check`.
 
 The secrets never reach the job's environment, so the third-party Plugin Check step that runs later
 in the same job does not see them there.
+
+### Manual runs
+
+A `workflow_dispatch` run has no pull request, so it has no head, no target and no comment. Two
+inputs say what a pull request would say:
+
+- `head-ref` is what is built and checked. Empty means the ref the run was started on.
+- `base-ref` is what it is compared with. The baseline is `.plugin-check-baseline.json` on that ref,
+  and the excluded checks are its `.plugin-check.json`, so a branch older than the Plugin Check
+  setup still runs with the right ones. With no baseline file there, `base-ref` is built and checked
+  too, as a pull request's target is. The `exclude-checks` input still replaces the file.
+
+A manual run never asks for a commit. When `base-ref` has no baseline file, the run is only slower,
+and it stops being slower when `base-ref` has the file, for example after `head-ref` is merged into it.
+
+The caller passes them from its own `workflow_dispatch` inputs; see
+`templates/workflows/plugin-check.yml`. For a pull request or a push both are empty, and nothing
+changes.
+
+There is no comment. The result is in the run's summary page, in the `plugin-check-report` artifact,
+and in the status of the run, which fails by the same rule as a pull request: a rule with more errors
+than the baseline in `baseline` mode, any error in `strict` mode.
 
 ### Permissions the caller grants
 
@@ -281,6 +305,7 @@ not start the run. The job that runs the Plugin Check action lowers itself to `c
 | `base-results` | no | none | Results of the target branch, used as the baseline when there is no baseline file. Not used in `strict` mode |
 | `base-required` | no | `false` | `true` when the caller checked the target branch: a missing `base-results` file then fails the compare |
 | `baseline-changed` | no | `false` | `true` when the pull request changes the baseline file; the comment says so |
+| `base-ref` | no | none | A manual run's `base-ref`. When the baseline file is missing, the notes name this ref instead of saying "there is no baseline file" |
 
 | Output | What it is |
 |---|---|

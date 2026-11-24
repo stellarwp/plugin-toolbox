@@ -407,11 +407,12 @@ function buildRows(now, base) {
  * @param {boolean} input.noBaseline  There was nothing to compare with: only the totals count.
  * @param {string}  input.baselineName The baseline file's name, for the hint to update it.
  * @param {boolean} input.fromFile    The baseline is the committed file, which can be lowered.
+ * @param {string}  input.baseRef     The ref a manual run compares with, or ''. A manual run gets no advice to commit a file.
  *
  * @returns {object} `messages` (`{level, text}` in print order), `totals`, `wentUp`, `wentDown`,
  *          `errorsDown` (how many rules have fewer errors), `errorsUp`, `upList` and `failed`.
  */
-function evaluate({ rows, mode, noBaseline, baselineName = BASELINE_FILE, fromFile = true }) {
+function evaluate({ rows, mode, noBaseline, baselineName = BASELINE_FILE, fromFile = true, baseRef = '' }) {
   const totals = { errorsBase: 0, errorsNow: 0, warningsBase: 0, warningsNow: 0 }
   const messages = []
   let failed = false
@@ -470,8 +471,8 @@ function evaluate({ rows, mode, noBaseline, baselineName = BASELINE_FILE, fromFi
   }
 
   // Fewer errors than the file says leaves room for them to come back unnoticed. Strict mode does
-  // not use the file, so it asks for nothing.
-  if (mode !== 'strict' && fromFile && errorsDown > 0) {
+  // not use the file, so it asks for nothing. Nor does a manual run, which has nothing to commit.
+  if (mode !== 'strict' && fromFile && !baseRef && errorsDown > 0) {
     messages.push({
       level: 'notice',
       text: `Error counts went down. Lower the baseline so they cannot come back: commit the baseline.json from this run's plugin-check-report artifact as ${baselineName}.`,
@@ -623,10 +624,16 @@ function buildComment({ marker, status, badge, column, noBaseline, totals, wentU
  * @param {string}  input.source  `file`, `target` or `none`.
  * @param {boolean} input.changed The pull request changes the baseline file, so the comparison is
  *                                with its own change. A reviewer should look at the diff of the file.
+ * @param {string}  input.baseRef The ref a manual run compares with, or ''. The note names it,
+ *                                because the checked ref may have a baseline file of its own.
  *
  * @returns {string} The line, or ''.
  */
-function baselineNote({ source, changed }) {
+function baselineNote({ source, changed, baseRef = '' }) {
+  if (source === 'target' && baseRef) {
+    return `ℹ️ ${baseRef} has no baseline file, so its own results are the baseline.`
+  }
+
   if (source === 'target') {
     return "ℹ️ There is no baseline file, so the baseline is the target branch's results. See the job summary to add one."
   }
@@ -647,7 +654,7 @@ function baselineNote({ source, changed }) {
  *
  * @returns {{errors: Map<string, number>, warnings: Map<string, number>}} Counts.
  */
-function readBaselineFile(file, name) {
+function readBaselineFile(file, name, baseRef = '') {
   try {
     return readBaseline(fs.readFileSync(file, 'utf8'))
   } catch (error) {
@@ -662,8 +669,13 @@ function readBaselineFile(file, name) {
     // A parser's message has no full stop of its own, and the sentence after it needs one.
     const stop = /[.!?]$/.test(reason) ? '' : '.'
 
+    // The file of this run holds the results of head-ref, so a manual run does not offer it as the fix.
+    const fix = baseRef
+      ? `It is the file on ${baseRef}. Fix it there, or compare with another base-ref.`
+      : "Fix it, or replace it with the baseline.json from this run's plugin-check-report artifact."
+
     throw new CheckFailure(
-      `The baseline file ${name} is not valid: ${reason}${stop} Fix it, or replace it with the baseline.json from this run's plugin-check-report artifact.`,
+      `The baseline file ${name} is not valid: ${reason}${stop} ${fix}`,
       error.exitCode,
       true
     )
@@ -687,8 +699,12 @@ function readTargetResults(env, name) {
   const file = env.PLUGIN_CHECK_BASE_RESULTS || ''
 
   if (!file || !isFile(file)) {
+    const baseRef = env.PLUGIN_CHECK_BASE_REF || ''
+
     throw new CheckFailure(
-      `The target branch could not be checked, so there is nothing to compare with. Look at the job that checks the target branch in this run. To skip that check, commit the baseline.json from this run's plugin-check-report artifact as ${name}.`,
+      baseRef
+        ? `${baseRef} could not be checked, so there is nothing to compare with. Look at the job that checks ${baseRef} in this run.`
+        : `The target branch could not be checked, so there is nothing to compare with. Look at the job that checks the target branch in this run. To skip that check, commit the baseline.json from this run's plugin-check-report artifact as ${name}.`,
       1,
       true
     )
@@ -713,11 +729,14 @@ function readTargetResults(env, name) {
  * @param {object} input.verdict      From evaluate.
  * @param {string} input.baselineName The baseline file's name.
  * @param {object} input.env          GITHUB_RUN_ID and GITHUB_REPOSITORY, for the real command.
+ * @param {string} input.baseRef      The ref a manual run compares with, or ''. A manual run gets no steps to commit a file.
  *
  * @returns {string} Markdown with a final line break, or ''.
  */
-function updateSection({ mode, noFile, verdict, baselineName, env }) {
-  if (mode === 'strict') {
+function updateSection({ mode, noFile, verdict, baselineName, env, baseRef = '' }) {
+  // A manual run with a base-ref is a test, so there is nothing to commit. The file of this run holds
+  // the results of head-ref, which must not become the baseline of base-ref.
+  if (mode === 'strict' || baseRef) {
     return ''
   }
 
@@ -761,7 +780,8 @@ function updateSection({ mode, noFile, verdict, baselineName, env }) {
  *                              used as the baseline when there is no file) and
  *                              PLUGIN_CHECK_BASE_REQUIRED (`true`: they must exist),
  *                              PLUGIN_CHECK_BASELINE_CHANGED (`true`: this pull request changes the
- *                              baseline file), COMMENT_BADGE,
+ *                              baseline file), PLUGIN_CHECK_BASE_REF (a manual run's base-ref, named
+ *                              in the notes about a missing baseline file), COMMENT_BADGE,
  *                              RUN_URL, ARTIFACT_URL, GITHUB_STEP_SUMMARY.
  * @param {object}   input.log  Where messages go: `out`, `err`, `error`, `warning`, `notice`.
  *
@@ -868,15 +888,18 @@ function compareOrThrow({ args, env, log }) {
   let base = { errors: new Map(), warnings: new Map() }
 
   if (hasFile) {
-    base = readBaselineFile(baselinePath, baselineName)
+    base = readBaselineFile(baselinePath, baselineName, env.PLUGIN_CHECK_BASE_REF || '')
   } else if (mode === 'strict') {
     // Strict mode does not use a baseline, so it has nothing to say and builds nothing.
     log.out('No baseline file. Strict mode does not need one.')
   } else if (env.PLUGIN_CHECK_BASE_RESULTS || env.PLUGIN_CHECK_BASE_REQUIRED === 'true') {
     base = readTargetResults(env, baselineName)
     source = 'target'
+    const baseRef = env.PLUGIN_CHECK_BASE_REF || ''
     log.warning(
-      `No baseline file at ${baselineName}, so the target branch was checked too, and its results are the baseline for this run. That makes the run slower. To stop it, commit the baseline.json from this run's plugin-check-report artifact as ${baselineName}.`
+      baseRef
+        ? `${baseRef} has no baseline file at ${baselineName}, so ${baseRef} was checked too, and its results are the baseline for this run. That makes the run slower. It stops when ${baseRef} has the file.`
+        : `No baseline file at ${baselineName}, so the target branch was checked too, and its results are the baseline for this run. That makes the run slower. To stop it, commit the baseline.json from this run's plugin-check-report artifact as ${baselineName}.`
     )
   } else {
     log.warning(
@@ -885,7 +908,7 @@ function compareOrThrow({ args, env, log }) {
   }
 
   const noBaseline = source === 'none'
-  const verdict = evaluate({ rows: buildRows(now, base), mode, noBaseline, baselineName, fromFile: hasFile })
+  const verdict = evaluate({ rows: buildRows(now, base), mode, noBaseline, baselineName, fromFile: hasFile, baseRef: env.PLUGIN_CHECK_BASE_REF || '' })
 
   for (const { level, text: message } of verdict.messages) {
     log[level](message)
@@ -912,8 +935,8 @@ function compareOrThrow({ args, env, log }) {
     totals: verdict.totals,
     wentUp: verdict.wentUp,
     wentDown: verdict.wentDown,
-    updateHint: mode !== 'strict' && hasFile && verdict.errorsDown > 0,
-    note: baselineNote({ source, changed: env.PLUGIN_CHECK_BASELINE_CHANGED === 'true' }),
+    updateHint: mode !== 'strict' && hasFile && !env.PLUGIN_CHECK_BASE_REF && verdict.errorsDown > 0,
+    note: baselineNote({ source, changed: env.PLUGIN_CHECK_BASELINE_CHANGED === 'true', baseRef: env.PLUGIN_CHECK_BASE_REF || '' }),
     upList: verdict.upList,
     links: linksLine({ artifactUrl: env.ARTIFACT_URL || '', runUrl, resultsPath }),
   })
@@ -922,7 +945,7 @@ function compareOrThrow({ args, env, log }) {
     writeText(commentFile, `${body}\n`, 'write')
   }
   if (env.GITHUB_STEP_SUMMARY) {
-    const how = updateSection({ mode, noFile: !hasFile, verdict, baselineName, env })
+    const how = updateSection({ mode, noFile: !hasFile, verdict, baselineName, env, baseRef: env.PLUGIN_CHECK_BASE_REF || '' })
     writeText(env.GITHUB_STEP_SUMMARY, `${body}\n${how}`, 'append')
   }
 
