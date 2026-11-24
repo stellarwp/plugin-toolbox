@@ -1,0 +1,100 @@
+# Generates a plugin's POT file with `wp i18n make-pot`, and says whether its strings changed, so a
+# caller commits and pushes a POT only when there is something new to translate. It writes the POT
+# and commits nothing.
+#
+# The logic lives in generate-pot.js, run by actions/github-script, so there is no dependency to
+# install and nothing to build. wp-cli is a pinned release, downloaded into the runner's temp
+# directory and checked against its sha512 before it runs on the runner's PHP.
+name: Generate POT
+description: Generates the POT file of a plugin with wp-cli and says whether its strings changed
+
+inputs:
+  pot-path:
+    description: >-
+      Where the POT is written, relative to the checkout, e.g. `languages/my-plugin.pot`.
+      Empty is `<Domain Path>/<Text Domain>.pot` under `source-path`, read from the header of
+      the plugin's main file, the first top-level PHP file of `source-path`, in name order,
+      with a `Plugin Name` header; the `domain` input stands in for `Text Domain`, and when it
+      is empty the header's `Text Domain` is passed as `--domain`. A header `Text Domain` and
+      each `Domain Path` part take letters, digits, dots, dashes and underscores, not starting
+      with a dash or a dot. No such file, no `Domain Path`, a `Domain Path` of `/`, no `Text
+      Domain` without `domain`, a header value that breaks that rule, an absolute path or one
+      outside the checkout fails before anything runs. A path that starts with `-` is passed
+      to make-pot after `./`.
+    required: false
+    default: ''
+  source-path:
+    description: >-
+      The directory scanned for strings, relative to the checkout. A path that starts with `-` is
+      passed to make-pot after `./`.
+    required: false
+    default: '.'
+  domain:
+    description: >-
+      The text domain to extract, passed as `--domain`, and the POT's file name when `pot-path` is
+      empty. Empty passes the header's `Text Domain` when `pot-path` is empty too, and otherwise
+      leaves it to make-pot, which reads the `Text Domain` header of the plugin, or uses the
+      directory name.
+    required: false
+    default: ''
+  headers:
+    description: >-
+      POT headers to set, as a JSON object of strings in a string, passed as `--headers`, e.g.
+      `'{"Report-Msgid-Bugs-To": "https://example.com/support"}'`. Anything else fails before
+      anything runs. Empty sets none.
+    required: false
+    default: ''
+  exclude:
+    description: >-
+      Extra files and directories to leave out, one per line, as `--exclude` takes them: relative to
+      `source-path`, e.g. `*.js.map`. They are added to the lines of `.distignore`, the tracked
+      paths git marks `export-ignore` (read with `git check-attr`, so the checkout has to be a git
+      checkout) and the git submodule paths, which are always left out once made relative to
+      `source-path`; the ones outside it are dropped. An `export-ignore` path with a `,` is skipped
+      with a warning. make-pot adds its own exclusions to all of them.
+    required: false
+    default: ''
+  working-directory:
+    description: >-
+      Where the repository is checked out, relative to the workspace or absolute. Empty is the
+      workspace. A directory that is not there fails before anything runs.
+    required: false
+    default: ''
+
+outputs:
+  pot-path:
+    description: >-
+      The POT, relative to the checkout: the `pot-path` input as given, or the path read from the
+      plugin header when it is empty.
+    value: ${{ steps.pot.outputs.pot-path }}
+  changed:
+    description: >-
+      `yes` when the POT is new or its strings changed. `no` when the POT git tracks differs only in
+      the `POT-Creation-Date`, `Project-Id-Version` and `X-Generator` headers, the
+      `# Copyright (C) <year>` line and the `#:` references, or not at all; the file is then put back
+      as it was.
+    value: ${{ steps.pot.outputs.changed }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate the POT and check whether the strings changed
+      id: pot
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so an input is data and
+        # never part of the program.
+        INPUT_POT_PATH: ${{ inputs.pot-path }}
+        INPUT_SOURCE_PATH: ${{ inputs.source-path }}
+        INPUT_DOMAIN: ${{ inputs.domain }}
+        INPUT_HEADERS: ${{ inputs.headers }}
+        INPUT_EXCLUDE: ${{ inputs.exclude }}
+        INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      with:
+        script: |
+          const { runGeneratePot } = require(`${process.env.ACTION_PATH}/generate-pot.js`)
+          await runGeneratePot({ core, exec, env: process.env })
