@@ -16,18 +16,18 @@ inputs:
   project:
     description: >-
       The GlotPress project the strings are imported into, as its path on the site:
-      `the-events-calendar`, or `givewp/give` for a project under a parent.
+      `my-plugin`, or `my-brand/my-plugin` for a project under a parent.
     required: true
   pot-path:
     description: >-
-      The POT file, relative to the workspace, e.g. `languages/give.pot`. Its name is the name it
+      The POT file, relative to the workspace, e.g. `languages/my-plugin.pot`. Its name is the name it
       has on the server. Empty means `<Domain Path>/<Text Domain>.pot` from the header of the plugin
       file at the top of the workspace.
     required: false
     default: ''
   remote-folder:
     description: >-
-      The folder under `pot-location` the POT is copied to, one per product line: `tec`, `givewp`.
+      The folder under `pot-location` the POT is copied to, one per product line, e.g. `my-brand`.
     required: true
   host:
     description: 'The server to connect to. Pass a secret.'

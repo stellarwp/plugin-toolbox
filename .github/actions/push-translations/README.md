@@ -3,14 +3,14 @@
 Pushes a plugin's POT file to the shared GlotPress site, translations.stellarwp.com, and imports
 its strings into a project. What the import printed comes back as an output.
 
-The Events Calendar, a project at the top level of the site:
+A project at the top level of the site:
 
 ```yaml
 - uses: stellarwp/plugin-toolbox/.github/actions/push-translations@v1
   id: translations
   with:
-    project: the-events-calendar
-    remote-folder: tec
+    project: my-plugin
+    remote-folder: my-brand
     host: ${{ secrets.TRANSLATIONS_DEPLOY_HOST }}
     user: ${{ secrets.TRANSLATIONS_DEPLOY_USER }}
     ssh-key: ${{ secrets.TRANSLATIONS_DEPLOY_SSH_KEY }}
@@ -21,13 +21,13 @@ The Events Calendar, a project at the top level of the site:
     RESULT: ${{ steps.translations.outputs.glotpress-result }}
 ```
 
-GiveWP, a project under a parent, with a folder of its own on the server:
+A project under a parent project:
 
 ```yaml
 - uses: stellarwp/plugin-toolbox/.github/actions/push-translations@v1
   with:
-    project: givewp/give
-    remote-folder: givewp
+    project: my-brand/my-plugin
+    remote-folder: my-brand
     host: ${{ secrets.TRANSLATIONS_DEPLOY_HOST }}
     user: ${{ secrets.TRANSLATIONS_DEPLOY_USER }}
     ssh-key: ${{ secrets.TRANSLATIONS_DEPLOY_SSH_KEY }}
@@ -40,7 +40,7 @@ step: the action only sends the file.
 With `pot-path` empty, the POT is `<Domain Path>/<Text Domain>.pot`, read from the header of the
 plugin file: the first PHP file at the top of the workspace with a `Plugin Name` header in its first
 8 KiB. Leading and trailing slashes on `Domain Path` are dropped, so `/languages/` gives
-`languages/give.pot`. Pass `pot-path` for a POT that is somewhere else or named differently.
+`languages/my-plugin.pot` for a `my-plugin` Text Domain. Pass `pot-path` for a POT that is somewhere else or named differently.
 
 ## One run at a time per project
 
@@ -54,7 +54,7 @@ jobs:
   translations:
     runs-on: ubuntu-latest
     concurrency:
-      group: push-translations-givewp-give
+      group: push-translations-my-plugin
       cancel-in-progress: false
 ```
 
@@ -115,9 +115,9 @@ secret.
 
 | Input | Required | Default | What it does |
 |---|---|---|---|
-| `project` | yes | | The GlotPress project path: `the-events-calendar`, `givewp/give` |
+| `project` | yes | | The GlotPress project path: `my-plugin`, or `my-brand/my-plugin` under a parent |
 | `pot-path` | no | `<Domain Path>/<Text Domain>.pot` from the plugin header | The POT file, relative to the workspace |
-| `remote-folder` | yes | | The folder under `pot-location` the POT is copied to: `tec`, `givewp` |
+| `remote-folder` | yes | | The folder under `pot-location` the POT is copied to, e.g. `my-brand` |
 | `host` | yes | | The server to connect to |
 | `user` | yes | | The user to connect as |
 | `ssh-key` | yes | | The private key of `user` |
@@ -132,7 +132,7 @@ A trailing `/` on a folder, a directory or the URL is optional.
 | Output | Example | What it is |
 |---|---|---|
 | `glotpress-result` | `1 new strings added, 0 updated, 0 fuzzied, and 0 obsoleted.` | What `wp glotpress import-originals` printed. Text from the server: pass it to a script through `env`, never inside `run:` |
-| `project` | `givewp/give` | The project the strings were imported into |
+| `project` | `my-brand/my-plugin` | The project the strings were imported into |
 
 ## How it runs
 

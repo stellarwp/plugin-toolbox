@@ -26,13 +26,13 @@ describe('readPluginHeader', () => {
 
   it('reads the Text Domain and Domain Path of the top-level PHP file with a Plugin Name', () => {
     write('helpers.php', '<?php\n// Helpers.\n')
-    write('give.php', '<?php\n/**\n * Plugin Name: Give\n * Text Domain: give\n * Domain Path: /languages\n */\n')
+    write('my-plugin.php', '<?php\n/**\n * Plugin Name: My Plugin\n * Text Domain: my-plugin\n * Domain Path: /languages\n */\n')
 
-    assert.deepEqual(readPluginHeader(dir), { file: 'give.php', textDomain: 'give', domainPath: 'languages' })
+    assert.deepEqual(readPluginHeader(dir), { file: 'my-plugin.php', textDomain: 'my-plugin', domainPath: 'languages' })
   })
 
   it('drops the leading and trailing slashes of the Domain Path', () => {
-    write('learndash.php', '<?php\n/*\nPlugin Name: LearnDash\nText Domain: learndash\nDomain Path: /languages/\n*/\n')
+    write('other-plugin.php', '<?php\n/*\nPlugin Name: Other Plugin\nText Domain: other-plugin\nDomain Path: /languages/\n*/\n')
 
     assert.equal(readPluginHeader(dir).domainPath, 'languages')
   })

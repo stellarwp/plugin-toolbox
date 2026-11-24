@@ -35,15 +35,15 @@ const PARTS = `${PART}(?:/${PART})*`
 const RULES = {
   project: {
     pattern: new RegExp(`^(${PARTS})$`),
-    shape: 'a GlotPress project path, such as the-events-calendar or givewp/give',
+    shape: 'a GlotPress project path, such as my-plugin or my-brand/my-plugin',
   },
   'pot-path': {
     pattern: new RegExp(`^((?:${PART}/)*${PART}\\.pot)$`),
-    shape: 'the path of a .pot file relative to the workspace, such as languages/give.pot',
+    shape: 'the path of a .pot file relative to the workspace, such as languages/my-plugin.pot',
   },
   'remote-folder': {
     pattern: new RegExp(`^(${PARTS})/?$`),
-    shape: 'a folder name under pot-location, such as tec or givewp',
+    shape: 'a folder name under pot-location, such as my-brand',
   },
   'site-directory': {
     pattern: new RegExp(`^(/?${PARTS})/?$`),
