@@ -1,0 +1,73 @@
+# Files the actions and filters a release adds, updates, deprecates or removes, and the views it
+# adds, changes or removes, as pending changelog entries, so the release notes name them. It
+# compares the checkout with the last release tag and writes change files only: it commits
+# nothing, so the step that commits the release preparation carries them.
+#
+# The logic lives in analyze-hooks.js, run by actions/github-script, so there is no dependency to
+# install and nothing to build.
+name: Analyze hooks
+description: Files the hooks and views a release adds, changes or removes as pending changelog entries
+
+inputs:
+  paths:
+    description: >-
+      Where to search for `apply_filters`, `do_action` and their `_ref_array` and `_deprecated`
+      calls, one git pathspec per line, relative to the checkout. A pathspec can be a glob or an
+      exclusion: `*.php` then `:!vendor` searches every PHP file outside vendor. Required, since
+      plugins keep their code in different directories; an empty value fails before anything runs.
+    required: true
+  views-paths:
+    description: >-
+      Where the templates a theme can override live, one git pathspec per line, relative to the
+      checkout. Every `.php` file they match that was added, changed or removed since the last
+      release is listed by its path in the checkout, e.g. `templates/list.php`. A `*` matches
+      across directories, so `includes/*/templates/*` is the templates directory of every directory
+      under `includes`. Empty, the default, lists no view.
+    required: false
+    default: ''
+  types:
+    description: >-
+      The changelog type of each entry, as a JSON object in a string, for a changelogger that has a
+      type per kind of change, e.g. `'{"added-filters": "tweak: added filters"}'`. The keys are
+      `added-filters`, `updated-filters`, `deprecated-filters`, `removed-filters`, `added-actions`,
+      `updated-actions`, `deprecated-actions`, `removed-actions`, `added-views`, `changed-views` and
+      `removed-views`. An entry with a type here holds the names only, since the type's label says
+      what they are. An entry without one is a `tweak` reading `Added filters: …`.
+    required: false
+    default: ''
+  working-directory:
+    description: >-
+      Where the repository is checked out, relative to the workspace or absolute. Empty is the
+      workspace. A directory that is not there fails before anything runs.
+    required: false
+    default: ''
+
+outputs:
+  tag:
+    description: 'The last release tag the checkout was compared with, e.g. `6.18.3` or `v5.3.0`. Empty before the first release.'
+    value: ${{ steps.analyze.outputs.tag }}
+  files:
+    description: 'The change files written, one per line, relative to the checkout. Empty when nothing changed.'
+    value: ${{ steps.analyze.outputs.files }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Add the hook and view changelog entries
+      id: analyze
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so an input is data and
+        # never part of the program.
+        INPUT_PATHS: ${{ inputs.paths }}
+        INPUT_VIEWS_PATHS: ${{ inputs.views-paths }}
+        INPUT_TYPES: ${{ inputs.types }}
+        INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      with:
+        script: |
+          const { runAnalyzeHooks } = require(`${process.env.ACTION_PATH}/analyze-hooks.js`)
+          await runAnalyzeHooks({ core, exec, env: process.env })
