@@ -195,6 +195,77 @@ describe('analyze-hooks', () => {
     assert.deepStrictEqual(entries(), { 'analyze-hooks-updated-actions.yaml': entry('Updated actions: `tec_swapped`') })
   })
 
+  it('reads a docblock as a call\'s only when it ends on the line above the call', async (t) => {
+    const docblock = (...since) => `/**\n * A hook.\n *\n${since.map((line) => ` * @since ${line}\n`).join('')} */\n`
+    const array = (...since) =>
+      `<?php\n$a = [\n${docblock(...since)}'x' => apply_filters( 'tec_x', 1 ),\n'y' => apply_filters( 'tec_y', 2 ),\n];\n`
+    const template = (...since) =>
+      `<?php\n${docblock(...since)}?>\n<div>\n<?php do_action( 'tribe_template_before_example' ); ?>\n</div>\n`
+    write('src/Tribe/Array.php', array('5.0.0'))
+    write('src/views/v2/example.php', template('5.0.0'))
+    commit('an array and a template')
+    git('tag', '6.18.3')
+    write('src/Tribe/Array.php', array('5.0.0', 'TBD Added a param.'))
+    write('src/views/v2/example.php', template('5.0.0', 'TBD Changed the markup.'))
+    commit('new @since lines')
+    await run(t, { INPUT_PATHS: 'src', INPUT_VIEWS_PATHS: '' })
+
+    assert.deepStrictEqual(entries(), { 'analyze-hooks-updated-filters.yaml': entry('Updated filters: `tec_x`') })
+  })
+
+  it('does not add, update or remove a hook through a call documented in another file', async (t) => {
+    const reuse = (kind) => `/** This ${kind} is documented in src/Tribe/Main.php */\n`
+    write('src/Tribe/Reuse.php', `<?php\n${reuse('action')}do_action( 'tec_removed_action' );\n`)
+    write('src/Tribe/Main.php', `${AFTER}do_action( 'tec_removed_action' );\n`)
+    commit('an original and a re-use')
+    git('tag', '6.18.3')
+    write(
+      'src/Tribe/Reuse.php',
+      `<?php\n${reuse('action')}do_action( 'tec_removed_action' );\n/** THIS FILTER IS DOCUMENTED IN wp-includes/post-template.php\n * @since 9.9.9\n */\n$c = apply_filters( 'the_content', $c );\n`
+    )
+    write('src/Tribe/Main.php', AFTER)
+    commit('remove the original, re-use a core filter')
+    await run(t)
+
+    assert.deepStrictEqual(entries(), {})
+  })
+
+  it('reads an entry as written when a line lists its names, whatever the strategy wrote around them', async (t) => {
+    write(
+      'package.json',
+      JSON.stringify({
+        changelogger: {
+          types: { 'tweak: added filters': 'Tweak - Added filters:', 'tweak: added actions': 'Tweak - Added actions:' },
+          typeLabelOverrides: { keepachangelog: { 'tweak: removed filters': 'Removed filters' } },
+        },
+      })
+    )
+    write(
+      'changelog.md',
+      [
+        '## [6.18.3] - 2026-02-01',
+        '',
+        // A period after the names, and a hook added by hand on the same line.
+        '* Tweak - Added filters: `hand_written`, `tec_added_a`, `tec_added_b`.',
+        // One of the two names only.
+        '* Tweak - Added actions: `tec_added_action`.',
+        // keepachangelog: a `- ` bullet, the label in the heading above it.
+        '### Removed filters',
+        '- `tec_removed_filter`',
+        '### Changed',
+        '- Removed actions: `tec_removed_action`',
+        '',
+        '## [6.18.2] - 2026-01-01',
+        '',
+      ].join('\n')
+    )
+    await run(t, {
+      INPUT_TYPES: '{"added-filters": "tweak: added filters", "added-actions": "tweak: added actions", "removed-filters": "tweak: removed filters"}',
+    })
+
+    assert.deepStrictEqual(Object.keys(entries()), ['analyze-hooks-added-actions.yaml', 'analyze-hooks-changed-views.yaml'])
+  })
+
   it('removes an entry from an earlier run when its change is reverted, and is stable when run twice', async (t) => {
     await run(t)
     const first = entries()

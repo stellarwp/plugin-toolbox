@@ -10,7 +10,9 @@
  *    A hook is added when it is live now and was not at the tag, deprecated when every call became
  *    a `_deprecated` one, and removed when no call is left, so one that moved, or that still has
  *    another call elsewhere, is not listed. A hook in both trees whose docblocks gained a `@since`
- *    line is updated;
+ *    line is updated. A docblock belongs to a call when it ends on the line above the call's line.
+ *    A call under a docblock that says the hook is documented in another file is a re-use: it does
+ *    not make a hook added or updated, and while it is there the hook is not removed;
  *  - the `.php` files under `views-paths` that `git diff` reports as added, changed or renamed, or
  *    removed, by their path in the checkout.
  *
@@ -95,9 +97,10 @@ const TOKEN =
  *
  * @param {string} source A PHP file.
  *
- * @returns {{text: string, docblocks: {end: number, since: string[]}[], strings: number[][]}} The
- *          code, as long as the source; each `/**` comment, where it ends and its `@since` lines;
- *          and where each string and heredoc starts and ends.
+ * @returns {{text: string, docblocks: {end: number, since: string[], reuse: boolean}[], strings: number[][]}}
+ *          The code, as long as the source and with the same lines; each `/**` comment, where it
+ *          ends, its `@since` lines and whether it says the hook is documented in another file; and
+ *          where each string and heredoc starts and ends.
  */
 function code(source) {
   const docblocks = []
@@ -130,6 +133,7 @@ function code(source) {
         docblocks.push({
           end: at + match[0].length,
           since: since.map((line) => squash(line.replace(/\*\/$/, ''))),
+          reuse: /this (filter|action) is documented in/i.test(match[0]),
         })
       }
       blankTo(at + match[0].length)
@@ -145,15 +149,18 @@ function code(source) {
 }
 
 /**
- * A hook in one tree: whether it is live, and its `@since` lines.
+ * A hook in one tree: whether it has a call that is not a re-use, whether one of those is live, and
+ * its `@since` lines.
  *
- * @typedef {{live: boolean, since: Set<string>}} Hook
+ * @typedef {{own: boolean, live: boolean, since: Set<string>}} Hook
  */
 
 /**
  * The hooks a set of PHP files calls. A hook is live while one of its calls is not a `_deprecated`
- * one, and deprecated when every call is. Its `@since` lines are those of the docblock above each
- * call, when no `;`, `{` or `}` comes between the two.
+ * one, and deprecated when every call is. Its `@since` lines are those of the docblock that ends on
+ * the line above each call's line. A call under a docblock that says `This filter is documented in`
+ * or `This action is documented in` re-uses a hook documented elsewhere: it marks the hook as
+ * called, and its `@since` lines and whether it is deprecated are not read.
  *
  * @param {string[]} sources The files.
  *
@@ -173,12 +180,15 @@ function hooks(sources) {
 
       const kind = found[match[1] === 'apply_filters' ? 'filters' : 'actions']
       const name = match[3] ?? match[4]
-      const hook = kind.get(name) ?? { live: false, since: new Set() }
-      const docblock = docblocks.findLast((doc) => doc.end <= match.index)
+      const hook = kind.get(name) ?? { own: false, live: false, since: new Set() }
+      const last = docblocks.findLast((doc) => doc.end <= match.index)
+      // One line break between the two: the `*/` is on the line above the call's.
+      const docblock = last && text.slice(last.end, match.index).split('\n').length === 2 ? last : undefined
 
-      hook.live ||= match[2] !== '_deprecated'
-      if (docblock && !/[;{}]/.test(text.slice(docblock.end, match.index))) {
-        docblock.since.forEach((line) => hook.since.add(line))
+      if (!docblock?.reuse) {
+        hook.own = true
+        hook.live ||= match[2] !== '_deprecated'
+        docblock?.since.forEach((line) => hook.since.add(line))
       }
       kind.set(name, hook)
     }
@@ -206,15 +216,20 @@ function hasNewSince(was, is) {
  * @param {Map<string, Hook>} kind The tree's hooks of one kind.
  * @param {string}            name The hook.
  *
- * @returns {'live'|'deprecated'|'gone'} Whether it has a call that is not deprecated, only
- *          deprecated calls, or none.
+ * @returns {'live'|'deprecated'|'reused'|'gone'} Whether it has a call that is not deprecated,
+ *          only deprecated calls, only re-uses, or none.
  */
 function state(kind, name) {
   if (!kind.has(name)) {
     return 'gone'
   }
 
-  return kind.get(name).live ? 'live' : 'deprecated'
+  const hook = kind.get(name)
+  if (!hook.own) {
+    return 'reused'
+  }
+
+  return hook.live ? 'live' : 'deprecated'
 }
 
 /**
@@ -233,13 +248,17 @@ function analyze(before, after, viewsDiff) {
 
   // A hook that became live is added, one whose calls all became deprecated is deprecated, and one
   // with no call left, live or deprecated before, is removed. One that stayed as it was is updated
-  // when its docblocks have a `@since` line they did not have at the tag.
+  // when its docblocks have a `@since` line they did not have at the tag. A hook with only re-uses
+  // now, or with only re-uses at the tag and no call now, is documented elsewhere and not listed.
   for (const kind of ['filters', 'actions']) {
     const names = { Added: [], Updated: [], Deprecated: [], Removed: [] }
 
     for (const name of new Set([...old[kind].keys(), ...now[kind].keys()])) {
       const [was, is] = [state(old[kind], name), state(now[kind], name)]
 
+      if (is === 'reused' || (is === 'gone' && was === 'reused')) {
+        continue
+      }
       if (is !== was) {
         names[{ live: 'Added', deprecated: 'Deprecated', gone: 'Removed' }[is]].push(name)
       } else if (is !== 'gone' && hasNewSince(old[kind].get(name), now[kind].get(name))) {
@@ -337,14 +356,15 @@ function readTypes(input) {
  *
  * @param {string|null} packageJson The file's contents, or null when there is none.
  *
- * @returns {{changesDir: string, changelogFiles: string[], labels: Object<string, string>}} Where
- *          the pending entries live, the files the changelog is written to, and the label each
- *          type is written with.
+ * @returns {{changesDir: string, changelogFiles: string[], labels: Object<string, string>[]}}
+ *          Where the pending entries live, the files the changelog is written to, and the labels
+ *          each type can be written with: `types`, then each strategy's `typeLabelOverrides`.
  */
 function readChangelogger(packageJson) {
   const config = readChangeloggerSection(packageJson) ?? {}
 
   const written = (Array.isArray(config.files) ? config.files : []).map((file) => file?.path)
+  const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
   return {
     changesDir: typeof config.changesDir === 'string' && config.changesDir !== '' ? config.changesDir : 'changelog',
@@ -353,7 +373,9 @@ function readChangelogger(packageJson) {
     changelogFiles: [...new Set([config.changelogFile, ...written, 'changelog.md', 'readme.txt'])].filter(
       (file) => typeof file === 'string' && file !== ''
     ),
-    labels: config.types !== null && typeof config.types === 'object' ? config.types : {},
+    labels: [config.types, ...Object.values(isObject(config.typeLabelOverrides) ? config.typeLabelOverrides : {})].filter(
+      isObject
+    ),
   }
 }
 
@@ -366,15 +388,18 @@ function readChangelogger(packageJson) {
  * @param {{change: string, kind: string, names: string[]}} entry The entry.
  * @param {Object<string, string>}                          types The `types` input.
  *
- * @returns {{key: string, type: string, text: string}} The entry's key, changelog type and text.
+ * @returns {{key: string, type: string, text: string, label: string|undefined, names: string[]}}
+ *          The entry's key, changelog type and text; the text before the names, when the entry has
+ *          no type of its own; and the names.
  */
 function describe(entry, types) {
   const key = `${entry.change.toLowerCase()}-${entry.kind}`
   const names = entry.names.map((name) => `\`${name}\``).join(', ')
+  const label = `${entry.change} ${entry.kind}:`
 
   return types[key]
-    ? { key, type: types[key], text: names }
-    : { key, type: DEFAULT_TYPE, text: `${entry.change} ${entry.kind}: ${names}` }
+    ? { key, type: types[key], text: names, label: undefined, names: entry.names }
+    : { key, type: DEFAULT_TYPE, text: `${label} ${names}`, label, names: entry.names }
 }
 
 /** A YAML scalar on one line: double quoted, single quoted or plain. */
@@ -401,14 +426,20 @@ function scalar(body, key) {
 }
 
 /**
- * Whether the plugin already carries an entry: in a changelog file, as a line that is the type's
- * label and the text, or in a pending change file that is not this action's.
+ * Whether the plugin already carries an entry: in a changelog file, as a line that has its label
+ * and every one of its names in backticks, or in a pending change file that is not this action's.
  *
- * @param {{type: string, text: string}} entry   The entry.
- * @param {object}                       known
- * @param {string[]}                     known.lines   The squashed `* ` lines of the changelog files.
- * @param {Set<string>}                  known.pending The pending entries, as squashed `type|text`.
- * @param {Object<string, string>}       labels  The label the changelogger writes each type with.
+ * The label is the text before the names, `Added filters:`, or for an entry with a type of its own
+ * one of the labels the changelogger writes that type with. Matching names rather than the whole
+ * line holds for a strategy that adds a period, or that merges entries of a type into one line
+ * with names a developer wrote by hand.
+ *
+ * @param {{type: string, text: string, label: string|undefined, names: string[]}} entry The entry.
+ * @param {object}                   known
+ * @param {string[]}                 known.lines   The squashed bullet lines of the changelog files,
+ *                                                 each after the heading above it.
+ * @param {Set<string>}              known.pending The pending entries, as squashed `type|text`.
+ * @param {Object<string, string>[]} labels        The labels the changelogger writes each type with.
  *
  * @returns {boolean} True when it is already there.
  */
@@ -417,11 +448,16 @@ function isKnown(entry, known, labels) {
     return true
   }
 
-  const label = labels[entry.type] ?? `${entry.type[0].toUpperCase()}${entry.type.slice(1)}`
+  // Without a configured label the changelogger writes a stock type capitalized, `Tweak`, and any
+  // other type as it is.
+  const configured = labels.map((map) => map[entry.type]).filter((label) => typeof label === 'string' && label !== '')
+  const typeLabels = configured.length ? configured : [entry.type, `${entry.type[0].toUpperCase()}${entry.type.slice(1)}`]
+  const candidates = entry.label ? [entry.label] : typeLabels
+  const names = entry.names.map((name) => squash(`\`${name}\``))
 
-  // `Tweak - Added filters: …` from the stock strategies; a label that ends the sentence itself,
-  // `Tweak - Added actions:`, is followed by the names with no separator.
-  return [squash(`${label}-${entry.text}`), squash(`${label}${entry.text}`)].some((line) => known.lines.includes(line))
+  return known.lines.some(
+    (line) => candidates.some((label) => line.includes(squash(label))) && names.every((name) => line.includes(name))
+  )
 }
 
 /** A heading of a changelog file that names a version: `= [6.18.2] 2026-01-01 =`, `= 3.9.0 =`, `### [6.18.2]`. */
@@ -460,11 +496,19 @@ function sinceLastRelease(text, version) {
  * @returns {{lines: string[], pending: Set<string>}} What isKnown compares with.
  */
 function readKnown(cwd, changesDir, changelogFiles, version) {
-  const lines = changelogFiles.flatMap((file) =>
-    [...sinceLastRelease(readCheckoutFile(cwd, file) ?? '', version).matchAll(/^\* (.+)$/gm)].map((match) =>
-      squash(match[1])
-    )
-  )
+  // Each `* ` or `- ` line after the heading above it, which is where keepachangelog writes the
+  // type's label: `### Changed` then `- Added filters: …`.
+  const lines = []
+  for (const file of changelogFiles) {
+    let heading = ''
+    for (const line of sinceLastRelease(readCheckoutFile(cwd, file) ?? '', version).split('\n')) {
+      if (/^[=#]/.test(line)) {
+        heading = line
+      } else if (/^[*-] /.test(line)) {
+        lines.push(squash(`${heading} ${line.slice(2)}`))
+      }
+    }
+  }
 
   const pending = new Set()
   const dir = path.join(cwd, changesDir)
