@@ -76,10 +76,10 @@ group holds jobs of one repository only, so push a project from one repository.
    the job summary.
 5. Deletes the file from the server. This runs even when the import or the read failed.
 
-The file is public while it exists, between steps 3 and 5. Its address appears in the run log, in
-the environment of the import, read and delete steps, so anyone who can read the log can fetch it
-in that time. It holds only what the import printed: counts of the strings added, updated, fuzzied
-and obsoleted.
+The file is public while it exists, between steps 3 and 5. Its name ends in a random build id,
+which the action masks before any step uses it, so the run log shows `***` in its place and the
+job summary does not name the file. It holds only what the import printed: counts of the strings
+added, updated, fuzzied and obsoleted.
 
 ## What the server needs
 

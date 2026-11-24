@@ -1,6 +1,6 @@
 'use strict'
 
-const { describe, it } = require('node:test')
+const { afterEach, describe, it } = require('node:test')
 const assert = require('node:assert')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -160,17 +160,28 @@ describe('push-translations', () => {
     }
   })
 
-  it('sets the validated values as outputs, and leaves the result file out of the summary', async (t) => {
+  it('masks the build id, sets the validated values as outputs, and leaves the summary empty', async (t) => {
     const { core, outputs, summary } = await coreWithOutputs(t)
 
-    await runPushTranslations({ core, env: GIVE })
+    // core is a module namespace, so its calls are recorded through a wrapper.
+    const calls = []
+    const recording = {
+      ...core,
+      setSecret: (value) => calls.push(['secret', value]) && core.setSecret(value),
+      setOutput: (name, value) => calls.push(['output', name]) && core.setOutput(name, value),
+    }
+
+    await runPushTranslations({ core: recording, env: GIVE })
 
     const set = outputs()
+    // The build id is masked before any output carries it, so the log shows *** in its place.
+    assert.deepStrictEqual(calls[0], ['secret', set['result-file'].slice(-32)])
+    assert.strictEqual(calls.filter(([kind]) => kind === 'secret').length, 1)
     assert.strictEqual(set.project, 'givewp/give')
     assert.strictEqual(set['remote-pot'], '/home/deploy/pots/givewp/give.pot')
     assert.match(set['result-file'], /^give-[a-f0-9]{32}$/)
     assert.strictEqual(set['result-url'], `https://translations.stellarwp.com/bot-output/${set['result-file']}`)
-    assert.ok(!summary().includes(set['result-file'].slice(-32)))
+    assert.strictEqual(summary(), '')
     assert.strictEqual(set.host, 'ssh.example.com')
     assert.strictEqual(set.user, 'deploy')
     // The key is never an output: the later steps take it from the input.
@@ -217,6 +228,18 @@ describe('runReadResult', () => {
 })
 
 describe('the pot-path default', () => {
+  const dirs = []
+
+  afterEach(() => {
+    dirs.splice(0).forEach((dir) => fs.rmSync(dir, { recursive: true, force: true }))
+  })
+
+  /** An empty temporary directory, removed after the test. */
+  const tempDir = () => {
+    dirs.push(fs.mkdtempSync(path.join(os.tmpdir(), 'push-translations-')))
+    return dirs.at(-1)
+  }
+
   /**
    * A workspace holding one plugin file with the given header lines.
    *
@@ -225,7 +248,7 @@ describe('the pot-path default', () => {
    * @returns {string} The workspace directory.
    */
   function workspace(header) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'push-translations-'))
+    const dir = tempDir()
     fs.writeFileSync(path.join(dir, 'give.php'), `<?php\n/**\n * Plugin Name: Give\n${header}\n */\n`)
     return dir
   }
@@ -246,12 +269,13 @@ describe('the pot-path default', () => {
     'no plugin file': null,
     'no Text Domain': ' * Domain Path: /languages',
     'no Domain Path': ' * Text Domain: give',
+    'the root as its Domain Path': ' * Text Domain: give\n * Domain Path: /',
     'a Text Domain that is not a file name': ' * Text Domain: give $(id)\n * Domain Path: /languages',
   }
 
   for (const [name, header] of Object.entries(refused)) {
     it(`refuses an empty pot-path when the header has ${name}`, () => {
-      const dir = header === null ? fs.mkdtempSync(path.join(os.tmpdir(), 'push-translations-')) : workspace(header)
+      const dir = header === null ? tempDir() : workspace(header)
 
       assert.throws(
         () => readInputs({ ...GIVE, INPUT_POT_PATH: '', GITHUB_WORKSPACE: dir }, BUILD_ID),

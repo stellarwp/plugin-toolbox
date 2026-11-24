@@ -113,16 +113,21 @@ function readInput(env, name) {
  * @returns {string} The POT's path, relative to the workspace.
  */
 function defaultPotPath(env) {
-  const header = readPluginHeader(env.GITHUB_WORKSPACE || '.')
   const pass = `Pass pot-path. ${WHAT}`
+  if (!env.GITHUB_WORKSPACE) {
+    throw new Error(`pot-path is empty and GITHUB_WORKSPACE is not set, so no plugin header can be read. ${pass}`)
+  }
+  const header = readPluginHeader(env.GITHUB_WORKSPACE)
 
   if (header === null) {
     throw new Error(`pot-path is empty and no PHP file at the top of the workspace has a Plugin Name header. ${pass}`)
   }
-  for (const [value, name] of [[header.textDomain, 'Text Domain'], [header.domainPath, 'Domain Path']]) {
-    if (!value) {
-      throw new Error(`pot-path is empty and ${header.file} has no ${name} header. ${pass}`)
-    }
+  if (!header.textDomain) {
+    throw new Error(`pot-path is empty and ${header.file} has no Text Domain header. ${pass}`)
+  }
+  // `Domain Path: /` names the plugin's root, which comes back empty once its slashes are dropped.
+  if (!header.domainPath) {
+    throw new Error(`pot-path is empty and ${header.file} has no Domain Path header, or it names the plugin's root. ${pass}`)
   }
 
   return `${header.domainPath}/${header.textDomain}.pot`
@@ -170,7 +175,7 @@ function readInputs(env, buildId = crypto.randomBytes(16).toString('hex')) {
  * Runs the check and sets the outputs.
  *
  * @param {object} options
- * @param {object} options.core The @actions/core toolkit, for the outputs.
+ * @param {object} options.core The @actions/core toolkit, for the mask and the outputs.
  * @param {object} options.env  The environment, holding the inputs as `INPUT_*`.
  *
  * @throws {Error} When an input is refused.
@@ -180,7 +185,11 @@ function readInputs(env, buildId = crypto.randomBytes(16).toString('hex')) {
 async function runPushTranslations({ core, env }) {
   const outputs = readInputs(env)
 
-  // Not written to the job summary: the result file's name is the address of the import output.
+  // The build id makes the import output's public address. Masked before any output carries it,
+  // so the runner prints *** in its place in every later log line, the env of the ssh steps
+  // included. It is not written to the job summary either.
+  core.setSecret(outputs['result-file'].slice(-32))
+
   for (const [name, value] of Object.entries(outputs)) {
     core.setOutput(name, value)
   }
