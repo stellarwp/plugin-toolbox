@@ -2,6 +2,9 @@
 
 const { describe, it } = require('node:test')
 const assert = require('node:assert')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
 
 const {
   runPushTranslations,
@@ -157,7 +160,7 @@ describe('push-translations', () => {
     }
   })
 
-  it('sets the validated values as outputs and names the build in the summary', async (t) => {
+  it('sets the validated values as outputs, and leaves the result file out of the summary', async (t) => {
     const { core, outputs, summary } = await coreWithOutputs(t)
 
     await runPushTranslations({ core, env: GIVE })
@@ -167,7 +170,7 @@ describe('push-translations', () => {
     assert.strictEqual(set['remote-pot'], '/home/deploy/pots/givewp/give.pot')
     assert.match(set['result-file'], /^give-[a-f0-9]{32}$/)
     assert.strictEqual(set['result-url'], `https://translations.stellarwp.com/bot-output/${set['result-file']}`)
-    assert.ok(summary().includes(set['result-file']))
+    assert.ok(!summary().includes(set['result-file'].slice(-32)))
     assert.strictEqual(set.host, 'ssh.example.com')
     assert.strictEqual(set.user, 'deploy')
     // The key is never an output: the later steps take it from the input.
@@ -211,4 +214,49 @@ describe('runReadResult', () => {
     await assert.rejects(runReadResult({ core, env: { RESULT_URL: 'http://example.com/x' }, fetchImpl }), /no https URL/)
     assert.deepStrictEqual(urls, [])
   })
+})
+
+describe('the pot-path default', () => {
+  /**
+   * A workspace holding one plugin file with the given header lines.
+   *
+   * @param {string} header The header lines, one per line.
+   *
+   * @returns {string} The workspace directory.
+   */
+  function workspace(header) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'push-translations-'))
+    fs.writeFileSync(path.join(dir, 'give.php'), `<?php\n/**\n * Plugin Name: Give\n${header}\n */\n`)
+    return dir
+  }
+
+  it('is <Domain Path>/<Text Domain>.pot from the plugin header when pot-path is empty', () => {
+    const env = { ...GIVE, INPUT_POT_PATH: '', GITHUB_WORKSPACE: workspace(' * Text Domain: give\n * Domain Path: /languages/') }
+
+    assert.strictEqual(readInputs(env, BUILD_ID)['pot-path'], 'languages/give.pot')
+  })
+
+  it('is not used when pot-path is given', () => {
+    const env = { ...GIVE, GITHUB_WORKSPACE: workspace(' * Text Domain: other\n * Domain Path: /lang') }
+
+    assert.strictEqual(readInputs(env, BUILD_ID)['pot-path'], 'languages/give.pot')
+  })
+
+  const refused = {
+    'no plugin file': null,
+    'no Text Domain': ' * Domain Path: /languages',
+    'no Domain Path': ' * Text Domain: give',
+    'a Text Domain that is not a file name': ' * Text Domain: give $(id)\n * Domain Path: /languages',
+  }
+
+  for (const [name, header] of Object.entries(refused)) {
+    it(`refuses an empty pot-path when the header has ${name}`, () => {
+      const dir = header === null ? fs.mkdtempSync(path.join(os.tmpdir(), 'push-translations-')) : workspace(header)
+
+      assert.throws(
+        () => readInputs({ ...GIVE, INPUT_POT_PATH: '', GITHUB_WORKSPACE: dir }, BUILD_ID),
+        /^Error: pot-path .*Nothing was sent to the translations server\.$/s
+      )
+    })
+  }
 })

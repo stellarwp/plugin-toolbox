@@ -14,6 +14,8 @@
 
 const crypto = require('node:crypto')
 
+const { readPluginHeader } = require('../../lib/plugin-header.js')
+
 /** What was not done, to close every error message. */
 const WHAT = 'Nothing was sent to the translations server.'
 
@@ -101,18 +103,45 @@ function readInput(env, name) {
 }
 
 /**
+ * Where the POT is when `pot-path` is empty: `<Domain Path>/<Text Domain>.pot`, from the header of
+ * the plugin file at the top of the workspace. The result is checked like a given `pot-path`.
+ *
+ * @param {object} env The environment, holding `GITHUB_WORKSPACE`.
+ *
+ * @throws {Error} When no plugin file is found, or its header has no Text Domain or Domain Path.
+ *
+ * @returns {string} The POT's path, relative to the workspace.
+ */
+function defaultPotPath(env) {
+  const header = readPluginHeader(env.GITHUB_WORKSPACE || '.')
+  const pass = `Pass pot-path. ${WHAT}`
+
+  if (header === null) {
+    throw new Error(`pot-path is empty and no PHP file at the top of the workspace has a Plugin Name header. ${pass}`)
+  }
+  for (const [value, name] of [[header.textDomain, 'Text Domain'], [header.domainPath, 'Domain Path']]) {
+    if (!value) {
+      throw new Error(`pot-path is empty and ${header.file} has no ${name} header. ${pass}`)
+    }
+  }
+
+  return `${header.domainPath}/${header.textDomain}.pot`
+}
+
+/**
  * Checks every input and builds the values the later steps use.
  *
  * @param {object} env     The environment, holding the inputs as `INPUT_*`.
- * @param {string} buildId What makes the output file's name unique and hard to guess. Random by
- *                         default; a test passes its own.
+ * @param {string} buildId What makes the output file's name unique. Random by default; a test
+ *                         passes its own.
  *
  * @throws {Error} When an input, or the build id, is refused.
  *
  * @returns {Object<string, string>} The step's outputs, by name.
  */
 function readInputs(env, buildId = crypto.randomBytes(16).toString('hex')) {
-  const read = Object.fromEntries(Object.keys(RULES).map((name) => [name, readInput(env, name)]))
+  const withPot = { ...env, INPUT_POT_PATH: String(env.INPUT_POT_PATH ?? '').trim() || defaultPotPath(env) }
+  const read = Object.fromEntries(Object.keys(RULES).map((name) => [name, readInput(withPot, name)]))
 
   if (!BUILD_ID.test(buildId)) {
     throw new Error(`The build id is not 32 hex characters. ${WHAT}`)
@@ -141,7 +170,7 @@ function readInputs(env, buildId = crypto.randomBytes(16).toString('hex')) {
  * Runs the check and sets the outputs.
  *
  * @param {object} options
- * @param {object} options.core The @actions/core toolkit, for the outputs and the summary.
+ * @param {object} options.core The @actions/core toolkit, for the outputs.
  * @param {object} options.env  The environment, holding the inputs as `INPUT_*`.
  *
  * @throws {Error} When an input is refused.
@@ -151,11 +180,10 @@ function readInputs(env, buildId = crypto.randomBytes(16).toString('hex')) {
 async function runPushTranslations({ core, env }) {
   const outputs = readInputs(env)
 
+  // Not written to the job summary: the result file's name is the address of the import output.
   for (const [name, value] of Object.entries(outputs)) {
     core.setOutput(name, value)
   }
-
-  await core.summary.addRaw(`## Translations build: \`${outputs['result-file']}\``, true).write()
 }
 
 /**

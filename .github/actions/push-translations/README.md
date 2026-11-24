@@ -10,7 +10,6 @@ The Events Calendar, a project at the top level of the site:
   id: translations
   with:
     project: the-events-calendar
-    pot-path: lang/the-events-calendar.pot
     remote-folder: tec
     host: ${{ secrets.TRANSLATIONS_DEPLOY_HOST }}
     user: ${{ secrets.TRANSLATIONS_DEPLOY_USER }}
@@ -28,7 +27,6 @@ GiveWP, a project under a parent, with a folder of its own on the server:
 - uses: stellarwp/plugin-toolbox/.github/actions/push-translations@v1
   with:
     project: givewp/give
-    pot-path: languages/give.pot
     remote-folder: givewp
     host: ${{ secrets.TRANSLATIONS_DEPLOY_HOST }}
     user: ${{ secrets.TRANSLATIONS_DEPLOY_USER }}
@@ -38,6 +36,11 @@ GiveWP, a project under a parent, with a folder of its own on the server:
 
 A composite action cannot read secrets, so the caller passes them. Generate the POT before this
 step: the action only sends the file.
+
+With `pot-path` empty, the POT is `<Domain Path>/<Text Domain>.pot`, read from the header of the
+plugin file: the first PHP file at the top of the workspace with a `Plugin Name` header in its first
+8 KiB. Leading and trailing slashes on `Domain Path` are dropped, so `/languages/` gives
+`languages/give.pot`. Pass `pot-path` for a POT that is somewhere else or named differently.
 
 ## One run at a time per project
 
@@ -71,11 +74,12 @@ group holds jobs of one repository only, so push a project from one repository.
    what it prints to `bot-output/<file>-<build id>`.
 4. Reads that file back from `result-url` over https, sets it as `glotpress-result` and adds it to
    the job summary.
-5. Deletes the file from the server. This runs even when the import or the read failed, so the
-   output does not stay public.
+5. Deletes the file from the server. This runs even when the import or the read failed.
 
-The build id is random, not derived from the commit, so the address of the output cannot be
-guessed while the file exists.
+The file is public while it exists, between steps 3 and 5. Its address appears in the run log, in
+the environment of the import, read and delete steps, so anyone who can read the log can fetch it
+in that time. It holds only what the import printed: counts of the strings added, updated, fuzzied
+and obsoleted.
 
 ## What the server needs
 
@@ -91,13 +95,15 @@ guessed while the file exists.
 
 Before anything is sent, with the input named in the message:
 
-- An empty `project`, `pot-path`, `remote-folder`, `host`, `user`, `ssh-key` or `pot-location`. A
+- An empty `project`, `remote-folder`, `host`, `user`, `ssh-key` or `pot-location`. A
   secret the repository does not have arrives empty, so this is how a missing secret shows.
 - Any path whose parts are not letters, digits, `.`, `_` and `-`, or that has a part starting with
   `.` or `-`. That rules out spaces, quotes, `;`, `|`, `$`, backticks, `..`, `~` and a value that
   would be read as a command option.
 - `project` or `remote-folder` that starts with `/`.
-- `pot-path` that is absolute or does not end in `.pot`.
+- `pot-path` that is absolute or does not end in `.pot`, given or read from the plugin header.
+- An empty `pot-path` when no plugin file is found, or its header has no `Text Domain` or no
+  `Domain Path`.
 - `pot-location` that is not absolute.
 - `host` that is not a host name or an IPv4 address, and `user` that is not a plain user name.
 - `result-url` that is not `https://`, or that has a query, a port or credentials.
@@ -110,7 +116,7 @@ secret.
 | Input | Required | Default | What it does |
 |---|---|---|---|
 | `project` | yes | | The GlotPress project path: `the-events-calendar`, `givewp/give` |
-| `pot-path` | yes | | The POT file, relative to the workspace |
+| `pot-path` | no | `<Domain Path>/<Text Domain>.pot` from the plugin header | The POT file, relative to the workspace |
 | `remote-folder` | yes | | The folder under `pot-location` the POT is copied to: `tec`, `givewp` |
 | `host` | yes | | The server to connect to |
 | `user` | yes | | The user to connect as |

@@ -21,8 +21,10 @@ inputs:
   pot-path:
     description: >-
       The POT file, relative to the workspace, e.g. `languages/give.pot`. Its name is the name it
-      has on the server.
-    required: true
+      has on the server. Empty means `<Domain Path>/<Text Domain>.pot` from the header of the plugin
+      file at the top of the workspace.
+    required: false
+    default: ''
   remote-folder:
     description: >-
       The folder under `pot-location` the POT is copied to, one per product line: `tec`, `givewp`.
@@ -132,7 +134,7 @@ runs:
           const { runReadResult } = require(`${process.env.ACTION_PATH}/push-translations.js`)
           await runReadResult({ core, env: process.env })
 
-    # Also when the import or the read failed, so the output file does not stay public.
+    # Also when the import or the read failed, so the output file does not stay on the server.
     - name: Delete the import output from the server
       if: ${{ always() && steps.check.outcome == 'success' }}
       uses: appleboy/ssh-action@25ce8cbbcb08177468c7ff7ec5cbfa236f9341e1 # v1.1.0
