@@ -1,0 +1,69 @@
+# Sets the WordPress version a plugin is tested up to and, when asked, the minimum it requires: a
+# version given, or the WordPress release two before the tested one. It rewrites the headers in readme.txt and the plugin
+# file only: it commits nothing, so the step that commits the release preparation carries the change.
+#
+# The logic lives in update-wp-version.js, run by actions/github-script, so there is no dependency
+# to install and nothing to build.
+name: Update the WordPress version
+description: Sets the 'Tested up to' WordPress version and, optionally, the 'Requires at least' minimum
+
+inputs:
+  tested-up-to:
+    description: >-
+      The WordPress version to set as `Tested up to`, e.g. `6.8` or `6.8.1`: two or three numeric
+      parts, none zero-padded, written as given. Empty is the major and minor version of the
+      latest WordPress release, read from api.wordpress.org, so `7.1.5` is written as `7.1`; a
+      failed lookup fails the step. Anything else fails before any file is written.
+    required: false
+    default: ''
+  min-version:
+    description: >-
+      The `Requires at least` version. Empty leaves it. `auto` sets it to the WordPress release two
+      before the major and minor version of `tested-up-to`, counted through the releases
+      api.wordpress.org lists, e.g. `6.8.1` gives `6.6` and `7.0` gives `6.8`, and never lowers a
+      higher minimum a file already has. `auto` fails the step when the lookup fails, or when the
+      tested version is not a listed release or has fewer than two releases before it. A version
+      such as `6.9` sets exactly that, lower or not, and may not be above `tested-up-to`. Anything
+      else fails before any file is written.
+    required: false
+    default: ''
+  working-directory:
+    description: >-
+      Where the repository is checked out, relative to the workspace or absolute. Empty is the
+      workspace. A directory that is not there fails before any file is written.
+    required: false
+    default: ''
+
+outputs:
+  min-version:
+    description: >-
+      The `Requires at least` version the files hold after the run, e.g. `6.6`: the version set, or
+      a higher one `auto` kept. When readme.txt and the plugin file end with different versions, the
+      higher one. Empty when `min-version` is empty or no file carries the header.
+    value: ${{ steps.update.outputs.min-version }}
+  changed:
+    description: >-
+      `true` when a file was written, `false` when every header was already at its version, was
+      left above it, or no file carries one, so a later step can skip the commit.
+    value: ${{ steps.update.outputs.changed }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Update the WordPress version
+      id: update
+      uses: actions/github-script@v9
+      env:
+        # github-script's require() resolves against the workspace of the repository being built,
+        # not this action's directory, so the path has to be passed in. github.action_path is the
+        # documented expression for it.
+        ACTION_PATH: ${{ github.action_path }}
+        # Read from process.env rather than interpolated into the script, so an input is data and
+        # never part of the program.
+        INPUT_TESTED_UP_TO: ${{ inputs.tested-up-to }}
+        INPUT_MIN_VERSION: ${{ inputs.min-version }}
+        INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      with:
+        script: |
+          const { runUpdateWpVersion } = require(`${process.env.ACTION_PATH}/update-wp-version.js`)
+          await runUpdateWpVersion({ core, env: process.env })
