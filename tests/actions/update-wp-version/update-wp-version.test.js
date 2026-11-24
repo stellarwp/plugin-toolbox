@@ -57,6 +57,40 @@ const versionCheck = (body, status = 200) => {
   return { fetchImpl, calls }
 }
 
+/** The stable-check endpoint, which lists every WordPress release. */
+const STABLE_CHECK_URL = 'https://api.wordpress.org/core/stable-check/1.0/'
+
+/**
+ * Releases as stable-check lists them: 1.0, 1.2 and 1.5 only as patch releases, as the real list
+ * does, then every minor from 2.0 to 7.2 with a patch release of each.
+ */
+const RELEASES = Object.fromEntries(
+  [
+    '1.0.2',
+    '1.2.1',
+    '1.5.1.3',
+    ...[2, 3, 4, 5, 6].flatMap((major) => [...Array(10).keys()].flatMap((minor) => [`${major}.${minor}`, `${major}.${minor}.1`])),
+    '7.0',
+    '7.0.9',
+    '7.1',
+    '7.1.5',
+    '7.2',
+  ].map((version) => [version, 'insecure'])
+)
+
+/**
+ * A fetch answering stable-check with the given body and status, and refusing any other URL.
+ *
+ * @param {object|string} body   The answer, JSON-encoded unless it is a string.
+ * @param {number}        status The HTTP status.
+ */
+const stableCheck = (body = RELEASES, status = 200) => async (url) => {
+  if (url !== STABLE_CHECK_URL) {
+    throw new Error(`No lookup of ${url} was expected.`)
+  }
+  return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status })
+}
+
 /** A .puprc listing the given version files, the plugin file twice as real ones do. */
 const puprc = (files = ['test-plugin.php', 'test-plugin.php', 'readme.txt', 'src/Main.php']) =>
   JSON.stringify({ paths: { versions: files.map((file) => ({ file, regex: '(Version: )(.+)' })) } })
@@ -82,7 +116,7 @@ describe('update-wp-version', () => {
         .map((file) => [path.relative(dir, file), fs.readFileSync(file, 'utf8')])
     )
 
-  const run = async (t, tested, min, inputs = {}, fetchImpl = noFetch) => {
+  const run = async (t, tested, min, inputs = {}, fetchImpl = stableCheck()) => {
     const { core, outputs, logged, summary } = await coreWithOutputs(t)
 
     await runUpdateWpVersion({
@@ -96,7 +130,7 @@ describe('update-wp-version', () => {
   }
 
   /** Asserts the run is refused with the message, with no file changed and no output set. */
-  const refuses = async (t, tested, min, message, fetchImpl = noFetch) => {
+  const refuses = async (t, tested, min, message, fetchImpl = stableCheck()) => {
     const before = snapshot()
     const { core, outputs } = await coreWithOutputs(t)
 
@@ -211,13 +245,34 @@ describe('update-wp-version', () => {
     write('test-plugin.php', PLUGIN.replace('least: 6.0', 'least: 6.9'))
     const { outputs, summary } = await run(t, '7.0', 'auto')
 
-    assert.strictEqual(outputs['min-version'], '6.8')
+    assert.strictEqual(outputs['min-version'], '6.9')
+    assert.match(summary, /\* Minimum Required Version: `6\.9`\n/)
     assert.strictEqual(read('test-plugin.php'), PLUGIN.replace('least: 6.0', 'least: 6.9'))
     assert.match(summary, /\* `readme.txt`: Requires at least changed from 6\.0 to 6\.8\n/)
     assert.match(summary, /\* `test-plugin.php`: Requires at least left at 6\.9, which is above 6\.8\n$/)
 
     await run(t, '7.0', '6.7')
     assert.strictEqual(read('test-plugin.php'), PLUGIN.replace('least: 6.0', 'least: 6.7'))
+  })
+
+  it('reports the minimum the files hold: the highest kept value, or empty when no file has the header', async (t) => {
+    write('readme.txt', README.replace('least: 6.0', 'least: 6.9'))
+    write('test-plugin.php', PLUGIN.replace('least: 6.0', 'least: 6.9'))
+    const kept = await run(t, '7.0', 'auto')
+
+    assert.strictEqual(kept.outputs['min-version'], '6.9')
+    assert.match(kept.summary, /\* Minimum Required Version: `6\.9`\n/)
+
+    write('readme.txt', README.replace('least: 6.0', 'least: 6.9'))
+    write('test-plugin.php', PLUGIN.replace('least: 6.0', 'least: 7.0'))
+    assert.strictEqual((await run(t, '7.0', 'auto')).outputs['min-version'], '7.0')
+
+    write('readme.txt', README.replace('Requires at least: 6.0\n', ''))
+    write('test-plugin.php', PLUGIN.replace(' * Requires at least: 6.0\n', ''))
+    const none = await run(t, '7.0', 'auto')
+
+    assert.strictEqual(none.outputs['min-version'], '')
+    assert.match(none.summary, /\* Minimum Required Version: Unchanged\n/)
   })
 
   it('updates a Tested up to header the plugin file carries, and adds none', async (t) => {
@@ -294,12 +349,16 @@ describe('update-wp-version', () => {
     }
   })
 
-  it('sets the latest WordPress release when tested-up-to is empty', async (t) => {
+  it('sets the major and minor of the latest WordPress release when tested-up-to is empty', async (t) => {
     const { fetchImpl, calls } = versionCheck({ offers: [{ version: '6.8.3' }, { version: '6.7.4' }] })
     await run(t, ' ', '', {}, fetchImpl)
 
     assert.deepStrictEqual(calls, ['https://api.wordpress.org/core/version-check/1.7/'])
-    assert.match(read('readme.txt'), /^Tested up to: 6\.8\.3$/m)
+    assert.match(read('readme.txt'), /^Tested up to: 6\.8$/m)
+
+    write('readme.txt', README.replace('up to: 6.4', 'up to: 6.8.2'))
+    await run(t, '', '', {}, fetchImpl)
+    assert.match(read('readme.txt'), /^Tested up to: 6\.8\.2$/m)
   })
 
   it('refuses when the latest WordPress release cannot be looked up', async (t) => {
@@ -316,11 +375,13 @@ describe('update-wp-version', () => {
     await refuses(t, '', '', unusable, versionCheck({ offers: [{ version: '6.8; rm -rf' }] }).fetchImpl)
   })
 
-  it('takes the minimum two minors back across a major version, as WordPress went from 6.9 to 7.0', async (t) => {
-    const expected = { '7.0': '6.8', '7.1': '6.9', '6.1.0': '5.9', '7.2.1': '7.0' }
+  it('takes the minimum two releases back in the stable-check list, across a major version', async (t) => {
+    // 2.0 followed 1.5, so two releases back from 2.0 is 1.2, which arithmetic would get wrong.
+    const expected = { '7.0': '6.8', '7.1': '6.9', '6.1.0': '5.9', '7.2.1': '7.0', '2.0': '1.2', '1.5': '1.0' }
 
     for (const [tested, minimum] of Object.entries(expected)) {
       write('readme.txt', README.replace('least: 6.0', 'least: 1.0'))
+      write('test-plugin.php', PLUGIN.replace('least: 6.0', 'least: 1.0'))
       const { outputs } = await run(t, tested, 'auto')
 
       assert.strictEqual(outputs['min-version'], minimum, tested)
@@ -328,14 +389,37 @@ describe('update-wp-version', () => {
     }
   })
 
-  it('refuses to derive a minimum below 1.0, and takes 1.0 from 1.2', async (t) => {
-    for (const tested of ['0.1', '0.2', '1.0', '1.1']) {
-      await refuses(t, tested, 'auto', new RegExp(`Cannot derive a minimum version two minors behind ${tested.replace('.', '\\.')}`))
+  it('refuses auto when stable-check lists fewer than two releases before the tested one', async (t) => {
+    for (const tested of ['1.0', '1.2']) {
+      await refuses(t, tested, 'auto', new RegExp(`fewer than two WordPress releases before ${tested.replace('.', '\\.')}`))
     }
+  })
 
-    write('readme.txt', README.replace('least: 6.0', 'least: 0.5'))
-    const { outputs } = await run(t, '1.2', 'auto')
-    assert.strictEqual(outputs['min-version'], '1.0')
+  it('refuses auto when the tested version is not a release stable-check lists', async (t) => {
+    for (const tested of ['7.3', '0.1', '1.1']) {
+      await refuses(t, tested, 'auto', new RegExp(`${tested.replace('.', '\\.')} is not a WordPress release`))
+    }
+  })
+
+  it('looks up the releases only for auto', async (t) => {
+    await run(t, '7.0', '6.8', {}, noFetch)
+    await run(t, '7.0', '', {}, noFetch)
+
+    assert.match(read('readme.txt'), /^Requires at least: 6\.8$/m)
+  })
+
+  it('refuses auto when the WordPress releases cannot be looked up', async (t) => {
+    const failed = /Looking up the WordPress releases failed/
+    const unusable = /lists no WordPress releases/
+
+    await refuses(t, '7.0', 'auto', failed, stableCheck({}, 500))
+    await refuses(t, '7.0', 'auto', failed, stableCheck('<html>'))
+    await refuses(t, '7.0', 'auto', failed, async () => {
+      throw new Error('getaddrinfo ENOTFOUND')
+    })
+    await refuses(t, '7.0', 'auto', unusable, stableCheck(null))
+    await refuses(t, '7.0', 'auto', unusable, stableCheck(['7.0', '6.9']))
+    await refuses(t, '7.0', 'auto', unusable, stableCheck({ latest: '7.0' }))
   })
 
   it('sets a minimum given as a version exactly', async (t) => {
@@ -386,7 +470,9 @@ describe('update-wp-version', () => {
     await refuses(t, '6.8', 'auto', /\.puprc is not valid JSON/)
 
     fs.rmSync(path.join(dir, '.puprc'))
-    await refuses(t, '6.8', 'auto', /No \.puprc/)
+    const needed = /^min-version is set, so a \.puprc listing the plugin file under paths\.versions is needed; see this action's README\./
+    await refuses(t, '6.8', 'auto', needed)
+    await refuses(t, '6.9', '6.6', needed)
   })
 
   it('takes a plugin file .puprc lists with a leading ./', async (t) => {
