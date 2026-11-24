@@ -641,7 +641,7 @@ describe('compare with no baseline file, in a pull request', () => {
     assert.match(run.summary, /There is no no-baseline\.json yet\. To start one, add the file from this run:/)
   })
 
-  it('names the base-ref of a manual run in the note and in the job summary', () => {
+  it('names the base-ref of a manual run, and never asks for a commit', () => {
     const run = compareWith([fixture('errors-up.txt')], {
       PLUGIN_CHECK_BASE_RESULTS: baseResults(),
       PLUGIN_CHECK_BASE_REQUIRED: 'true',
@@ -651,7 +651,9 @@ describe('compare with no baseline file, in a pull request', () => {
     assert.match(run.stdout, /::warning title=Plugin Check::master has no baseline file at no-baseline\.json, so master was checked too/)
     assert.match(run.comment, /master has no baseline file, so its own results are the baseline\./)
     assert.doesNotMatch(run.comment, /There is no baseline file/)
-    assert.match(run.summary, /master has no no-baseline\.json yet\. To start one there, add the file from this run:/)
+    assert.doesNotMatch(run.comment, /job summary/)
+    assert.doesNotMatch(run.summary, /baseline\.json|gh run download|commit/)
+    assert.doesNotMatch(run.stdout, /commit the baseline/)
   })
 
   it('keeps the old wording when there is no base-ref', () => {

@@ -270,6 +270,9 @@ inputs say what a pull request would say:
   setup still runs with the right ones. With no baseline file there, `base-ref` is built and checked
   too, as a pull request's target is. The `exclude-checks` input still replaces the file.
 
+A manual run never asks for a commit. When `base-ref` has no baseline file, the run is only slower,
+and it stops being slower when `base-ref` has the file, for example after `head-ref` is merged into it.
+
 The caller passes them from its own `workflow_dispatch` inputs; see
 `templates/workflows/plugin-check.yml`. For a pull request or a push both are empty, and nothing
 changes.

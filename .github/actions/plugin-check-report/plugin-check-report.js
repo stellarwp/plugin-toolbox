@@ -630,7 +630,7 @@ function buildComment({ marker, status, badge, column, noBaseline, totals, wentU
  */
 function baselineNote({ source, changed, baseRef = '' }) {
   if (source === 'target' && baseRef) {
-    return `ℹ️ ${baseRef} has no baseline file, so its own results are the baseline. See the job summary to add one.`
+    return `ℹ️ ${baseRef} has no baseline file, so its own results are the baseline.`
   }
 
   if (source === 'target') {
@@ -719,19 +719,19 @@ function readTargetResults(env, name) {
  * @param {object} input.verdict      From evaluate.
  * @param {string} input.baselineName The baseline file's name.
  * @param {object} input.env          GITHUB_RUN_ID and GITHUB_REPOSITORY, for the real command.
- * @param {string} input.baseRef      The ref a manual run compares with, or ''. Names where the file is missing.
+ * @param {string} input.baseRef      The ref a manual run compares with, or ''. A manual run gets no steps to commit a file.
  *
  * @returns {string} Markdown with a final line break, or ''.
  */
 function updateSection({ mode, noFile, verdict, baselineName, env, baseRef = '' }) {
-  if (mode === 'strict') {
+  // A manual run with a base-ref is a test, so there is nothing to commit. The file of this run holds
+  // the results of head-ref, which must not become the baseline of base-ref.
+  if (mode === 'strict' || baseRef) {
     return ''
   }
 
   const lines = []
-  if (noFile && baseRef) {
-    lines.push(`${baseRef} has no ${baselineName} yet. To start one there, add the file from this run:`)
-  } else if (noFile) {
+  if (noFile) {
     lines.push(`There is no ${baselineName} yet. To start one, add the file from this run:`)
   } else if (verdict.errorsDown > 0) {
     lines.push(`Error counts went down. To lower the baseline, replace ${baselineName} with the file from this run:`)
@@ -888,7 +888,7 @@ function compareOrThrow({ args, env, log }) {
     const baseRef = env.PLUGIN_CHECK_BASE_REF || ''
     log.warning(
       baseRef
-        ? `${baseRef} has no baseline file at ${baselineName}, so ${baseRef} was checked too, and its results are the baseline for this run. That makes the run slower. To stop it, commit the baseline.json from this run's plugin-check-report artifact as ${baselineName} on ${baseRef}.`
+        ? `${baseRef} has no baseline file at ${baselineName}, so ${baseRef} was checked too, and its results are the baseline for this run. That makes the run slower. It stops when ${baseRef} has the file.`
         : `No baseline file at ${baselineName}, so the target branch was checked too, and its results are the baseline for this run. That makes the run slower. To stop it, commit the baseline.json from this run's plugin-check-report artifact as ${baselineName}.`
     )
   } else {

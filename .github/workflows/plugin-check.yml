@@ -282,7 +282,11 @@ jobs:
           if { [ "$EVENT" = pull_request ] || [ -n "$BASE_REF" ]; } && [ "$MODE" != strict ] && [ ! -f "$baseline" ]; then
             echo 'matrix={"target":["head","base"]}' >> "$GITHUB_OUTPUT"
             echo 'base=true' >> "$GITHUB_OUTPUT"
-            echo "::notice title=Plugin Check::There is no .plugin-check-baseline.json, so the target branch is built and checked too. Commit the baseline.json from the plugin-check-report artifact of this run to stop that."
+            if [ -n "$BASE_REF" ]; then
+              echo "::notice title=Plugin Check::$BASE_REF has no .plugin-check-baseline.json, so it is built and checked too. That stops when $BASE_REF has the file."
+            else
+              echo "::notice title=Plugin Check::There is no .plugin-check-baseline.json, so the target branch is built and checked too. Commit the baseline.json from the plugin-check-report artifact of this run to stop that."
+            fi
           else
             echo 'matrix={"target":["head"]}' >> "$GITHUB_OUTPUT"
             echo 'base=false' >> "$GITHUB_OUTPUT"
