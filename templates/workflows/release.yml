@@ -27,6 +27,8 @@ on:
         description: 'Version being released, e.g. 4.17.0'
         required: true
         type: string
+      # The dashboard and the packaging bot never send this input, so their runs always use the
+      # default. A repository without Blacksmith changes the default to ubuntu-24.04.
       runs-on:
         description: 'Runner label, e.g. ubuntu-24.04 for a repository without Blacksmith'
         required: false
