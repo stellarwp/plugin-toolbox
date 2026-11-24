@@ -30,6 +30,13 @@ on:
         required: false
         type: string
         default: ''
+      # The dashboard and the packaging bot never send this input, so their runs always use the
+      # default. A repository without Blacksmith changes the default to ubuntu-24.04.
+      runs-on:
+        description: 'Runner label, e.g. ubuntu-24.04 for a repository without Blacksmith'
+        required: false
+        type: string
+        default: blacksmith-2vcpu-ubuntu-2404
 
 # Two preparations of the same branch would both commit on top of the same checkout, and the second
 # commit would be refused as not a fast-forward. One group per branch makes the second wait for the first.
@@ -41,8 +48,8 @@ permissions:
 
 jobs:
   prepare:
-    # pup runs on PHP, which ubuntu-24.04 ships. Pinned so that stays true.
-    runs-on: ubuntu-24.04
+    # pup runs on PHP, which the Ubuntu 24.04 image ships. Keep the runner on that image.
+    runs-on: ${{ inputs.runs-on }}
     permissions:
       contents: write # the action commits the preparation to the branch
     steps:
