@@ -4,9 +4,8 @@
  * The header of a plugin's main file, shared by the toolbox actions. Loaded by a path relative to
  * each action's directory, like workspace.js.
  *
- * The main file is found the way `wp i18n make-pot` finds it: the PHP files at the top of the
- * directory, read up to their first 8 KiB, and the first with a `Plugin Name` header wins. The
- * files are read in name order.
+ * The main file is the first PHP file at the top of the directory, in name order, with a
+ * `Plugin Name` header in its first 8 KiB.
  */
 
 const fs = require('node:fs')

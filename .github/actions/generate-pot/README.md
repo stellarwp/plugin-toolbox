@@ -31,13 +31,17 @@ GitHub-hosted runners get instead.
 ## Where the POT goes
 
 Without `pot-path`, the POT goes to `<Domain Path>/<Text Domain>.pot` under `source-path`, read from
-the plugin's main file: the first PHP file at the top of `source-path`, in name order, with a
-`Plugin Name` header in its first 8 KiB, which is how make-pot finds it. A `Text Domain` of
+the plugin's main file: the first top-level PHP file of `source-path`, in name order, with a
+`Plugin Name` header in its first 8 KiB. A `Text Domain` of
 `my-plugin` and a `Domain Path` of `/languages/` give `languages/my-plugin.pot`. The `domain`
 input stands in for `Text Domain`.
 
-The step fails before anything runs when there is no such file, when it has no `Domain Path`, or
-when it has no `Text Domain` and `domain` is empty. Pass `pot-path` then. `pot-path` overrides the
+A `Text Domain` read from the header and each part of the `Domain Path` take letters, digits,
+dots, dashes and underscores, and do not start with a dash or a dot, so they cannot read as an
+option or lead out of the plugin. The step fails before anything runs when there is no such file,
+when it has no `Domain Path`, a `Domain Path` of `/`, which names the plugin's root, or one that
+breaks that rule, or when `domain` is empty and the `Text Domain` is missing or breaks that rule.
+Pass `pot-path` then, or `domain` for the `Text Domain`. `pot-path` overrides the
 header, and the `pot-path` output reports the path used either way.
 
 ## What it runs
@@ -45,6 +49,9 @@ header, and the `pot-path` output reports the path used either way.
 ```
 wp i18n make-pot <source-path> <pot-path> --skip-audit [--domain=…] [--headers=…] [--exclude=…]
 ```
+
+A `source-path` or `pot-path` that starts with `-` is passed after `./`, so make-pot does not read it
+as an option.
 
 wp-cli is release 2.12.0, pinned in [`generate-pot.js`](generate-pot.js) with its sha512. The phar
 is downloaded into the runner's temp directory, never the checkout, and checked before it runs. A
@@ -57,8 +64,10 @@ Four lists are joined into `--exclude`, each entry once:
 
 - The lines of `.distignore`, when the checkout has one: what the zip leaves out is not translated.
   Empty lines and `#` comments are skipped.
-- The path of each `.gitattributes` line that sets `export-ignore`, which the zip leaves out too. A
-  line with `-export-ignore` or `!export-ignore` is skipped.
+- The path of each line of the root `.gitattributes` that sets `export-ignore`, which the zip
+  leaves out too. As in git, the last of `export-ignore`, `-export-ignore` and `!export-ignore` on a
+  line wins. `[attr]` macro lines, quoted patterns and patterns with a `,`, which would split the
+  `--exclude` value, are skipped. A `.gitattributes` in a subdirectory is not read.
 - The path of each git submodule, read from `.gitmodules`. A submodule has its own text domain and
   its own POT, and its strings do not belong in this one.
 - The lines of the `exclude` input, passed as given.

@@ -13,14 +13,19 @@ inputs:
     description: >-
       Where the POT is written, relative to the checkout, e.g. `lang/the-events-calendar.pot` or
       `languages/give.pot`. Empty is `<Domain Path>/<Text Domain>.pot` under `source-path`, read from
-      the header of the plugin's main file, the first PHP file at the top of `source-path` with a
-      `Plugin Name` header; the `domain` input stands in for `Text Domain`. No such file, no
-      `Domain Path`, no `Text Domain` without `domain`, an absolute path or one outside the checkout
-      fails before anything runs.
+      the header of the plugin's main file, the first top-level PHP file of `source-path`, in name
+      order, with a `Plugin Name` header; the `domain` input stands in for `Text Domain`. A header
+      `Text Domain` and each `Domain Path` part take letters, digits, dots, dashes and underscores,
+      not starting with a dash or a dot. No such file, no `Domain Path`, a `Domain Path` of `/`, no
+      `Text Domain` without `domain`, a header value that breaks that rule, an absolute path or one
+      outside the checkout fails before anything runs. A path that starts with `-` is passed to
+      make-pot after `./`.
     required: false
     default: ''
   source-path:
-    description: 'The directory scanned for strings, relative to the checkout.'
+    description: >-
+      The directory scanned for strings, relative to the checkout. A path that starts with `-` is
+      passed to make-pot after `./`.
     required: false
     default: '.'
   domain:
@@ -41,9 +46,9 @@ inputs:
     description: >-
       Extra files and directories to leave out, one per line, as `--exclude` takes them: relative to
       `source-path`, e.g. `*.js.map`. They are added to the lines of `.distignore`, the paths
-      `.gitattributes` marks `export-ignore` and the git submodule paths, which are always left out
-      once made relative to `source-path`; the ones outside it are dropped. make-pot adds its own
-      exclusions to all of them.
+      the root `.gitattributes` marks `export-ignore` and the git submodule paths, which are always
+      left out once made relative to `source-path`; the ones outside it are dropped. make-pot adds its
+      own exclusions to all of them.
     required: false
     default: ''
   working-directory:

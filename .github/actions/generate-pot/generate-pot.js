@@ -45,6 +45,13 @@ const COPYRIGHT = '# Copyright '
 const REFERENCE = '#:'
 
 /**
+ * A file or directory name read from the plugin header: letters, digits, dots, dashes and
+ * underscores, not starting with a dash or a dot, so it cannot read as an option, leave the plugin
+ * directory or hold a space.
+ */
+const HEADER_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/
+
+/**
  * Splits a multi-line value into its lines, trimmed, without the empty ones and the `#` comments.
  *
  * @param {string|null} text The value: an input, or a file's contents.
@@ -67,8 +74,9 @@ function readLines(text) {
  * @param {string} sourcePath The `source-path` input.
  * @param {string} domain     The `domain` input; empty reads the `Text Domain` header.
  *
- * @throws {Error} When there is no plugin file, or it has no `Domain Path`, or no `Text Domain` and
- *                 the `domain` input is empty.
+ * @throws {Error} When there is no plugin file; when it has no `Domain Path`, or one that names the
+ *                 plugin's root or holds a part that is not a plain name; or when the `domain` input
+ *                 is empty and the `Text Domain` is missing or not a plain name.
  *
  * @returns {string} The path, relative to the checkout.
  */
@@ -86,8 +94,24 @@ function defaultPotPath(cwd, sourcePath, domain) {
   if (textDomain === null) {
     throw new Error(`pot-path is empty and ${header.file} has no Text Domain header. Pass domain or pot-path. ${WHAT}`)
   }
+  if (!domain && !HEADER_NAME.test(textDomain)) {
+    throw new Error(
+      `pot-path is empty and the Text Domain '${textDomain}' is not a file name: it takes letters, digits, ` +
+        `dots, dashes and underscores, and does not start with a dash or a dot. Pass domain or pot-path. ${WHAT}`
+    )
+  }
   if (header.domainPath === null) {
     throw new Error(`pot-path is empty and ${header.file} has no Domain Path header. Pass pot-path. ${WHAT}`)
+  }
+  if (header.domainPath === '') {
+    throw new Error(`pot-path is empty and the Domain Path names the plugin's root. Pass pot-path. ${WHAT}`)
+  }
+  if (!header.domainPath.split('/').every((part) => HEADER_NAME.test(part))) {
+    throw new Error(
+      `pot-path is empty and the Domain Path '${header.domainPath}' is not a directory inside the plugin: each ` +
+        `part takes letters, digits, dots, dashes and underscores, and does not start with a dash or a dot. ` +
+        `Pass pot-path. ${WHAT}`
+    )
   }
 
   return path.posix.join(sourcePath.split(path.sep).join('/'), header.domainPath, `${textDomain}.pot`)
@@ -188,7 +212,9 @@ function rebaseExclude(line, base, anchored) {
 
 /**
  * The paths `.gitattributes` marks `export-ignore`, which a zip leaves out like the `.distignore`
- * lines. A line that unsets the attribute, `-export-ignore` or `!export-ignore`, is skipped.
+ * lines. As in git, the last of `export-ignore`, `-export-ignore` and `!export-ignore` on a line
+ * wins. An `[attr]` macro line, a quoted pattern and a pattern with a `,`, which `--exclude` would
+ * split, are skipped.
  *
  * @param {string|null} text The contents of `.gitattributes`.
  *
@@ -197,8 +223,21 @@ function rebaseExclude(line, base, anchored) {
 function readExportIgnores(text) {
   return readLines(text)
     .map((line) => line.split(/\s+/))
-    .filter(([, ...attributes]) => attributes.includes('export-ignore'))
+    .filter(([pattern]) => !pattern.startsWith('[attr]') && !pattern.startsWith('"') && !pattern.includes(','))
+    .filter(([, ...attributes]) => attributes.filter((a) => /^[-!]?export-ignore$/.test(a)).at(-1) === 'export-ignore')
     .map(([pattern]) => pattern)
+}
+
+/**
+ * A path as a make-pot positional argument: one that starts with `-` gets `./` in front, so make-pot
+ * does not read it as an option.
+ *
+ * @param {string} value The path.
+ *
+ * @returns {string} The argument.
+ */
+function asPositional(value) {
+  return value.startsWith('-') ? `./${value}` : value
 }
 
 /**
@@ -341,7 +380,7 @@ async function runGeneratePot({ core, exec, env, cwd: workspace = process.cwd(),
 
   const phar = await setupWpCli({ core, exec, env, wpCli })
 
-  const args = ['i18n', 'make-pot', sourcePath, potPath, '--skip-audit']
+  const args = ['i18n', 'make-pot', asPositional(sourcePath), asPositional(potPath), '--skip-audit']
   if (domain !== '') {
     args.push(`--domain=${domain}`)
   }

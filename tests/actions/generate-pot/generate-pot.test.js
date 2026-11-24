@@ -199,6 +199,15 @@ describe('generate-pot', () => {
       assert.deepStrictEqual(php.args.slice(3), ['i18n', 'make-pot', '.', 'lang/plugin.pot', '--skip-audit'])
     })
 
+    it('passes a source-path or pot-path that starts with - after ./, so make-pot does not read it as an option', async (t) => {
+      fs.mkdirSync(path.join(repo, '-src'))
+
+      const { php, outputs } = await run(t, { generated: pot(), inputs: { INPUT_SOURCE_PATH: '-src', INPUT_POT_PATH: '-plugin.pot' } })
+
+      assert.deepStrictEqual(php.args.slice(5, 7), ['./-src', './-plugin.pot'])
+      assert.strictEqual(outputs['pot-path'], '-plugin.pot')
+    })
+
     it('passes the source, the domain and the headers', async (t) => {
       const { php } = await run(t, {
         generated: pot(),
@@ -247,6 +256,25 @@ describe('generate-pot', () => {
       const { php } = await run(t, { generated: pot(), inputs: { INPUT_SOURCE_PATH: 'src' } })
 
       assert.strictEqual(php.args.at(-1), '--exclude=node_modules,tests')
+    })
+
+    it('takes the last export-ignore, -export-ignore or !export-ignore of a line, as git does', async (t) => {
+      write('.gitattributes', 'a export-ignore -export-ignore\nb -export-ignore export-ignore\nc export-ignore !export-ignore\n')
+
+      const { php } = await run(t, { generated: pot() })
+
+      assert.strictEqual(php.args.at(-1), '--exclude=b')
+    })
+
+    it('skips the [attr] macro lines, quoted patterns and patterns with a comma of .gitattributes', async (t) => {
+      write(
+        '.gitattributes',
+        '[attr]dist export-ignore\n"with space" export-ignore\na,b export-ignore\n/kept export-ignore\n'
+      )
+
+      const { php } = await run(t, { generated: pot() })
+
+      assert.strictEqual(php.args.at(-1), '--exclude=/kept')
     })
 
     it('reads .distignore in the working directory', async (t) => {
@@ -325,6 +353,14 @@ describe('generate-pot', () => {
       assert.strictEqual(outputs['pot-path'], 'src/lang/my-plugin.pot')
     })
 
+    it('accepts a Text Domain and Domain Path parts of letters, digits, dots, dashes and underscores', async (t) => {
+      write('plugin.php', header(['Text Domain: my_plugin-2.x', 'Domain Path: /i18n/lang_v2/']))
+
+      const { outputs } = await run(t, { generated: pot(), inputs: { INPUT_POT_PATH: '' } })
+
+      assert.strictEqual(outputs['pot-path'], 'i18n/lang_v2/my_plugin-2.x.pot')
+    })
+
     it('is overridden by the pot-path input', async (t) => {
       write('plugin.php', header(['Text Domain: my-plugin', 'Domain Path: /languages']))
 
@@ -336,7 +372,11 @@ describe('generate-pot', () => {
     const refused = [
       ['no Text Domain and no domain input', ['Domain Path: /languages'], /plugin\.php has no Text Domain header\. Pass domain or pot-path/],
       ['no Domain Path', ['Text Domain: my-plugin'], /plugin\.php has no Domain Path header\. Pass pot-path/],
-      ['a Domain Path outside the checkout', ['Text Domain: my-plugin', 'Domain Path: ../../elsewhere'], /not a path inside the checkout/],
+      ['a Text Domain that reads as an option', ['Text Domain: --allow-root', 'Domain Path: lang'], /Text Domain '--allow-root' is not a file name/],
+      ['a Text Domain with a space', ['Text Domain: a b', 'Domain Path: lang'], /Text Domain 'a b' is not a file name/],
+      ['a Domain Path that leads up', ['Text Domain: my-plugin', 'Domain Path: ../..'], /Domain Path '\.\.\/\.\.' is not a directory inside the plugin/],
+      ['a Domain Path that leads up from a directory', ['Text Domain: my-plugin', 'Domain Path: lang/../..'], /Domain Path 'lang\/\.\.\/\.\.' is not a directory inside the plugin/],
+      ['a Domain Path of the plugin root', ['Text Domain: my-plugin', 'Domain Path: /'], /Domain Path names the plugin's root\. Pass pot-path/],
     ]
 
     for (const [name, lines, message] of refused) {
