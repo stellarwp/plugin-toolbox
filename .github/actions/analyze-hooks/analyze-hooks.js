@@ -11,9 +11,10 @@
  *    a `_deprecated` one, and removed when no call is left, so one that moved, or that still has
  *    another call elsewhere, is not listed. A hook in both trees whose docblocks gained a `@since`
  *    line is updated, reading the `@since` lines of a docblock that ends on the line above a call's
- *    line. A call after a docblock that says the hook is documented in another file, with no `;`,
- *    `{` or `}` between them, is a re-use: it does not make a hook added or updated, and while it
- *    is there the hook is not removed;
+ *    line with no `;`, `{` or `}` between them. A call after a docblock that says the hook is
+ *    documented in another file, with no `;`, `{` or `}` between them, is a re-use: it does not
+ *    make a hook added or updated, and while it is there the hook is not removed. A method named
+ *    `do_action` or `apply_filters`, called with `->`, `?->` or `::`, is not a hook call;
  *  - the `.php` files under `views-paths` that `git diff` reports as added, changed or renamed, or
  *    removed, by their path in the checkout.
  *
@@ -44,9 +45,10 @@ const RELEASE_TAG = /^v?\d+\.\d+\.\d+(\.\d+)?$/
 
 /**
  * A hook call whose name is a plain string literal, closed by `,` or `)`. A name built from a
- * variable, interpolation or concatenation (`'tec_' . $name`) is not a name.
+ * variable, interpolation or concatenation (`'my_plugin_' . $name`) is not a name. A method of the
+ * same name, `$events->do_action(` or `Events::do_action(`, is not a hook call; `\do_action(` is.
  */
-const HOOK_CALL = /\b(apply_filters|do_action)(_ref_array|_deprecated)?\s*\(\s*(?:'([^'$]+)'|"([^"$]+)")\s*[,)]/g
+const HOOK_CALL = /(?<!(?:->|::)\s*)\b(apply_filters|do_action)(_ref_array|_deprecated)?\s*\(\s*(?:'([^'$]+)'|"([^"$]+)")\s*[,)]/g
 
 /** Every entry the action can write, as `<change>-<kind>`: the keys the `types` input takes. */
 const ENTRY_KEYS = [
@@ -159,7 +161,7 @@ function code(source) {
 /**
  * The hooks a set of PHP files calls. A hook is live while one of its calls is not a `_deprecated`
  * one, and deprecated when every call is. Its `@since` lines are those of the docblock that ends on
- * the line above each call's line. A call is a re-use of a hook documented elsewhere when the
+ * the line above each call's line, when no `;`, `{` or `}` comes between them. A call is a re-use of a hook documented elsewhere when the
  * docblock before it, with no `;`, `{` or `}` between them, says `This filter is documented in` or
  * `This action is documented in`: it marks the hook as called, and its `@since` lines and whether
  * it is deprecated are not read.
@@ -191,8 +193,9 @@ function hooks(sources) {
       if (!reuse) {
         hook.own = true
         hook.live ||= match[2] !== '_deprecated'
-        // One line break between the two: the `*/` is on the line above the call's.
-        if (between.split('\n').length === 2) {
+        // One line break and no statement between the two: the `*/` is on the line above the
+        // call's, and the call is the first statement after it.
+        if (between.split('\n').length === 2 && !/[;{}]/.test(between)) {
           docblock.since.forEach((line) => hook.since.add(line))
         }
       }
@@ -562,7 +565,7 @@ function readKnown(cwd, changesDir, changelogFiles, version) {
 async function runAnalyzeHooks({ core, exec, env, cwd: workspace = process.cwd() }) {
   const paths = readPathspecs(env.INPUT_PATHS)
   if (paths.length === 0) {
-    throw new Error(`paths is empty. Pass the directories to search for hooks, one per line, e.g. src. ${WHAT}`)
+    throw new Error(`paths is empty. Pass the directories to search for hooks, one per line, e.g. src or includes. ${WHAT}`)
   }
   const viewsPaths = readPathspecs(env.INPUT_VIEWS_PATHS)
   const types = readTypes(env.INPUT_TYPES)
@@ -634,7 +637,7 @@ async function runAnalyzeHooks({ core, exec, env, cwd: workspace = process.cwd()
   }
 
   // --relative names a file by its path in the checkout, which git prints the same whatever the
-  // form of the pathspec, `./src/views` or `src/views/`.
+  // form of the pathspec, `./templates` or `templates/`.
   const viewsDiff =
     viewsPaths.length === 0
       ? ''

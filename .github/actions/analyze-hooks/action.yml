@@ -13,18 +13,18 @@ inputs:
     description: >-
       Where to search for `apply_filters`, `do_action` and their `_ref_array` and `_deprecated`
       calls, one git pathspec per line, relative to the checkout. A pathspec can be a glob or an
-      exclusion: `*.php` then `:!vendor` searches every PHP file outside vendor.
-    required: false
-    default: 'src'
+      exclusion: `*.php` then `:!vendor` searches every PHP file outside vendor. Required, since
+      plugins keep their code in different directories; an empty value fails before anything runs.
+    required: true
   views-paths:
     description: >-
       Where the templates a theme can override live, one git pathspec per line, relative to the
       checkout. Every `.php` file they match that was added, changed or removed since the last
-      release is listed by its path in the checkout, e.g. `src/views/v2/list.php`. A `*` matches
+      release is listed by its path in the checkout, e.g. `templates/list.php`. A `*` matches
       across directories, so `includes/*/templates/*` is the templates directory of every directory
-      under `includes`. Empty lists no view.
+      under `includes`. Empty, the default, lists no view.
     required: false
-    default: 'src/views'
+    default: ''
   types:
     description: >-
       The changelog type of each entry, as a JSON object in a string, for a changelogger that has a

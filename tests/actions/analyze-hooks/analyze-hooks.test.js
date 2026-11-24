@@ -516,6 +516,49 @@ describe('analyze-hooks', () => {
 
   it('refuses an empty paths input', async (t) => {
     await assert.rejects(run(t, { INPUT_PATHS: '\n \n' }), /paths is empty/)
+    await assert.rejects(run(t, { INPUT_PATHS: undefined }), /paths is empty/)
+  })
+
+  it('lists no view when views-paths is not given', async (t) => {
+    await run(t, { INPUT_VIEWS_PATHS: undefined })
+
+    assert.ok(!('analyze-hooks-changed-views.yaml' in entries()))
+  })
+
+  it('does not read a method named do_action or apply_filters as a hook', async (t) => {
+    write(
+      'src/Tribe/Methods.php',
+      [
+        '<?php',
+        "$dispatcher->do_action( 'my_plugin_instance' );",
+        "$maybe?->apply_filters( 'my_plugin_nullsafe', $a );",
+        "Foo::do_action( 'my_plugin_static' );",
+        "\\do_action( 'my_plugin_qualified' );",
+        '',
+      ].join('\n')
+    )
+    commit('methods')
+    await run(t)
+
+    assert.strictEqual(
+      entries()['analyze-hooks-added-actions.yaml'],
+      entry('Added actions: `my_plugin_qualified`, `tec_added_action`, `tec_added_ref`')
+    )
+    assert.ok(!entries()['analyze-hooks-added-filters.yaml'].includes('my_plugin_nullsafe'))
+  })
+
+  it('does not read @since lines for a call after a statement on the line below the docblock', async (t) => {
+    const docblock = (...since) => `/**\n * A hook.\n *\n${since.map((line) => ` * @since ${line}\n`).join('')} */\n`
+    const file = (...since) =>
+      `<?php\n${docblock(...since)}$ready = true; do_action( 'my_plugin_existing' );\n${docblock(...since)}do_action( 'my_plugin_documented' );\n`
+    write('src/Tribe/Statement.php', file('1.0.0'))
+    commit('two hooks')
+    git('tag', '6.18.3')
+    write('src/Tribe/Statement.php', file('1.0.0', 'TBD Added a param.'))
+    commit('new @since lines')
+    await run(t)
+
+    assert.deepStrictEqual(entries(), { 'analyze-hooks-updated-actions.yaml': entry('Updated actions: `my_plugin_documented`') })
   })
 
   it('refuses a types input that is not an object of known keys', () => {

@@ -12,6 +12,11 @@ adds, changes or removes, as pending changelog entries, so the release notes nam
     fetch-depth: 0
 
 - uses: stellarwp/plugin-toolbox/.github/actions/analyze-hooks@v1
+  with:
+    paths: |
+      src
+      includes
+    views-paths: templates
 
 # Write the changelog and commit here, e.g. with the release-prep action: this action only writes
 # change files.
@@ -36,9 +41,9 @@ or four numeric parts, with or without a leading `v` (`6.18.3`, `v5.3.0`, `4.19.
 | `analyze-hooks-updated-actions.yaml` | ``Updated actions: `a` `` |
 | `analyze-hooks-deprecated-actions.yaml` | ``Deprecated actions: `a` `` |
 | `analyze-hooks-removed-actions.yaml` | ``Removed actions: `a` `` |
-| `analyze-hooks-added-views.yaml` | ``Added views: `src/views/v2/month.php` `` |
-| `analyze-hooks-changed-views.yaml` | ``Changed views: `src/views/v2/list.php` `` |
-| `analyze-hooks-removed-views.yaml` | ``Removed views: `src/views/v2/day.php` `` |
+| `analyze-hooks-added-views.yaml` | ``Added views: `templates/month.php` `` |
+| `analyze-hooks-changed-views.yaml` | ``Changed views: `templates/list.php` `` |
+| `analyze-hooks-removed-views.yaml` | ``Removed views: `templates/day.php` `` |
 
 Each is a `patch` entry of type `tweak`, and a kind with nothing to list writes no file.
 
@@ -46,8 +51,9 @@ Each is a `patch` entry of type `tweak`, and a kind with nothing to list writes 
   `do_action`, `do_action_ref_array` and `do_action_deprecated` calls under `paths` whose name is a
   complete string literal. A name built
   from a variable, interpolation or concatenation is not listed, and neither is a call inside a
-  comment, inside a string, or in the HTML of a template outside `<?php ... ?>`. The name can be on any line after
-  the parenthesis. A hook is live while one of its calls is not a `_deprecated` one, deprecated when
+  comment, inside a string, or in the HTML of a template outside `<?php ... ?>`. A method of the
+  same name, called with `->`, `?->` or `::`, is not a hook call; a global call written
+  `\do_action(` is. The name can be on any line after the parenthesis. A hook is live while one of its calls is not a `_deprecated` one, deprecated when
   every call is, and gone when it has none. A hook is added when it is live now and was not at the
   tag, deprecated when it is deprecated now and was not, and removed when it is gone now and was
   live or deprecated. A hook that moved, or that still has another call elsewhere, is not listed.
@@ -59,8 +65,9 @@ Each is a `patch` entry of type `tweak`, and a kind with nothing to list writes 
   now that they did not have at the tag: a change to a hook's signature is recorded as one more
   line, such as `@since TBD Added the $type parameter.` The lines of every call's docblock are read
   together. A docblock's `@since` lines belong to a call when its `*/` is on the line directly
-  above the line of the call, so a hook in an array or a template without a docblock of its own is not updated by the
-  docblock of the hook or file above it.
+  above the line of the call and no `;`, `{` or `}` comes between them. So a hook in an array or a
+  template without a docblock of its own, or a call after another statement on that line, is not
+  updated by the docblock above it.
 - **Views** are the `.php` files matched by `views-paths` that were added, changed or removed since
   the tag. A renamed view is changed, under its new path. Each is named by its path in the
   checkout, `.php` included, so a reader with an override of the file finds it by that path.
@@ -126,8 +133,8 @@ the removed hooks, stays a `tweak` reading `Removed filters: …`.
 
 | Input | Default | |
 |---|---|---|
-| `paths` | `src` | Where to search for hooks, one git pathspec per line. `*.php` matches every PHP file, `:!vendor` excludes a directory. |
-| `views-paths` | `src/views` | Where the templates a theme can override live, one git pathspec per line. A `*` matches across directories: `includes/*/templates/*`. Empty lists no view. |
+| `paths` | required | Where to search for hooks, one git pathspec per line. `*.php` matches every PHP file, `:!vendor` excludes a directory. An empty value fails the step. |
+| `views-paths` | | Where the templates a theme can override live, one git pathspec per line. A `*` matches across directories: `includes/*/templates/*`. Empty, the default, lists no view. |
 | `types` | | The changelog type per entry, as a JSON object in a string. Keys: `added-filters`, `updated-filters`, `deprecated-filters`, `removed-filters`, `added-actions`, `updated-actions`, `deprecated-actions`, `removed-actions`, `added-views`, `changed-views`, `removed-views`. |
 | `working-directory` | | Where the repository is checked out. Empty is the workspace. |
 
