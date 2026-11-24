@@ -39,7 +39,10 @@ const VERSION_CHECK_URL = 'https://api.wordpress.org/core/version-check/1.7/'
 const STABLE_CHECK_URL = 'https://api.wordpress.org/core/stable-check/1.0/'
 
 /** A release key of stable-check, whose first two parts are its major and minor version. */
-const RELEASE_PATTERN = /^(\d+\.\d+)(\.\d+)*$/
+const RELEASE_PATTERN = /^((?:0|[1-9]\d*)\.(?:0|[1-9]\d*))(\.\d+)*$/
+
+/** How long a request to api.wordpress.org may take, in milliseconds, before the step fails. */
+const LOOKUP_TIMEOUT = 10000
 
 /** The header that is never lowered. */
 const TESTED = 'Tested up to'
@@ -75,7 +78,7 @@ function majorMinor(version) {
 async function latestWordPress(fetchImpl) {
   let body
   try {
-    const response = await fetchImpl(VERSION_CHECK_URL)
+    const response = await fetchImpl(VERSION_CHECK_URL, { signal: AbortSignal.timeout(LOOKUP_TIMEOUT) })
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)
     }
@@ -137,7 +140,7 @@ async function readTestedUpTo(value, fetchImpl) {
 async function wordPressReleases(fetchImpl) {
   let body
   try {
-    const response = await fetchImpl(STABLE_CHECK_URL)
+    const response = await fetchImpl(STABLE_CHECK_URL, { signal: AbortSignal.timeout(LOOKUP_TIMEOUT) })
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)
     }

@@ -422,6 +422,19 @@ describe('update-wp-version', () => {
     await refuses(t, '7.0', 'auto', unusable, stableCheck({ latest: '7.0' }))
   })
 
+  it('skips a zero-padded release key, and gives each lookup a timeout', async (t) => {
+    const signals = []
+    const padded = async (url, options) => {
+      signals.push(options?.signal)
+      return stableCheck({ ...RELEASES, '06.10': 'insecure', '6.010': 'insecure' })(url)
+    }
+
+    const { outputs } = await run(t, '7.0', 'auto', {}, padded)
+
+    assert.strictEqual(outputs['min-version'], '6.8')
+    assert.ok(signals.length === 1 && signals[0] instanceof AbortSignal)
+  })
+
   it('sets a minimum given as a version exactly', async (t) => {
     const { outputs } = await run(t, '7.0', ' 6.9 ')
 
