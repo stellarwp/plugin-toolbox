@@ -2,6 +2,9 @@
 # Use it when a workflow needs plugins that are not part of the repository it checked out, such as
 # a plugin a test suite depends on or code a static analysis has to read.
 #
+# A GitHub release's built zip asset is preferred over the tag's source archive, which lacks build
+# output such as a Strauss `vendor-prefixed/`. `composer install` runs only for a source archive.
+#
 # By default each plugin is placed next to the checkout, as `../<name>`; `destination` picks another
 # directory. phpstan.yml uses it that way, and any other workflow can call it.
 #
@@ -14,8 +17,8 @@ description: Downloads plugins from GitHub releases or WordPress.org, next to th
 inputs:
   plugins:
     description: >-
-      Plugins to download, one per line. `owner/name` is a GitHub repository's latest release; a bare
-      slug is a WordPress.org plugin. An empty string (`''`) downloads nothing. The directory name of
+      Plugins to download, one per line. `owner/name` is a GitHub repository's latest release: its
+      built `.zip` asset when it has one, else the source archive; a bare slug is a WordPress.org plugin. An empty string (`''`) downloads nothing. The directory name of
       each plugin is the part after the last `/`.
     required: false
     default: ''

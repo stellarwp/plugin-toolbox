@@ -6,7 +6,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 
-const { downloadPlugins, parsePlugins, run } = require('../../../.github/actions/download-plugins/download.js')
+const { chooseAsset, downloadPlugins, parsePlugins, run } = require('../../../.github/actions/download-plugins/download.js')
 const { coreWithOutputs, recordingExec } = require('../../support/actions.js')
 
 /**
@@ -33,13 +33,14 @@ function runner() {
  * @param {string}   tmp   The scratch directory.
  * @param {string}   inner The directory the archive holds.
  * @param {object}   files Files the archive holds in it, by relative path.
- * @param {object[]} extra More rules.
+ * @param {object[]} extra  More rules.
+ * @param {string[]} assets Names of the release's assets.
  *
  * @returns {object[]} Rules for recordingExec.
  */
-function rules(tmp, inner, files = {}, extra = []) {
+function rules(tmp, inner, files = {}, extra = [], assets = []) {
   return [
-    { command: 'gh', args: /^release view/, stdout: 'v1.2.3\n' },
+    { command: 'gh', args: /^release view/, stdout: JSON.stringify({ tagName: 'v1.2.3', assets: assets.map((name) => ({ name })) }) },
     { command: 'gh', args: /^release download/ },
     { command: 'curl' },
     {
@@ -104,6 +105,57 @@ describe('download-plugins', () => {
       assert.deepEqual(calls[3].args, [path.join(tmp, 'unpacked', 'learndash-core-abc'), path.join(dest, 'learndash-core')])
       assert.ok(calls[1].args.includes('v1.2.3'))
       assert.ok(calls[4].args.includes(`--working-dir=${path.join(dest, 'learndash-core')}`))
+    })
+
+    describe('release assets', () => {
+      const install = async (t, assets, spec = 'stellarwp/learndash-core', inner = 'sfwd-lms') => {
+        const { workspace, dest, tmp } = runner()
+        const { core } = await coreWithOutputs(t)
+        const { exec, calls } = recordingExec(rules(tmp, inner, { 'composer.json': '{}' }, [], assets))
+
+        await downloadPlugins({ core, exec, plugins: parsePlugins(spec), workspace, tmp })
+
+        return { dest, calls, download: calls.find((call) => call.command === 'gh' && call.args[1] === 'download') }
+      }
+
+      it('downloads the zip asset instead of the source archive and skips Composer', async (t) => {
+        const { dest, calls, download } = await install(t, ['sfwd-lms.1.2.3.zip', 'sfwd-lms.1.2.3.zip.sha256'])
+
+        assert.ok(download.args.includes('--pattern'))
+        assert.equal(download.args[download.args.indexOf('--pattern') + 1], 'sfwd-lms.1.2.3.zip')
+        assert.ok(!download.args.includes('--archive'))
+        assert.equal(calls.filter((call) => call.command === 'composer').length, 0)
+        // The archive's own directory, sfwd-lms, is placed under the repository's name.
+        assert.ok(fs.existsSync(path.join(dest, 'learndash-core', 'composer.json')))
+        assert.ok(!fs.existsSync(path.join(dest, 'sfwd-lms')))
+      })
+
+      it('falls back to the source archive, and Composer, when the release has no zip asset', async (t) => {
+        for (const assets of [[], ['notes.txt', 'plugin.tar.gz'], ['plugin-source.zip']]) {
+          const { calls, download } = await install(t, assets)
+
+          assert.ok(download.args.includes('--archive'), assets.join())
+          assert.ok(!download.args.includes('--pattern'))
+          assert.equal(calls.filter((call) => call.command === 'composer').length, 1)
+        }
+      })
+
+      it('takes the only zip named after the repository when there are several', async (t) => {
+        const { download } = await install(t, ['learndash-core.zip', 'extras.zip', 'learndash-core-src.zip'])
+
+        assert.equal(download.args[download.args.indexOf('--pattern') + 1], 'learndash-core.zip')
+      })
+
+      it('fails when several zips remain and none is the repository\'s', async (t) => {
+        await assert.rejects(install(t, ['a.zip', 'b.zip']), /several zip assets \(a\.zip, b\.zip\)/)
+      })
+    })
+
+    describe('chooseAsset', () => {
+      it('ignores names that mark source or auxiliary zips and non-zips', () => {
+        assert.equal(chooseAsset([{ name: 'p.zip' }, { name: 'p-source.zip' }, { name: 'p.zip.sig' }, { name: 'docs.zip' }], 'p', 'o/p'), 'p.zip')
+        assert.equal(chooseAsset(undefined, 'p', 'o/p'), null)
+      })
     })
 
     it('downloads a WordPress.org plugin with curl and skips Composer without a composer.json', async (t) => {

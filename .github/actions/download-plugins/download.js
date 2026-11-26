@@ -1,7 +1,7 @@
 'use strict'
 
 /**
- * Downloads plugins, GitHub releases or WordPress.org, to `<destination>/<name>`.
+ * Downloads plugins, GitHub releases (the built zip asset, else the source archive) or WordPress.org, to `<destination>/<name>`.
  *
  * parsePlugins is pure and holds the validation. downloadPlugins takes the toolkit and does the
  * work, so a test can pass stand-ins and assert the commands.
@@ -54,6 +54,42 @@ function parsePlugins(plugins) {
   return parsed
 }
 
+/** Zip names that are source or auxiliary artifacts of a release, not the plugin itself. */
+const NOT_THE_PLUGIN = /(^|[-_.])(source|sources|src|dev|tests?|docs?|documentation)([-_.]|$)/i
+
+/**
+ * Picks the release asset to install, when the release has a built plugin zip.
+ *
+ * A `.zip` asset is what the repository's release workflow built and published, so it is preferred
+ * over the tag's source archive, which has no build output (a Strauss `vendor-prefixed/`, compiled
+ * assets). Zips whose name marks them as source or other artifacts are ignored. Of several that are
+ * left, the one named after the repository (`<name>.zip`, `<name>-1.2.zip`) is taken when it is the
+ * only one; otherwise the choice is ambiguous and the run fails rather than guess.
+ *
+ * @param {{name: string}[]} assets The release's assets.
+ * @param {string}           name   The repository name, the part of the spec after the `/`.
+ * @param {string}           spec   The `owner/name` spec, for the error message.
+ *
+ * @throws {Error} When more than one candidate zip remains and none is the only one named after the repository.
+ *
+ * @returns {string|null} The asset name, or null when the release has no suitable zip.
+ */
+function chooseAsset(assets, name, spec) {
+  const zips = (assets ?? []).map((asset) => asset.name).filter((file) => /\.zip$/i.test(file) && !NOT_THE_PLUGIN.test(file))
+
+  if (zips.length <= 1) {
+    return zips[0] ?? null
+  }
+
+  const own = zips.filter((file) => file.toLowerCase().startsWith(name.toLowerCase()))
+
+  if (own.length === 1) {
+    return own[0]
+  }
+
+  throw new Error(`${spec} has several zip assets (${zips.join(', ')}) and none can be picked as the plugin. Publish one zip per release or name it after the repository.`)
+}
+
 /**
  * Puts the extracted archive at `<dest>/<name>`.
  *
@@ -66,6 +102,10 @@ function parsePlugins(plugins) {
  * @param {string} options.workspace The checkout, which must not be replaced.
  * @param {string} options.tmp       A scratch directory that holds `plugin.zip`.
  * @param {string} options.name      The directory name of the plugin.
+ *
+ * The directory inside the archive keeps no say in the name: a release asset's is the plugin's slug
+ * (`sfwd-lms/` in the `learndash-core` repository), a source archive's is `<repo>-<sha>`, and both
+ * end up at `<dest>/<name>`.
  *
  * @throws {Error} When the target is the checkout or holds it, or the archive holds no directory.
  *
@@ -131,11 +171,22 @@ async function downloadPlugins({ core, exec, plugins, workspace, tmp, dest = pat
   const placed = []
 
   for (const { spec, name, github } of plugins) {
-    if (github) {
-      const tag = (await runOrFail(exec, 'gh', ['release', 'view', '--repo', spec, '--json', 'tagName', '--jq', '.tagName'], {}, `Finding the latest release of ${spec}`)).trim()
+    // Whether the zip is a release asset, which is already built.
+    let built = false
 
-      core.info(`${spec}: ${tag}`)
-      await runOrFail(exec, 'gh', ['release', 'download', tag, '--repo', spec, '--archive', 'zip', '--output', zip, '--clobber'], {}, `Downloading ${spec} ${tag}`)
+    if (github) {
+      const release = JSON.parse(await runOrFail(exec, 'gh', ['release', 'view', '--repo', spec, '--json', 'tagName,assets'], {}, `Finding the latest release of ${spec}`))
+      const tag = release.tagName
+      const asset = chooseAsset(release.assets, name, spec)
+
+      if (asset) {
+        core.info(`${spec}: ${tag}, release asset ${asset}`)
+        await runOrFail(exec, 'gh', ['release', 'download', tag, '--repo', spec, '--pattern', asset, '--output', zip, '--clobber'], {}, `Downloading ${asset} of ${spec} ${tag}`)
+        built = true
+      } else {
+        core.info(`${spec}: ${tag}, no zip asset, using the source archive`)
+        await runOrFail(exec, 'gh', ['release', 'download', tag, '--repo', spec, '--archive', 'zip', '--output', zip, '--clobber'], {}, `Downloading ${spec} ${tag}`)
+      }
     } else {
       await runOrFail(exec, 'curl', ['-fsSL', '-o', zip, `https://downloads.wordpress.org/plugin/${spec}.latest-stable.zip`], {}, `Downloading ${spec} from WordPress.org`)
     }
@@ -145,8 +196,11 @@ async function downloadPlugins({ core, exec, plugins, workspace, tmp, dest = pat
     // Only a GitHub repository the caller named: it is trusted like the caller's own code, and gets
     // the tokens. A WordPress.org zip ships its vendor directory, and its composer.json is code the
     // caller does not control: Composer would run its scripts and let its `config` choose where
-    // files are written.
-    if (github && fs.existsSync(path.join(target, 'composer.json'))) {
+    // files are written. A release asset is skipped for the same reason of already being built: it
+    // ships its vendor directory, and `composer install` would not reproduce the build (Strauss and
+    // other scripts that made `vendor-prefixed/`) but could undo it. Only a source archive, which
+    // holds no vendor directory, needs it.
+    if (github && !built && fs.existsSync(path.join(target, 'composer.json'))) {
       await runOrFail(exec, 'composer', ['install', '--no-interaction', '--no-progress', '--prefer-dist', `--working-dir=${target}`], {}, `Installing the dependencies of '${name}'`)
     }
 
@@ -190,4 +244,4 @@ async function run({ core, exec, env }) {
   }
 }
 
-module.exports = { run, downloadPlugins, parsePlugins, place }
+module.exports = { run, downloadPlugins, parsePlugins, place, chooseAsset }
