@@ -100,7 +100,8 @@ on:
       plugins:
         description: >-
           Plugins PHPStan scans, one per line, downloaded to `../<name>`. `owner/name` is a GitHub
-          repository's latest release (a private one needs the `github-token` secret); a bare slug
+          repository's latest release, its built `.zip` asset when it has one (else the source archive,
+          with `composer install`; a private repository needs the `github-token` secret); a bare slug
           is a WordPress.org plugin. An empty string (`''`) downloads nothing.
         required: false
         type: string

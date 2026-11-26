@@ -47,7 +47,7 @@ the PHPStan config reaches the plugins as `../<name>`.
 
 | Line | Where it comes from | Directory name |
 |---|---|---|
-| `owner/name` | The latest release of that GitHub repository, downloaded with `gh` | `name` |
+| `owner/name` | The latest release of that GitHub repository, downloaded with `gh`: its built `.zip` asset when it has one, else the source archive. See [Release assets](#release-assets) | `name` |
 | `woocommerce` | The latest stable release of that WordPress.org plugin | `woocommerce` |
 
 Anything else, such as a path or a name with other characters, fails before anything is downloaded. So do two lines whose directory name is the same, such as `acme/calendar` and `community/calendar`, because the second would replace the first.
@@ -57,7 +57,17 @@ Anything else, such as a path or a name with other characters, fails before anyt
 - Downloads and unpacks the archive, and places it at `<destination>/<name>`.
 - Replaces a copy a previous job left there, so the new one is never nested inside the old one.
 - Fails when the plugin would land on the checkout or on a directory that holds it, even through a symlink, because the old copy is deleted first and the checkout is never replaced.
-- Runs `composer install` in a GitHub plugin that has a `composer.json`, with `token` for private packages. A WordPress.org plugin never gets it: its zip ships `vendor/`, and its `composer.json` is code the caller does not control.
+- Runs `composer install` in a GitHub plugin that has a `composer.json` and came from a source archive, with `token` for private packages. A release asset and a WordPress.org plugin never get it: their zips ship `vendor/`, and `composer install` would not reproduce a build (such as Strauss's `vendor-prefixed/`) but could undo it. A WordPress.org plugin's `composer.json` is also code the caller does not control.
+
+## Release assets
+
+The tag's source archive has no build output, so for `owner/name` the action first reads the latest release's assets:
+
+- Zip names marking source or auxiliary files (`source`, `src`, `dev`, `test`, `docs`) are ignored, and so is anything that is not a `.zip`.
+- One zip left: that is the plugin. Several left: the one whose name starts with the repository name is taken when it is the only one; otherwise the run fails and lists them, rather than guess.
+- No zip left: the source archive is downloaded and `composer install` runs, exactly as before.
+
+The directory inside the zip does not matter. `stellarwp/learndash-core` publishes `sfwd-lms.<version>.zip` holding `sfwd-lms/`, and it is still placed at `../learndash-core`. The asset is downloaded with the same `token` as the release lookup.
 
 ## Permissions
 
